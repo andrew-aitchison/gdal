@@ -101,8 +101,20 @@ the health of the project:
 
 - Supporter level:
 
-    `Umbra <https://umbra.space/>`__
+  .. _supporter-sponsors:
+  .. container:: horizontal-logos
 
+    .. container:: horizontal-logo
+
+        Myles Sutherland
+
+    .. container:: horizontal-logo
+
+        `Space Intelligence <https://www.space-intelligence.com//>`__
+
+    .. container:: horizontal-logo
+
+        `Umbra <https://umbra.space/>`__
 
 .. raw:: html
 
@@ -140,6 +152,7 @@ the health of the project:
     $('#platinum-sponsors').randomize('div.horizontal-logo');
     $('#gold-sponsors').randomize('div.horizontal-logo');
     $('#silver-sponsors').randomize('div.horizontal-logo');
+    $('#supporter-sponsors').randomize('div.horizontal-logo');
 
   </script>
 
