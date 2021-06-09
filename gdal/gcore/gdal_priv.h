@@ -2410,7 +2410,10 @@ public:
      *
      * This is used in particular for caching.
      *
-     * Might be empty if the array is not linked to a file. */
+     * Might be empty if the array is not linked to a file.
+     * 
+     * @since GDAL 3.4
+     */
     virtual const std::string& GetFilename() const = 0;
 
     virtual CSLConstList GetStructuralInfo() const;
@@ -2872,6 +2875,21 @@ int GDALCanFileAcceptSidecarFile(const char* pszFilename);
 bool GDALCanReliablyUseSiblingFileList(const char* pszFilename);
 
 bool CPL_DLL GDALIsDriverDeprecatedForGDAL35StillEnabled(const char* pszDriverName, const char* pszExtraMsg = "");
+
+typedef enum
+{
+    GSF_UNSIGNED_INT,
+    GSF_SIGNED_INT,
+    GSF_FLOATING_POINT,
+} GDALBufferSampleFormat;
+
+bool CPL_DLL GDALBufferHasOnlyNoData(const void* pBuffer,
+                                     double dfNoDataValue,
+                                     size_t nWidth, size_t nHeight,
+                                     size_t nLineStride,
+                                     size_t nComponents,
+                                     int nBitsPerSample,
+                                     GDALBufferSampleFormat nSampleFormat);
 
 //! @endcond
 

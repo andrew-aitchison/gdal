@@ -1713,6 +1713,10 @@ def Sync(*args, **kwargs):
     """Sync(char const * pszSource, char const * pszTarget, char ** options=None, GDALProgressFunc callback=0, void * callback_data=None) -> bool"""
     return _gdal.Sync(*args, **kwargs)
 
+def AbortPendingUploads(*args):
+    """AbortPendingUploads(char const * utf8_path) -> bool"""
+    return _gdal.AbortPendingUploads(*args)
+
 def GetActualURL(*args):
     """GetActualURL(char const * utf8_path) -> char const *"""
     return _gdal.GetActualURL(*args)
@@ -1915,7 +1919,7 @@ class MajorObject(_object):
 
 
     def GetMetadata(self, domain=''):
-      if domain[:4] == 'xml:':
+      if domain and domain[:4] == 'xml:':
         return self.GetMetadata_List(domain)
       return self.GetMetadata_Dict(domain)
 
@@ -2975,9 +2979,19 @@ class MDArray(_object):
         return _gdal.MDArray_GetNoDataValueAsDouble(self, *args)
 
 
+    def GetNoDataValueAsString(self, *args):
+        """GetNoDataValueAsString(MDArray self) -> retStringAndCPLFree *"""
+        return _gdal.MDArray_GetNoDataValueAsString(self, *args)
+
+
     def SetNoDataValueDouble(self, *args):
         """SetNoDataValueDouble(MDArray self, double d) -> CPLErr"""
         return _gdal.MDArray_SetNoDataValueDouble(self, *args)
+
+
+    def SetNoDataValueString(self, *args):
+        """SetNoDataValueString(MDArray self, char const * nodata) -> CPLErr"""
+        return _gdal.MDArray_SetNoDataValueString(self, *args)
 
 
     def SetNoDataValueRaw(self, *args):
