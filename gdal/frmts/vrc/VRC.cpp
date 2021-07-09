@@ -174,7 +174,7 @@ VRC_png_read_data_fn (png_structp png_read_ptr,
     // Sanity checks on our data pointer
     if (pVRCpng_data->pData==nullptr) {
         CPLDebug("Viewranger PNG",
-                 "VRC_png_read_data_fn(%p %p %ld) pVRCpng_data is null",
+                 "VRC_png_read_data_fn(%p %p %zd) pVRCpng_data is null",
                  png_read_ptr, data, length
                  );
         return;
@@ -198,7 +198,7 @@ VRC_png_read_data_fn (png_structp png_read_ptr,
     // Sanity check the function args
     if ( static_cast<long>(length) > nSpare ) {
         CPLDebug("Viewranger PNG",
-                 "VRC_png_read_data_fn(%p %p %ld) %ld+%ld reads beyond %ld",
+                 "VRC_png_read_data_fn(%p %p %zd) %zd+%zd reads beyond %ld",
                  png_read_ptr, data, length,
                  pVRCpng_data->current, length, pVRCpng_data->length
                  );
@@ -209,7 +209,7 @@ VRC_png_read_data_fn (png_structp png_read_ptr,
                    static_cast<size_t>(nSpare));
         } else {
             CPLDebug("Viewranger PNG",
-                     "VRC_png_read_data_fn(%p %p %ld) buffer already over full: current %ld >= space %ld",
+                     "VRC_png_read_data_fn(%p %p %zd) buffer already over full: current %ld >= space %ld",
                      png_read_ptr, data, length,
                      pVRCpng_data->current, pVRCpng_data->length
                      );
@@ -319,7 +319,7 @@ char *VRCDataset::VRCGetString( VSILFILE *fp, unsigned int byteaddr )
 
     if (bytesread < ustring_length) {
       VSIFree(pszNewString);
-      CPLDebug("Viewranger", "requested x%08x bytes but only got x%8lx",
+      CPLDebug("Viewranger", "requested x%08x bytes but only got x%08zx",
                string_length, bytesread);
       CPLError(CE_Failure, CPLE_AppDefined,
                "problem reading string\n");
@@ -2385,7 +2385,7 @@ void dumpPPM(unsigned int width,
 #if 1 // Noisy
                     if (getenv("VRC_NOISY")) {
                         CPLDebug("Viewranger PGM",
-                                 "dumpPPM: writing(%p, 1, %d, %p) returned %lu",
+                                 "dumpPPM: writing(%p, 1, %d, %p) returned %zu",
                                  pRow, width, fpPPM, rowwriteresult);
                     }
 #endif // Noisy
@@ -2494,7 +2494,7 @@ void dumpPNG(
             int nFileErr=errno;
             VRC_file_strerror_r(nFileErr, pszErrStr, 255);
             CPLError( CE_Failure, CPLE_AppDefined,
-                      "dumpPNG error writing %s result=%d errno=%lu\n\t%s",
+                      "dumpPNG error writing %s result=%d errno=%zu\n\t%s",
                       pszPNGname, nFileErr, nWriteResult, pszErrStr);
 
             return;
@@ -2565,9 +2565,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     }
     if (nVRCDataLen >= static_cast<VRCDataset *>(poDS)->oStatBufL.st_size) {
         CPLDebug("Viewranger PNG",
-                 "block (%d,%d) tile (%d,%d) nVRCData is bigger %u than file %lu",
+                 "block (%d,%d) tile (%d,%d) nVRCData is bigger %u than file %zu",
                  nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy,
-                 nVRCDataLen, static_cast<VRCDataset *>(poDS)->oStatBufL.st_size);
+                 nVRCDataLen,
+                 static_cast<VRCDataset *>(poDS)->oStatBufL.st_size);
         return nullptr;
     }
 
