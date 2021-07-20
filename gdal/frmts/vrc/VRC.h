@@ -1,11 +1,30 @@
 /******************************************************************************
- * $Id: VRC.h,v 1.24 2021/07/08 11:56:03 werdna Exp $
+ * $Id: VRC.h,v 1.24 2021/07/08 11:56:03 werdna Exp werdna $
  *
  * Author:  Andrew C Aitchison
  *
  ******************************************************************************
  * Copyright (c) 2019-21, Andrew C Aitchison
- *****************************************************************************/
+ ******************************************************************************
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ ****************************************************************************/
 
 #pragma once
 
@@ -16,22 +35,8 @@
 #define FRMT_viewranger
 #endif
 
-#pragma clang diagnostic push
-// #pragma clang diagnostic ignored "-Wformat-pedantic"
-#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
-#pragma clang diagnostic ignored "-Wdouble-promotion"
-#pragma clang diagnostic ignored "-Wimplicit-int-float-conversion"
-#pragma clang diagnostic ignored "-Winconsistent-missing-destructor-override"
-#pragma clang diagnostic ignored "-Wfloat-equal"
-#pragma clang diagnostic ignored "-Wpadded"
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#pragma clang diagnostic ignored "-Wsuggest-destructor-override"
-#pragma clang diagnostic ignored "-Wunknown-warning-option"
-#pragma clang diagnostic ignored "-Wundef"
-#pragma clang diagnostic ignored "-Wunused-template"
-#pragma clang diagnostic ignored "-Wweak-vtables"
+
 #include "gdal_pam.h"
-#pragma clang diagnostic pop
 #include "ogr_spatialref.h"
 //#include "cpl_string.h"
 
@@ -40,38 +45,14 @@
 // Set *one* of these definitions (to 1)
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
 // #define VRC36_PIXEL_IS_PIXEL 1
-#define VRC36_PIXEL_IS_TILE 1
+// #define VRC36_PIXEL_IS_TILE 1
 // #define VRC36_PIXEL_IS_FILE 1
-
-#if GDAL_VERSION_NUM < 2010000
-#define GDAL_IDENTIFY_UNKNOWN -1
-#define GDAL_IDENTIFY_FALSE 0
-#define GDAL_IDENTIFY_TRUE 1
-#define CPLsnprintf snprintf
-#else
-// These are defined in gdal/gdal_priv.h
-#endif // GDAL_VERSION_NUM < 2010000
-
-#if 0 // __cplusplus <= 201103L
-#define override
-#define nullptr 0
-#endif
-
-#ifdef CODE_ANALYSIS
-
-// Printing variables with CPLDebug can hide
-// the fact that they are not otherwise used ...
-// ... but this also confuse other checks, such as
-// Found duplicate branches for 'if' and 'else'
-// 
-#define CPLDebug(...)
-
-#endif // CODE_ANALYSIS
+#define VRC36_SKIP 1
 
 
 
 static const unsigned int vrc_magic_metres = 0x002e1f7e; // 0x7e1f2e00; //
-static const unsigned int vrc_magic_thirtysix = 0x01ce6336; // 0x3663ce01; //
+static const unsigned int vrc_magic36 = 0x01ce6336; // 0x3663ce01; //
 
 // static const unsigned int nVRCNoData = 255;
 // static const unsigned int nVRCNoData = 0xffffffff;
@@ -104,9 +85,8 @@ extern const char* CharsetFromCountry(int nCountry);
 /* ==================================================================== */
 /************************************************************************/
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpadded"
-class VRCDataset : public GDALPamDataset
+// class VRCDataset : public GDALPamDataset
+class VRCDataset : public GDALDataset
 {
     friend class VRCRasterBand;
     
@@ -139,16 +119,8 @@ class VRCDataset : public GDALPamDataset
     VSIStatBufL oStatBufL;
 
 public:
-    VRCDataset();
+    VRCDataset() = default;
     ~VRCDataset() override;
-
-#if 0    
-    virtual CPLErr IBuildOverviews( const char *pszResampling,
-                                    int nOverviewCount, int *panOverviewList,
-                                    int nListBands, int *panBandList,
-                                    GDALProgressFunc pfnProgress,
-                                    void * pProgressData ) override;
-#endif
 
     static GDALDataset *Open( GDALOpenInfo * );
     static int Identify( GDALOpenInfo * );
@@ -156,36 +128,16 @@ public:
     // Gdal <3 uses proj.4, Gdal>=3 uses proj.6, see eg:
     // https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn
     // https://gdal.org/development/rfc/rfc73_proj6_wkt2_srsbarn.html
-#if GDAL_VERSION_MAJOR >= 3
     const OGRSpatialReference* GetSpatialRef() const override {
         return poSRS;
     }
     // const char *_GetProjectionRef
-#else
-    const char* GetProjectionRef() override {
-        char* pszSRS=nullptr;
-        if(!poSRS) {
-            poSRS = CRSfromCountry(nCountry);
-        }
-        if(poSRS) {
-            poSRS->exportToWkt( &pszSRS );
-            // delete poSRS; ???
-        }
-        CPLDebug("VRC",
-                 "GetProjectionRef() returns %s",
-                 pszSRS);
-        return pszSRS;
-    }
-#endif
 
-#if 1 // GeoLoc
     CPLErr GetGeoTransform( double * padfTransform ) override;
-#endif
 
     static char *VRCGetString( VSILFILE *fp, unsigned int byteaddr );
 }; // class VRCDataset
 
-#pragma clang diagnostic pop
 
 
 /************************************************************************/
@@ -198,15 +150,13 @@ class VRCRasterBand : public GDALPamRasterBand
 {
     friend class VRCDataset;
     
-    // GUIntBig    nRecordSize;
-    
     GDALColorInterp  eBandInterp;
     int          nThisOverview;  // -1 for base ?
     unsigned int nResFactor;
     int          nOverviewCount;
     VRCRasterBand**  papoOverviewBands;
 
-    void read_VRC_Tile_ThirtySix( VSILFILE *fp,
+    void read_VRC_Tile_36( VSILFILE *fp,
                                 int block_xx, int block_yy,
                                 void *pImage);
     void read_VRC_Tile_Metres( VSILFILE *fp,
@@ -277,16 +227,6 @@ public:
                   int nOverviewCountIn,
                   VRCRasterBand**papoOverviewBandsIn);
 
-#if 0
-    VRCRasterBand(VRCDataset *pVRDS,
-                  int nBandIn,
-                  int nThisOverviewIn )
-    {
-         VRCRasterBand( pVRDS, nBandIn, nThisOverviewIn,
-                        6, nullptr);
-    }
-#endif
-    
     ~VRCRasterBand() override;
     
     virtual GDALColorInterp GetColorInterpretation() override;
@@ -298,23 +238,12 @@ public:
     
     virtual int GetOverviewCount() override;
     virtual GDALRasterBand *GetOverview(int) override;
-#if 0
-    void EstablishOverviews();
-    virtual CPLErr CleanOverviews();
-
-    virtual CPLErr BuildOverviews( const char *pszResampling,
-                                   int nReqOverviews, int *panOverviewList,
-                                   GDALProgressFunc pfnProgress,
-                                   void *pProgressData ) override;
-#endif
     virtual CPLErr IReadBlock( int, int, void * ) override;
 
-#if GDAL_VERSION_NUM >= 2020000
     virtual int IGetDataCoverageStatus( int nXOff, int nYOff,
                                         int nXSize, int nYSize,
                                         int nMaskFlagStop,
                                         double* pdfDataPct) override;
-#endif
 }; // class VRCRasterBand 
 
 extern void
@@ -325,9 +254,9 @@ dumpTileHeaderData(
                    unsigned int anTileOverviewIndex[],
                    const int tile_xx, const int tile_yy );
 
-extern short VRGetShort( void* base, int byteOffset );
-extern signed int VRGetInt( void* base, unsigned int byteOffset );
-extern unsigned int VRGetUInt( void* base, unsigned int byteOffset );
+extern short VRGetShort(const void* base, int byteOffset );
+extern signed int VRGetInt(const void* base, unsigned int byteOffset );
+extern unsigned int VRGetUInt(const void* base, unsigned int byteOffset );
 
 extern int VRReadChar(VSILFILE *fp);
 extern int VRReadShort(VSILFILE *fp);

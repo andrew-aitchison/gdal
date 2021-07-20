@@ -1,5 +1,5 @@
 /*
- * $Id: png_crc.h,v 1.7 2021/06/15 10:05:06 werdna Exp $
+ * $Id: png_crc.h,v 1.8 2021/07/15 16:19:23 werdna Exp $
  */
 
 #pragma once
@@ -7,7 +7,7 @@
 #ifndef PNG_CRC_H_INCLUDED
 #define PNG_CRC_H_INCLUDED
 
-#include <cpl_port.h>
+#include "cpl_port.h"
 
 CPL_C_START
       

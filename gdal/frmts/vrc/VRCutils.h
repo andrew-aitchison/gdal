@@ -1,11 +1,29 @@
 /******************************************************************************
- * $Id: VRCutils.h,v 1.6 2021/06/26 19:10:13 werdna Exp $
+ * $Id: VRCutils.h,v 1.6 2021/06/26 19:10:13 werdna Exp werdna $
  *
  * Author:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2020, Andrew C Aitchison
- *****************************************************************************/
+ * Copyright (c) 2020-21, Andrew C Aitchison
+ ******************************************************************************
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ ****************************************************************************/
 
 // Everything declared here is also declared in VRC.h
 // #ifndef VRC_H_INCLUDED
@@ -13,45 +31,9 @@
 #ifndef VRC_UTILS_H_INCLUDED
 #define VRC_UTILS_H_INCLUDED
 
-#pragma clang diagnostic push
-// #pragma clang diagnostic ignored "-Wformat-pedantic"
-#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
-#pragma clang diagnostic ignored "-Wdouble-promotion"
-#pragma clang diagnostic ignored "-Wfloat-equal"
-#pragma clang diagnostic ignored "-Wimplicit-int-float-conversion"
-#pragma clang diagnostic ignored "-Winconsistent-missing-destructor-override"
-#pragma clang diagnostic ignored "-Wpadded"
-#pragma clang diagnostic ignored "-Wreserved-id-macro"
-#pragma clang diagnostic ignored "-Wsuggest-destructor-override"
-#pragma clang diagnostic ignored "-Wundef"
-#pragma clang diagnostic ignored "-Wunknown-warning-option"
-#pragma clang diagnostic ignored "-Wunused-template"
-#pragma clang diagnostic ignored "-Wweak-vtables"
 #include "gdal_pam.h"
-#pragma clang diagnostic pop
 #include "ogr_spatialref.h"
 //#include "cpl_string.h"
-
-#if GDAL_VERSION_NUM < 2010000
-#define GDAL_IDENTIFY_UNKNOWN -1
-#define GDAL_IDENTIFY_FALSE 0
-#define GDAL_IDENTIFY_TRUE 1
-#else
-// These are defined in gdal/gdal_priv.h
-#endif // GDAL_VERSION_NUM < 2010000
-
-#if 0 // __cplusplus <= 201103L
-#define override
-#define nullptr 0
-#endif
-
-#ifdef CODE_ANALYSIS
-
-// Printing variables with CPLDebug can hide
-// the fact that they are not otherwise used ...
-#define CPLDebug(...)
-
-#endif // CODE_ANALYSIS
 
 int VRReadChar(VSILFILE *fp);
 int VRReadInt(VSILFILE *fp);
@@ -68,9 +50,9 @@ dumpTileHeaderData(
                    unsigned int anTileOverviewIndex[],
                    const int tile_xx, const int tile_yy );
 
-extern short VRGetShort( void* base, int byteOffset );
-extern signed int VRGetInt( void* base, unsigned int byteOffset );
-extern unsigned int VRGetUInt( void* base, unsigned int byteOffset );
+extern short VRGetShort(const void* base, int byteOffset );
+extern signed int VRGetInt(const void* base, unsigned int byteOffset );
+extern unsigned int VRGetUInt(const void* base, unsigned int byteOffset );
 
 extern int VRReadChar(VSILFILE *fp);
 extern int VRReadShort(VSILFILE *fp);

@@ -1,5 +1,5 @@
 /*
- * $Id: png_crc.c,v 1.9 2021/06/20 08:58:41 werdna Exp $
+ * $Id: png_crc.c,v 1.9 2021/06/20 08:58:41 werdna Exp werdna $
  *
  * http://www.libpng.org/pub/png/spec/1.2/PNG-CRCAppendix.html
  *
@@ -24,9 +24,8 @@ const unsigned long nBitsPerBytes=8;
 
 /* Table of CRCs of all 8-bit messages. */
 #define ncrc_table_size 256
-// static const
+static // const
 unsigned long crc_table[ ncrc_table_size ]
-#if 1
    =
     {
      0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
@@ -49,7 +48,6 @@ unsigned long crc_table[ ncrc_table_size ]
      0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
      0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0
     }
-#endif
     ;
 
 /* Flag: has the table been computed? Initially false. */
@@ -57,7 +55,8 @@ unsigned long crc_table[ ncrc_table_size ]
 int crc_table_computed = 0;
 
 /* Make the table for a fast CRC. */
-static void make_crc_table(void)
+static
+void make_crc_table(void)
 {
     // unsigned int n, k;
 

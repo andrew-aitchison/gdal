@@ -1,23 +1,33 @@
 /******************************************************************************
- * $Id: VRCthirtysix.cpp,v 1.20 2021/06/26 20:37:41 werdna Exp $
+ * $Id: VRCthirtysix.cpp,v 1.20 2021/06/26 20:37:41 werdna Exp werdna $
  *
  * Author:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2019, Andrew C Aitchison
- *****************************************************************************/
+ * Copyright (c) 2019-2021, Andrew C Aitchison
+ ******************************************************************************
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ ****************************************************************************/
 
 // #ifdef FRMT_vrc
 
 #include "VRC.h"
-
-#ifdef CODE_ANALYSIS
-
-// Printing variables with CPLDebug can hide
-// the fact that they are not otherwise used ...
-#define CPLDebug(...)
-
-#endif // CODE_ANALYSIS
 
 // Like strncmp but null bytes don't terminate.
 // Used in verifySubTileMem()
@@ -31,118 +41,38 @@ size_t bytesmatch(const unsigned char*data, const unsigned char*pattern, size_t 
 }
 
 
-void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
+void VRCRasterBand::read_VRC_Tile_36( VSILFILE *fp,
                                 int block_xx, int block_yy,
                                 void *pImage)
 {
     auto *poGDS = dynamic_cast<VRCDataset *>(poDS);
     if (block_xx < 0 || block_xx >= nRasterXSize ) {
         CPLError( CE_Failure, CPLE_NotSupported,
-                  "read_VRC_Tile_ThirtySix invalid row %d", block_xx );
+                  "read_VRC_Tile_36 invalid row %d", block_xx );
         return ;
     }
     if (block_yy < 0 || block_yy >= nRasterYSize ) {
         CPLError( CE_Failure, CPLE_NotSupported,
-                  "read_VRC_Tile_ThirtySix invalid column %d", block_yy );
+                  "read_VRC_Tile_36 invalid column %d", block_yy );
         return ;
     }
     if (pImage == nullptr ) {
         CPLError( CE_Failure, CPLE_AppDefined,
-                  "read_VRC_Tile_ThirtySix passed no image" );
+                  "read_VRC_Tile_36 passed no image" );
         return ;
     }
-    if (poGDS->nMagic != vrc_magic_thirtysix) {
+    if (poGDS->nMagic != vrc_magic36) {
         CPLError( CE_Failure, CPLE_AppDefined,
-                  "read_VRC_Tile_ThirtySix called with wrong magic number x%08x",
+                  "read_VRC_Tile_36 called with wrong magic number x%08x",
                   poGDS->nMagic );
         return ;
     }
         
-    CPLDebug("Viewranger", "read_VRC_Tile_ThirtySix(%p, %d, %d, %p)",
+    CPLDebug("Viewranger", "read_VRC_Tile_36(%p, %d, %d, %p)",
              static_cast<void*>(fp), block_xx, block_yy, pImage
              );
 
-#if defined VRC36_PIXEL_IS_FILE
-    // dummy pixel until we can read the real data
-    if (block_xx != 0 || block_yy != 0 ) {
-        CPLDebug("Viewranger",
-                 "vrc36_pixel_is_file only supports one tile: %d %d requested",
-                 block_xx, block_yy);
-    }
-    // static_cast<char*>(pImage)[0] = 1;
-    // GDT_UInt32
-    static_cast<GUInt32*>(pImage)[0] = 0xffbb7744;
-    (void)fp; // We don't actually use the image data for VRC36_PIXEL_IS_FILE
-#else
-
     int tilenum = poGDS->tileXcount * block_yy + block_xx;
-#if defined VRC36_PIXEL_IS_TILE
-    if (block_xx != 0 || block_yy != 0 ) {
-        CPLDebug("Viewranger",
-                 "vrc36_pixel_is_tile only supports one tile: %d %d requested",
-                 block_xx, block_yy);
-    }
-    // The image is a single tile with one pixel for each VRC tile.
-    // Since the tiles are divided into subtiles,
-    // this is not particularly informative
-    // - one pixel per subtile would be better.
-    CPLDebug("Viewranger", "\traster %d x %d tilenum %d",
-             poGDS->nRasterXSize, poGDS->nRasterYSize, tilenum );
-    if (poGDS->nRasterXSize<=0 || poGDS->nRasterYSize<=0) {
-        // No data to examine
-        return;
-    }
-    auto nXsize = static_cast<unsigned int>(poGDS->nRasterXSize);
-    auto nYsize = static_cast<unsigned int>(poGDS->nRasterYSize);
-    // GDT_UInt32 ((char *) pImage)[0] = 1;
-    // ((GUInt32 *) pImage)[tilenum] = 0xffbb7744; // temporary
-
-    for (unsigned int i=0; i<nXsize * nYsize; i++) {
-        // ((GUInt32 *) pImage)[i] = poGDS->anTileIndex[i];
-
-        unsigned long nStart = poGDS->anTileIndex[i];
-        unsigned long nFinish= poGDS->anTileIndex[i+1];
-        long long nFileSize = poGDS->oStatBufL.st_size;
-        CPLString osBaseLabel
-            = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%03d.%03d.%08lu.%02u",
-                                 // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                                 poGDS->sLongTitle.c_str(),
-                                 i / nYsize, i % nYsize , nStart, // nGDtile_xx, nGDtile_yy, // nVRtile_xx, nVRtile_yy,
-                                 nBand);
-
-        if (/* 0<=nStart && */ nStart<=nFinish
-            && static_cast<long long>(nFinish) <= nFileSize) {
-            int nVerifyResult=
-                verifySubTileFile(fp,
-                                  nStart, nFinish,
-                                  block_xx, block_yy,
-                                  //static_cast<unsigned int>
-                                  (i / nYsize),
-                                  //static_cast<unsigned int>
-                                  (i % nYsize)
-                                  );
-            if (nVerifyResult<0) {
-                static_cast<GUInt32*>(pImage)[tilenum] = nVRCNoData;
-            } else {
-                static_cast<GUInt32*>(pImage)[tilenum] = static_cast<GUInt32>(nVerifyResult);
-                if (0 == (0x0100 & static_cast<GUInt32>(nVerifyResult))) {
-                    CPLDebug("Viewranger",
-                             "raw data for tile %u, %u did not verify\n",
-                             i / nYsize, i % nYsize);
-                }
-            }
-        } else {
-            CPLDebug("Viewranger",
-                     "skipping %s: expected 0 <= x%lx <= x%lx <= x%llx filesize",
-                     osBaseLabel.c_str(),
-                     nStart, nFinish, nFileSize
-                     );
-            static_cast<GUInt32*>(pImage)[i] = nVRCNoData;
-        } // end range check 
-    } // for  i<nXsize * nYsize
-    
-    // CPLDebug("Viewranger", "vrc36_pixel_is_tile set %d pixels", p);
-#else
     // VRC36_PIXEL_IS_PIXEL
     // this will be the default
     CPLDebug("Viewranger", "vrc36_pixel_is_pixel only partially implemented");
@@ -159,7 +89,7 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
     if (nTileIndex==0) {
         // No data for this tile
         CPLDebug("Viewranger",
-                 "read_VRC_Tile_ThirtySix(.. %d %d ..) null tile",
+                 "read_VRC_Tile_36(.. %d %d ..) null tile",
                  block_xx, block_yy );
 
         if (eDataType==GDT_Byte) {
@@ -171,7 +101,7 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
             }
         } else {
             CPLError( CE_Failure, CPLE_AppDefined,
-                      "read_VRC_Tile_ThirtySix eDataType %d unexpected for null tile",
+                      "read_VRC_Tile_36 eDataType %d unexpected for null tile",
                       eDataType);
         }
         return;
@@ -253,7 +183,7 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
 
         if (nThisOverview < -1 || nThisOverview >= nOverviewCount) {
             CPLDebug("Viewranger",
-                     "read_VRC_Tile_ThirtySix: overview %d=x%08x not in range [-1, %d]",
+                     "read_VRC_Tile_36: overview %d=x%08x not in range [-1, %d]",
                      nThisOverview, nThisOverview, nOverviewCount);
             return;
         }
@@ -316,7 +246,7 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
                      "Band %d block %d,%d empty at overview %d\n",
                      nBand, block_xx, block_yy, nThisOverview
                      );
-            GDALRasterBandH hOvrBandSrc =
+            auto* hOvrBandSrc =
                 reinterpret_cast<GDALRasterBandH>(GetOverview( nThisOverview+1 ));
             GDALRasterBandH ahOvrBandTgts[1];
             ahOvrBandTgts[0] = reinterpret_cast<GDALRasterBandH>(GetOverview( nThisOverview+2 ));
@@ -438,7 +368,8 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
 
     // Read in this tile's index to ?raw? sub-tiles.
     std::vector<unsigned int> anSubTileIndex;
-    anSubTileIndex.reserve(static_cast<size_t>(nRawXcount*nRawYcount +1));
+    anSubTileIndex.reserve
+        (static_cast<size_t>(nRawXcount)*static_cast<size_t>(nRawYcount) +1);
     for (size_t loop=0;
          loop <= static_cast<size_t>(nRawXcount*nRawYcount);
          loop++) {
@@ -453,10 +384,14 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
     }
     
 
-    for (int loopX=0; loopX < nRawXcount; loopX++) {
-        for (int loopY=0; loopY < nRawYcount; loopY++) {
-            auto loop = static_cast<size_t>
-                (nRawYcount-1-loopY + loopX*nRawYcount);
+    for (unsigned int loopX=0;
+         loopX < static_cast<size_t>(nRawXcount);
+         loopX++) {
+        for (unsigned int loopY=0;
+             loopY < static_cast<size_t>(nRawYcount);
+             loopY++) {
+            auto loop = static_cast<size_t>(nRawYcount)-1-loopY
+                + static_cast<size_t>(loopX)*static_cast<size_t>(nRawYcount);
 
             //((GUInt32 *) pImage)[i] = poGDS->anSubTileIndex[loop];
 
@@ -468,16 +403,15 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
                 = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%03d.%03d.%08lu.%02u",
                                      // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
                                      poGDS->sLongTitle.c_str(),
-                                     loopX, loopX, nStart,
+                                     loopX, loopY, nStart,
                                      nBand);
 
             if (/* 0<=nStart && */ nStart<=nFinish && nFinish <= nFileSize) {
-                size_t nRawSubtileSize = static_cast<size_t>
-                    (nRawXsize*nRawYsize);
+                auto nRawSubtileSize = static_cast<size_t>(nRawXsize*nRawYsize);
                 if (nRawSubtileSize>nFinish-nStart) {
                     nRawSubtileSize = nFinish-nStart;
                 }
-                GByte *abySubTileData = static_cast<GByte *>(VSIMalloc(nRawSubtileSize));
+                auto *abySubTileData = static_cast<GByte *>(VSIMalloc(nRawSubtileSize));
 
                 int seekres = VSIFSeekL( fp, nStart, SEEK_SET );
                 if ( seekres ) {
@@ -493,11 +427,13 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
                     return;  
                 }
             
-                int nVerifyResult=verifySubTileMem(abySubTileData,
-                                                   nStart, nFinish,
-                                                   block_xx, block_yy,
-                                                   loopX, loopY
-                                                   );
+                int nVerifyResult =
+                    verifySubTileMem(abySubTileData,
+                                     nStart, nFinish,
+                                     block_xx, block_yy,
+                                     static_cast<unsigned int >(loopX),
+                                     static_cast<unsigned int >(loopY)
+                                     );
                 if (0==(nVerifyResult & ~0xff)) {
                     CPLDebug("Viewranger",
                              "raw data at x%08lx for tile (%d,%d) sub tile (%d,%d) did not verify\n",
@@ -510,29 +446,9 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
                     return;
                 }
 
-#if 0
-                {
-                    unsigned int nf0count=0;
-                    unsigned int n47count=0;
-                    for (unsigned int i=0; i < nRawSubtileSize ; i++) {
-                        if (abySubTileData[i] == 0xf0) {
-                            nf0count++;
-                        }
-                        if (abySubTileData[i] == 0x47) {
-                            nf0count++;
-                        }
-                    }
-                    CPLDebug("Viewranger",
-                             "tile (%d,%d) sub tile (%d,%d) contains 0xf0 %d times",
-                             block_xx, block_yy, loopX, loopY, nf0count);
-                    CPLDebug("Viewranger",
-                             "tile (%d,%d) sub tile (%d,%d) contains 0x47 %d times",
-                             block_xx, block_yy, loopX, loopY, n47count);
-                }
-#endif
-
                 // Allow for under-height tiles
-                int nSkipTopRows = nBlockYSize - nRawYcount * nRawYsize;
+                int nSkipTopRows =
+                    nBlockYSize - static_cast<int>(nRawYcount * nRawYsize);
                 if (nSkipTopRows > 0) {
                     CPLDebug("Viewranger",
                              "underheight tile nRawYcount %d x nRawYsize %d < blocksize %d)",
@@ -558,10 +474,12 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
                 
                 // Write the raw data into the subtile of the image,
                 // padding with the result of verifySubTileMem/File.
-                unsigned int nCount= static_cast<unsigned int>(nStart);
+                auto nCount= static_cast<unsigned int>(nStart);
                 for (int j=0; j < nRawYsize ; j++) {
-                    int pixelnum = (j+loopY*nRawYsize+nSkipTopRows) * nBlockXSize
-                        + loopX*nRawXsize;
+                    int pixelnum =
+                        (j + static_cast<signed int>(loopY)*nRawYsize+nSkipTopRows)
+                        * nBlockXSize
+                        + static_cast<int>(loopX)*nRawXsize;
                     for (int i=0; i < nRawXsize ; i++) {
                         if (pixelnum >= nBlockXSize*nBlockYSize) {
                             CPLDebug("Viewranger",
@@ -595,8 +513,6 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
             } // end range check 
         } // for loopY
     } // for loopX
-#endif
-#endif
 
     if (getenv("VRC_DUMP_TILE") && 1==nBand) {
         long nDumpCount = strtol(getenv("VRC_DUMP_TILE"),nullptr,10);
@@ -620,7 +536,7 @@ void VRCRasterBand::read_VRC_Tile_ThirtySix( VSILFILE *fp,
                 );
     }
 
-} // VRCRasterBand::read_VRC_Tile_ThirtySix
+} // VRCRasterBand::read_VRC_Tile_36
 
 
 int VRCRasterBand::verifySubTileFile(
@@ -722,14 +638,6 @@ int VRCRasterBand::verifySubTileMem(
          //
                            0xbc,        0x84, 0x41, 0x23, 0x4a
         };
-#if 0
-    const unsigned char kacExpectedValues2[73] =
-        { /*                                           */ 0x4B,
-         0x4E, 0x52, 0x38, 0x48,        0x27, 0x4C, 0x2C, 0x33,
-         0x22, 0x72, 0x59, 0x68,        0x77, 0x77, 0x56, 0x65,
-         0x6B, 0x6C, 0x69,
-        };
-#endif
 
     if (start>finish) {
         CPLDebug("Viewranger", "Backwards sub-tile: %lu>%lu bytes at %s",
@@ -768,28 +676,6 @@ int VRCRasterBand::verifySubTileMem(
         CPLDebug("Viewranger", "then [%lu] = x%02x",
                  i, static_cast<unsigned char>(abyRawStartData[i]));
     }
-
-#if 0
-    {
-        // Script to write a "plain" portable graymap ...
-        CPLDebug("Viewranger",
-                 "echo \"P2 1 1 65535\n%lu\" > \"%s.pgm\"",
-                 nBytesMatched, osBaseLabel.c_str() );
-        // ... and a script to write the matching world map:
-        // These values are a work in progress
-        // and are not yet expected to be correct.
-        double dx = static_cast<VRCDataset *>(poDS)->nLeft
-            + nBlockXSize*nGDtile_xx + nVRtile_xx;
-        double dy = static_cast<VRCDataset *>(poDS)->nBottom
-            - nBlockYSize*nGDtile_yy + nVRtile_yy;
-        CPLDebug("Viewranger",
-                 "echo \"%g\n%g\n%g\n%g\n%g\n%g\n\" > \"%s.wld\"",
-                 1.0*static_cast<VRCDataset *>(poDS)->tileXcount, 0.0,
-                 0.0, -1.0*static_cast<VRCDataset *>(poDS)->tileYcount,
-                 dx, dy,
-                 osBaseLabel.c_str() );
-    }
-#endif
 
     return 0x0100 | static_cast<int>(nBytesMatched);
 } // VRCRasterBand::verifySubTileMem()

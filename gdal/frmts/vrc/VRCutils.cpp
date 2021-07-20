@@ -5,18 +5,20 @@
 
 #include "VRC.h"
 
-extern short VRGetShort( void* base, int byteOffset )
+extern short VRGetShort(const void* base, int byteOffset )
 {
-    unsigned char * buf = static_cast<unsigned char*>(base)+byteOffset;
+    const unsigned char * buf =
+        static_cast<const unsigned char*>(base)+byteOffset;
     short vv = buf[0];
     vv |= (buf[1] << 8);
 
     return(vv);
 }
 
-signed int VRGetInt( void* base, unsigned int byteOffset )
+signed int VRGetInt(const void* base, unsigned int byteOffset )
 {
-    unsigned char* buf = static_cast<unsigned char*>(base)+byteOffset;
+    const unsigned char* buf =
+         static_cast<const unsigned char*>(base)+byteOffset;
     signed int vv = buf[0];
     vv |= (buf[1] << 8U);
     vv |= (buf[2] << 16U);
@@ -24,9 +26,10 @@ signed int VRGetInt( void* base, unsigned int byteOffset )
 
     return(vv);
 }
-unsigned int VRGetUInt( void* base, unsigned int byteOffset )
+unsigned int VRGetUInt(const void* base, unsigned int byteOffset )
 {
-    unsigned char* buf = static_cast<unsigned char*>(base)+byteOffset;
+    const unsigned char* buf =
+        static_cast<const unsigned char*>(base)+byteOffset;
     int vv = buf[0];
     vv |= (buf[1] << 8U);
     vv |= (buf[2] << 16U);
@@ -115,11 +118,7 @@ unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset )
  */
 
 // Some CRS use the "old" axis convention
-#if GDAL_VERSION_MAJOR >= 3
 #define VRC_SWAP_AXES        poSRS->SetAxisMappingStrategy( OAMS_TRADITIONAL_GIS_ORDER )
-#else
-#define VRC_SWAP_AXES
-#endif
 
 #define VRC_EPSG(A) errImport=poSRS->importFromEPSGA(A)
 

@@ -6,8 +6,27 @@
  * Authors:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2015-9, Andrew C Aitchison
+ * Copyright (c) 2015-21, Andrew C Aitchison
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
+
 
 /* -*- tab-width: 4 ; indent-tabs-mode: nil ; c-basic-offset 'tab-width -*- */
 
@@ -16,19 +35,10 @@
 
 #include "VRCutils.h"
 
-CPL_CVSID("$Id: VRHV.cpp,v 1.102 2021/06/26 20:28:41 werdna Exp werdna $")
 
 CPL_C_START
 void   GDALRegister_VRHV(void);
 CPL_C_END
-
-#ifdef CODE_ANALYSIS
-
-// Printing variables with CPLDebug can hide
-// the fact that they are not otherwise used ...
-#define CPLDebug(...)
-
-#endif // CODE_ANALYSIS
 
 
 static const unsigned int vrh_magic = 0xfac6804f; // 0x4f80c6fa; //
@@ -57,38 +67,27 @@ static const unsigned int nVRVNoData = 255;
 
 class VRHRasterBand;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpadded"
-class VRHVDataset : public GDALPamDataset
+class VRHVDataset : public GDALDataset
 {
     friend class VRHRasterBand;
     
-    VSILFILE            *fp;
+    VSILFILE            *fp = nullptr;
     GDALColorTable      *poColorTable;
     GByte       abyHeader[0x5a0];
     
-    unsigned int nMagic, nPixelMetres;
-    int nVRHVersion;
-    signed int nLeft, nRight, nTop, nBottom;
-    unsigned int nScale;
-    unsigned int *anColumnIndex;
-    unsigned int *anTileIndex;
-    short nCountry;
+    unsigned int nMagic=0, nPixelMetres;
+    int nVRHVersion=0;
+    signed int nLeft=INT_MAX, nRight=INT_MAX, nTop=INT_MIN, nBottom=INT_MIN;
+    unsigned int nScale=0;
+    unsigned int *anColumnIndex = nullptr;
+    unsigned int *anTileIndex = nullptr;
     OGRSpatialReference* poSRS = nullptr;
-
-    char *pszLongTitle,
-    // *pszName, *pszIdentifier,
-    // *pszEdition, *pszRevision, *pszKeywords,
-        *pszCopyright
-        ;
-    // *pszDepths, *pszHeights, *pszProjection,
-    // *pszOrigFileName;
-    // latlon TL, TR, BL, BR;
+    char *pszLongTitle = nullptr;
+    char *pszCopyright = nullptr;
 
     std::string sDatum;
+    short nCountry;
     
-#pragma clang diagnostic pop
-
 public:
     VRHVDataset();
     ~VRHVDataset() override;
@@ -99,21 +98,15 @@ public:
     // Gdal <3 uses proj.4, Gdal>=3 uses proj.6, see eg:
     // https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn
     // https://gdal.org/development/rfc/rfc73_proj6_wkt2_srsbarn.html
-#if GDAL_VERSION_MAJOR >= 3
     const OGRSpatialReference* GetSpatialRef() const override {
         return GetSpatialRefFromOldGetProjectionRef();
     }
     const char *_GetProjectionRef
-#else
-    const char *GetProjectionRef
-#endif
     () override {
         return sDatum.c_str();
     }
 
-#if 1 // GeoLoc
     CPLErr GetGeoTransform( double * padfTransform ) override;
-#endif
 
     char       **GetFileList() override;
 
@@ -132,7 +125,7 @@ public:
  */
 char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
 {
-    if (byteaddr==0) return( strdup (""));
+    if (byteaddr==0) return( CPLStrdup (""));
     
     int seekres = VSIFSeekL( fp, byteaddr, SEEK_SET );
     if ( seekres ) {
@@ -146,7 +139,7 @@ char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
             CPLDebug("ViewrangerHV", "odd length for string %012llx - length %d",
                      byteaddr, string_length);
         }
-        return( strdup (""));
+        return( CPLStrdup (""));
     }
     auto ustring_length = static_cast<size_t>(string_length);
 
@@ -158,7 +151,6 @@ char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
         return nullptr;
     }
     
-
     size_t bytesread =
       VSIFReadL( pszNewString, 1, ustring_length, fp);
 
@@ -184,7 +176,7 @@ char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
 /* ==================================================================== */
 /************************************************************************/
 
-class VRHRasterBand : public GDALPamRasterBand
+class VRHRasterBand : public GDALRasterBand
 {
     friend class VRHVDataset;
     
@@ -325,37 +317,7 @@ CPLErr VRHRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
             return CE_Failure;
     }
 
-#if 0
-    if (pVRHVData == nullptr) {
-        if (nRecordSize < 0)
-            return CE_Failure;
-
-        pVRHVData = static_cast<signed short*>(VSIMalloc(nRecordSize));
-        if (pVRHVData == nullptr) {
-            CPLError(CE_Failure, CPLE_OutOfMemory,
-                     "Cannot allocate scanline buffer");
-            nRecordSize = -1;
-            return CE_Failure;
-        }
-    }
-#endif
-
     if ( poGDS->nMagic == vrh_magic ) {
-#if 0
-        // dummy data for now
-        // this draws a box
-        for( int i = 0; i < nBlockXSize *nBlockYSize ; i++ ) {
-            static_cast<signed short*>(pImage)[i] = nVRHNoData;
-        }
-        for( int i = 0; i < nBlockXSize ; i++ ) {
-            static_cast<signed short*>(pImage)[i] = 0;
-            static_cast<signed short*>(pImage)[nBlockXSize *nBlockYSize - i] = 0;
-        }
-        for( int i = 1; i < nBlockYSize-1 ; i++ ) {
-            static_cast<signed short*>(pImage)[i*nBlockXSize] = 0;
-            static_cast<signed short*>(pImage)[(i+1)*nBlockXSize-1] = 0;
-        }
-#endif
 
         if ( poGDS->anColumnIndex[nBlockXOff] ) {
             int seekres =
@@ -377,16 +339,6 @@ CPLErr VRHRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
         }        
     } else  if ( poGDS->nMagic == vrv_magic ) {
         read_VRV_Tile(poGDS->fp, nBlockXOff, nBlockYOff, pImage);
-#if 0
-        char * charImage = (char *)pImage;
-        CPLDebug("ViewrangerHV", "IReadBlock %p\t%02x %02x %02x %02x %02x %02x %02x %02x\t%02x %02x %02x %02x %02x %02x %02x %02x",
-                 charImage,
-                 charImage[0], charImage[1], charImage[2], charImage[3],
-                 charImage[4], charImage[5], charImage[6], charImage[7],
-                 charImage[8], charImage[9], charImage[10], charImage[11],
-                 charImage[12], charImage[13], charImage[14], charImage[15]
-                 );
-#endif
         return CE_None; // all OK
         
     } else  if ( poGDS->nMagic == vmc_magic ) {
@@ -439,13 +391,6 @@ GDALColorInterp VRHRasterBand::GetColorInterpretation()
 GDALColorTable *VRHRasterBand::GetColorTable()
 
 {
-#if 0
-    VRHVDataset  *poGDS = (VRHVDataset *) poDS;
-
-    if( nBand == 1 )
-        return poGDS->poColorTable;
-    else
-#endif
         return nullptr;
 }
 
@@ -465,25 +410,12 @@ VRHVDataset::VRHVDataset() :
     poColorTable(nullptr),
     // These are only here to keep cppcheck happy
     // They may make the program think things are OK when they are not.
-#ifdef CODE_ANALYSIS
-    abyHeader{0},   // Inefficient since we never use the initial value.
-    // iOverview(0),
-    nMagic(0),
-    nPixelMetres(0),
-    nVRHVersion(-1),
-#endif // CODE_ANALYSIS
     nLeft(INT_MAX),
     nRight(INT_MIN),
     nTop(INT_MIN),
     nBottom(INT_MAX),
-#ifdef CODE_ANALYSIS
-    nScale(0),
-#endif // CODE_ANALYSIS
     anColumnIndex(nullptr),
     anTileIndex(nullptr),
-#ifdef CODE_ANALYSIS
-    nCountry(-1),
-#endif // CODE_ANALYSIS
     poSRS(nullptr),
 
     pszLongTitle(nullptr),
@@ -538,28 +470,11 @@ VRHVDataset::~VRHVDataset()
         poSRS->Release();
         poSRS = nullptr;
     }
-#if 0
-    if (sDatum != nullptr ) {
-        VSIFree(sDatum);
-        sDatum = nullptr;
-    }
-
-    // trying to free strings created in VRHVDataset::Open
-    for (int ii=0; ii<nStringCount; ++ii) {
-        if (paszStrings[ii]) {
-            VSIFree(paszStrings[ii]);
-            paszStrings[ii] = 0;
-        }        
-    }
-    VSIFree(paszStrings);
-    paszStrings = 0;
-#endif
 }
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-#if 1 // GeoLoc
 CPLErr VRHVDataset::GetGeoTransform( double * padfTransform )
 
 {
@@ -576,22 +491,12 @@ CPLErr VRHVDataset::GetGeoTransform( double * padfTransform )
         CPLDebug("ViewrangerHV", "country/srs 17 USA?Belgium?Discovery(Spain) grid is unknown. Current guess is unlikely to be correct.");
         CPLDebug("ViewrangerHV", "raw position: TL: %d %d BR: %d %d",
                  nTop,nLeft,nBottom,nRight);
-#if 1 // standard until 20 Sept 2020
         dLeft   /= tenMillion;
         dRight  /= tenMillion;
         dTop    /= tenMillion;
         dBottom /= tenMillion;
         CPLDebug("ViewrangerHV", "scaling by 10 million: TL: %g %g BR: %g %g",
                  dTop,dLeft,dBottom,dRight);
-#else
-        const double nineMillion = 9.0 * 1000 * 1000;
-        dLeft   /= nineMillion;
-        dRight  /= nineMillion;
-        dTop    /= nineMillion;
-        dBottom /= nineMillion;
-        CPLDebug("ViewrangerHV", "scaling by 9 million: TL: %g %g BR: %g %g",
-                 dTop,dLeft,dBottom,dRight);
-#endif
     } else if (nCountry == 155) {
         // New South Wales srs is not quite GDA94/MGA55 EPSG:28355
         dLeft   = 1.0*nLeft;
@@ -612,14 +517,6 @@ CPLErr VRHVDataset::GetGeoTransform( double * padfTransform )
         padfTransform[4] = 0.0;
         padfTransform[5] = (1.0*dBottom - dTop) / (GetRasterYSize());
     } else {
-#if 0
-        padfTransform[0] = dLeft;
-        padfTransform[1] = (1.0*dRight - dLeft);
-        padfTransform[2] = 0.0;
-        padfTransform[3] = dTop;
-        padfTransform[4] = 0.0;
-        padfTransform[5] = (1.0*dBottom - dTop);
-#endif
         CPLError( CE_Failure, CPLE_AppDefined,
                           "unknown magic %d", nMagic);
     }
@@ -629,7 +526,6 @@ CPLErr VRHVDataset::GetGeoTransform( double * padfTransform )
     CPLDebug("ViewrangerHV", "padfTransform %g %g %g", padfTransform[3], padfTransform[4], padfTransform[5]);
     return CE_None;
 }
-#endif
 
 /************************************************************************/
 /*                              Identify()                              */
@@ -764,13 +660,11 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
     if (!Identify(poOpenInfo))
         return nullptr;
 
-#if GDAL_VERSION_MAJOR >= 2
     /* Check that the file pointer from GDALOpenInfo* is available */ 
     if( poOpenInfo->fpL == nullptr )
     {
         return nullptr;
     }
-#endif
 
 /* -------------------------------------------------------------------- */
 /*      Confirm the requested access is supported.                      */
@@ -789,18 +683,9 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
     // unsigned int nVRHVersion;
     auto* poDS = new VRHVDataset();
 
-#if GDAL_VERSION_MAJOR >= 2
     /* Borrow the file pointer from GDALOpenInfo* */
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
-#else
-    poDS->fp = VSIFOpenL( poOpenInfo->pszFilename, "rb" );
-    if (poDS->fp == nullptr)
-    {
-        delete poDS;
-        return nullptr;
-    }
-#endif
 
 /* -------------------------------------------------------------------- */
 /*      Read the header.                                                */
@@ -1058,27 +943,6 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
     /********************************************************************/
 
     // calculate corner coordinates
-#if 0
-#if defined VRC_PIXEL_IS_FILE
-    xy_to_latlon(poDS, 0, 0, &poDS->TL);
-    xy_to_latlon(poDS, poDS->nRasterXSize, 0, &poDS->TR);
-    xy_to_latlon(poDS, 0, poDS->nRasterYSize, &poDS->BL);
-    xy_to_latlon(poDS, poDS->nRasterXSize, poDS->nRasterYSize, &poDS->BR);
-#else
-#if defined VRC_PIXEL_IS_TILE
-    xy_to_latlon(poDS, 0, 0, &poDS->TL);
-    xy_to_latlon(poDS, poDS->nRasterXSize, 0, &poDS->TR);
-    xy_to_latlon(poDS, 0, poDS->nRasterYSize, &poDS->BL);
-    xy_to_latlon(poDS, poDS->nRasterXSize, poDS->nRasterYSize, &poDS->BR);
-#else
-    // VRC_PIXEL_IS_PIXEL
-    xy_to_latlon(poDS, 0, 0, &poDS->TL);
-    xy_to_latlon(poDS, poDS->nRasterXSize, 0, &poDS->TR);
-    xy_to_latlon(poDS, 0, poDS->nRasterYSize, &poDS->BL);
-    xy_to_latlon(poDS, poDS->nRasterXSize, poDS->nRasterYSize, &poDS->BR);
-#endif
-#endif
-#endif
 
 
 /* -------------------------------------------------------------------- */
@@ -1100,11 +964,8 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
         poBand->SetNoDataValue( nVRNoData );
     }
 
-/* -------------------------------------------------------------------- */
-/*      Initialize any PAM information.                                 */
-/* -------------------------------------------------------------------- */
+
     poDS->SetDescription( poOpenInfo->pszFilename );
-    poDS->TryLoadXML();
 
 /* -------------------------------------------------------------------- */
 /*      Check for overviews.                                            */
@@ -1137,10 +998,7 @@ void GDALRegister_VRHV()
 
         poDriver->SetDescription( "ViewrangerVRH/VRV" );
 
-        // required in gdal version 2, not supported in gdal 1.11
-#if GDAL_VERSION_MAJOR >= 2
         poDriver->SetMetadataItem( GDAL_DCAP_RASTER, "YES" );
-#endif
 
         poDriver->SetMetadataItem( GDAL_DMD_LONGNAME, 
                                    "ViewRanger Height (.VRH/.VHV)" );
@@ -1282,20 +1140,10 @@ VRHRasterBand::read_VMC_Tile(VSILFILE *fp,
             }
             pnBottomPixel[nPix] =
                     (nCurrentData & 1) ? nVMCYesData : nVMCNoData ;
-#if 0
-            if (x>nBlockXSize/2) {
-                pnBottomPixel[nPix] |= 128;
-            }
-            if (y>nBlockYSize/3) {
-                pnBottomPixel[nPix] |= 64;
-            }
-#endif
-#if 1
             CPLDebug("ViewrangerHV", "read_VMC_Tile: %p %3d %3d [%06d] = x%02x x%02x %d/%d",
                      pimage, x, y, nPix,
                      pnBottomPixel[nPix],
                      0xff&nCurrentData, nBytesRead, nBitsLeft);
-#endif
             nCurrentData >>= 1;  nBitsLeft--;
             if (nBitsLeft<=0) {
                 nCurrentData=static_cast<unsigned int>(VRReadChar(fp));
@@ -1363,12 +1211,6 @@ VRHRasterBand::read_VRV_Tile(VSILFILE *fp,
             if (nPixel == 0) nPixel=nVRVNoData;
             pnBottomPixel[y*nBlockXSize + x] = static_cast<char>(nPixel);
 
-#if 0
-            CPLDebug("ViewrangerHV", "read_VRV_Tile: %p %d %d %d [%d] = %d",
-                     pimage, x, y, pixelnum, y*nBlockXSize + x,
-                     (int)pnBottomPixel[y*nBlockXSize + x] );
-#endif
-
             pixelnum++;
         }
     }
@@ -1376,16 +1218,6 @@ VRHRasterBand::read_VRV_Tile(VSILFILE *fp,
              static_cast<void*>(fp), tile_xx, tile_yy, pimage, pnBottomPixel,
              pixelnum, nBlockXSize, nBlockYSize);
     (void)pixelnum; // cppcheck ignores CPLDebug args. Don't complain that pixelnum is never used.
-#if 0
-    // Could crash with small files (eg Switzerland1M.VRV is 2x2) ?
-    CPLDebug("ViewrangerHV", "read_VRV_Tile %p\t%02x %02x %02x %02x %02x %02x %02x %02x\t%02x %02x %02x %02x %02x %02x %02x %02x",
-             pnBottomPixel,
-             pnBottomPixel[0], pnBottomPixel[1], pnBottomPixel[2], pnBottomPixel[3],
-             pnBottomPixel[4], pnBottomPixel[5], pnBottomPixel[6], pnBottomPixel[7],
-             pnBottomPixel[8], pnBottomPixel[9], pnBottomPixel[10], pnBottomPixel[11],
-             pnBottomPixel[12], pnBottomPixel[13], pnBottomPixel[14], pnBottomPixel[15]
-             );
-#endif
 } // VRHRasterBand::read_VMC_Tile()
 
 
@@ -1395,18 +1227,11 @@ VRHRasterBand::read_VRV_Tile(VSILFILE *fp,
 
 char **VRHVDataset::GetFileList()
 {
-    char **papszFileList = GDALPamDataset::GetFileList();
+    char **papszFileList = GDALDataset::GetFileList();
 
     CPLDebug("ViewrangerHV", "GetDescription %s", GetDescription() );
 
     // GDALReadWorldFile2 (gdal_misc.cpp) has code we need to copy
-#if 0
-    if (osWldFilename.size() != 0 &&
-        CSLFindString(papszFileList, osWldFilename) == -1)
-    {
-        papszFileList = CSLAddString( papszFileList, osWldFilename );
-    }
-#endif
     return papszFileList;
 }
 
