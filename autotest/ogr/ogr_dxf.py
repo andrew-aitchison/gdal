@@ -2987,9 +2987,8 @@ def test_ogr_dxf_44():
         f.DumpReadable()
         pytest.fail()
 
-    # Note, the text actually is nine question marks, this is not an encoding error
     f = lyr.GetNextFeature()
-    if f.GetStyleString() != 'LABEL(f:"Calibri",it:1,t:"?????????",p:7,s:4g,w:40,c:#0000ff)' \
+    if f.GetStyleString() != 'LABEL(f:"Calibri",it:1,t:"wwmhyhuasmjekhosovikpigsvtippomllixhzkrpithawzztyqybthjqiobkrpcxngjfkepricimyjplksbzteotqgnkbprugrextpsnhhiorevsxjxzomzcnyrtphzgeibfljbsaikosjfrhrrhidjswmxeqjrvbllbjggjblzydcqpbuzjhgcaoflgskaabkuikiwqcmytgbaxbiukpqvqjtfinygjcakzfdyyejvvpdbwsftxzimjettbzkjmdqfigwyoghbsolhvlfunknprjmmrfxntjwmvonkxvmgsntczwcmbujxkwzykpaexmquoatsvjkbchlzptgedbjnbutvimbufrbhxpwotemzvrxtidzdtbbqywmurmdzsgqqyiyahgmnacmhrlpekufpgfruh",p:7,s:4g,w:40,c:#0000ff)' \
             or ogrtest.check_feature_geometry(f, 'POINT (40.0 -17.9846153846154)') != 0:
         f.DumpReadable()
         pytest.fail()
@@ -3625,6 +3624,23 @@ def test_ogr_dxf_54():
         f = lyr.GetNextFeature()
         isFeatureVisible = '#000000)' in f.GetStyleString() or '#ff0000)' in f.GetStyleString()
         if isFeatureVisible == (h == 'h'):
+            f.DumpReadable()
+            pytest.fail('Wrong visibility on feature %d' % number)
+
+
+###############################################################################
+# Test hidden objects in blocks
+
+
+def test_ogr_dxf_55():
+
+    with gdaltest.config_option('DXF_MERGE_BLOCK_GEOMETRIES', 'FALSE'):
+        ds = ogr.Open('data/dxf/block-hidden-entities.dxf')
+    lyr = ds.GetLayer(0)
+
+    # Red features should be hidden, black features should be visible
+    for number, f in enumerate(lyr):
+        if not ('#ff000000)' in f.GetStyleString() or '#000000)' in f.GetStyleString()):
             f.DumpReadable()
             pytest.fail('Wrong visibility on feature %d' % number)
 

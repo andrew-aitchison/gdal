@@ -4,8 +4,8 @@ set -e
 
 dnf install -y --setopt=install_weak_deps=False proj-devel
 dnf install -y clang make diffutils ccache \
-              libxml2-devel expat-devel xerces-c-devel \
-              zlib-devel xz-devel libzstd-devel \
+              libxml2-devel libxslt-devel expat-devel xerces-c-devel \
+              zlib-devel xz-devel libzstd-devel blosc-devel \
               giflib-devel libjpeg-devel libpng-devel \
               openjpeg2-devel cfitsio-devel libwebp-devel \
               libkml-devel json-c-devel \
@@ -14,6 +14,7 @@ dnf install -y clang make diffutils ccache \
               libtiff-devel libgeotiff-devel \
               poppler-cpp-devel \
               cryptopp-devel \
+              mdbtools-devel unixODBC-devel \
               armadillo-devel qhull-devel \
               hdf-devel hdf5-devel netcdf-devel \
               mongo-cxx-driver-devel libpq-devel \

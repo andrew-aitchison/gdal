@@ -21,7 +21,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing --no-install-rec
     libpq-dev libssl-dev libboost-dev \
     autoconf automake bash-completion libarmadillo-dev \
     libopenexr-dev libheif-dev \
-    libdeflate-dev \
+    libdeflate-dev libblosc-dev liblz4-dev \
     mono-mcs libmono-system-drawing4.0-cil ccache \
     perl ant \
     opencl-c-headers ocl-icd-opencl-dev
@@ -96,5 +96,16 @@ mkdir geos \
     && make install \
     && cd ../.. \
     && rm -rf geos
+
+# Install pdfium
+wget -q https://github.com/rouault/pdfium_build_gdal_3_4/releases/download/v1_pdfium_4538/install-ubuntu2004-rev4538.tar.gz \
+  && tar -xzf install-ubuntu2004-rev4538.tar.gz \
+  && chown -R root:root install \
+  && mv install/lib/* /usr/lib/ \
+  && mv install/include/* /usr/include/ \
+  && rm -rf install-ubuntu2004-rev4538.tar.gz install \
+  && apt-get update -y \
+  && apt-get install -y --fix-missing --no-install-recommends liblcms2-dev \
+  && rm -rf /var/lib/apt/lists/*
 
 ldconfig

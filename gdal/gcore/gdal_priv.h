@@ -1809,7 +1809,8 @@ public:
     static GDALExtendedDataType Create(const std::string& osName,
                                        size_t nTotalSize,
                                        std::vector<std::unique_ptr<GDALEDTComponent>>&& components);
-    static GDALExtendedDataType CreateString(size_t nMaxStringLength = 0);
+    static GDALExtendedDataType CreateString(size_t nMaxStringLength = 0,
+                                             GDALExtendedDataTypeSubType eSubType = GEDTST_NONE);
 
     bool operator== (const GDALExtendedDataType& ) const;
     /** Non-equality operator */
@@ -1832,6 +1833,14 @@ public:
      * This is the same as the C function GDALExtendedDataTypeGetNumericDataType()
      */
     GDALDataType              GetNumericDataType() const { return m_eNumericDT;  }
+
+    /** Return subtype.
+     *
+     * This is the same as the C function GDALExtendedDataTypeGetSubType()
+     *
+     * @since 3.4
+     */
+    GDALExtendedDataTypeSubType GetSubType() const { return m_eSubType; }
 
     /** Return the components of the data type (only valid when GetClass() == GEDTC_COMPOUND)
      *
@@ -1864,7 +1873,7 @@ public:
                      void* pDst, const GDALExtendedDataType& dstType);
 
 private:
-    explicit GDALExtendedDataType(size_t nMaxStringLength = 0);
+    GDALExtendedDataType(size_t nMaxStringLength, GDALExtendedDataTypeSubType eSubType);
     explicit  GDALExtendedDataType(GDALDataType eType);
     GDALExtendedDataType(const std::string& osName,
                          size_t nTotalSize,
@@ -1872,6 +1881,7 @@ private:
 
     std::string m_osName{};
     GDALExtendedDataTypeClass m_eClass = GEDTC_NUMERIC;
+    GDALExtendedDataTypeSubType m_eSubType = GEDTST_NONE;
     GDALDataType m_eNumericDT = GDT_Unknown;
     std::vector<std::unique_ptr<GDALEDTComponent>> m_aoComponents{};
     size_t m_nSize = 0;
@@ -2154,7 +2164,7 @@ public:
                                  FuncProcessPerChunkType pfnFunc,
                                  void* pUserData);
 
-    bool Read(const GUInt64* arrayStartIdx,     // array of size GetDimensionCount()
+    virtual bool Read(const GUInt64* arrayStartIdx,     // array of size GetDimensionCount()
                       const size_t* count,                 // array of size GetDimensionCount()
                       const GInt64* arrayStep,        // step in elements
                       const GPtrDiff_t* bufferStride, // stride in elements
@@ -2294,7 +2304,8 @@ protected:
 public:
     GDALAttributeString(const std::string& osParentName,
                   const std::string& osName,
-                  const std::string& osValue);
+                  const std::string& osValue,
+                  GDALExtendedDataTypeSubType eSubType = GEDTST_NONE);
 
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override;
 
@@ -2378,6 +2389,9 @@ class CPL_DLL GDALMDArray: virtual public GDALAbstractMDArray, public GDALIHasAt
                         double dfMean, double dfStdDev,
                         GUInt64 nValidCount );
 
+    mutable bool m_bHasTriedCachedArray = false;
+    mutable std::shared_ptr<GDALMDArray> m_poCachedArray{};
+
 protected:
 //! @cond Doxygen_Suppress
     GDALMDArray(const std::string& osParentName, const std::string& osName);
@@ -2385,6 +2399,7 @@ protected:
     virtual bool IAdviseRead(const GUInt64* arrayStartIdx,
                              const size_t* count) const;
 
+    virtual bool IsCacheable() const { return true; }
 //! @endcond
 
 public:
@@ -2399,8 +2414,18 @@ public:
                           GDALProgressFunc pfnProgress,
                           void * pProgressData);
 
-    /** Return whether an array is writable; */
+    /** Return whether an array is writable. */
     virtual bool IsWritable() const = 0;
+
+    /** Return the filename that contains that array.
+     *
+     * This is used in particular for caching.
+     *
+     * Might be empty if the array is not linked to a file.
+     *
+     * @since GDAL 3.4
+     */
+    virtual const std::string& GetFilename() const = 0;
 
     virtual CSLConstList GetStructuralInfo() const;
 
@@ -2441,7 +2466,10 @@ public:
     * ar->at(0,3,2)
     * \endcode
     */
+    // sphinx 4.1.0 / breathe 4.30.0 don't like typename...
+//! @cond Doxygen_Suppress
     template<typename... GUInt64VarArg>
+//! @endcond
     // cppcheck-suppress functionStatic
     std::shared_ptr<GDALMDArray> at(GUInt64 idx, GUInt64VarArg... tail) const
     {
@@ -2487,6 +2515,17 @@ public:
 
     bool GuessGeoTransform(size_t nDimX, size_t nDimY, bool bPixelIsPoint,
                            double adfGeoTransform[6]) const;
+
+    bool Cache( CSLConstList papszOptions = nullptr ) const;
+
+    bool Read(const GUInt64* arrayStartIdx,     // array of size GetDimensionCount()
+                      const size_t* count,                 // array of size GetDimensionCount()
+                      const GInt64* arrayStep,        // step in elements
+                      const GPtrDiff_t* bufferStride, // stride in elements
+                      const GDALExtendedDataType& bufferDataType,
+                      void* pDstBuffer,
+                      const void* pDstBufferAllocStart = nullptr,
+                      size_t nDstBufferAllocSize = 0) const override final;
 
 //! @cond Doxygen_Suppress
     static constexpr GUInt64 COPY_COST = 1000;
@@ -2547,6 +2586,7 @@ class CPL_DLL GDALMDArrayRegularlySpaced: public GDALMDArray
     GDALExtendedDataType m_dt = GDALExtendedDataType::Create(GDT_Float64);
     std::vector<std::shared_ptr<GDALDimension>> m_dims;
     std::vector<std::shared_ptr<GDALAttribute>> m_attributes{};
+    std::string m_osEmptyFilename{};
 
 protected:
 
@@ -2566,6 +2606,8 @@ public:
                 double dfOffsetInIncrement);
 
     bool IsWritable() const override { return false; }
+
+    const std::string& GetFilename() const override { return m_osEmptyFilename; }
 
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override;
 
@@ -2847,6 +2889,21 @@ int GDALCanFileAcceptSidecarFile(const char* pszFilename);
 bool GDALCanReliablyUseSiblingFileList(const char* pszFilename);
 
 bool CPL_DLL GDALIsDriverDeprecatedForGDAL35StillEnabled(const char* pszDriverName, const char* pszExtraMsg = "");
+
+typedef enum
+{
+    GSF_UNSIGNED_INT,
+    GSF_SIGNED_INT,
+    GSF_FLOATING_POINT,
+} GDALBufferSampleFormat;
+
+bool CPL_DLL GDALBufferHasOnlyNoData(const void* pBuffer,
+                                     double dfNoDataValue,
+                                     size_t nWidth, size_t nHeight,
+                                     size_t nLineStride,
+                                     size_t nComponents,
+                                     int nBitsPerSample,
+                                     GDALBufferSampleFormat nSampleFormat);
 
 //! @endcond
 

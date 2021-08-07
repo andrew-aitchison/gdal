@@ -50,7 +50,7 @@ from osgeo_utils.auxiliary.util import GetOutputDriverFor, open_ds
 from osgeo_utils.auxiliary.extent_util import Extent, GT
 from osgeo_utils.auxiliary import extent_util
 from osgeo_utils.auxiliary.rectangle import GeoRectangle
-from osgeo_utils.auxiliary.color_table import get_color_table
+from osgeo_utils.auxiliary.color_table import get_color_table, ColorTableLike
 from osgeo_utils.auxiliary.gdal_argparse import GDALArgumentParser, GDALScript
 
 GDALDataType = int
@@ -95,7 +95,7 @@ def Calc(calc: MaybeSequence[str], outfile: Optional[PathLikeOrStr] = None, NoDa
          type: Optional[Union[GDALDataType, str]] = None, format: Optional[str] = None,
          creation_options: Optional[Sequence[str]] = None, allBands: str = '', overwrite: bool = False,
          hideNoData: bool = False, projectionCheck: bool = False,
-         color_table: Optional[Union[PathLikeOrStr, gdal.ColorTable]] = None,
+         color_table: Optional[ColorTableLike] = None,
          extent: Optional[Extent] = None, projwin: Optional[Union[Tuple, GeoRectangle]] = None,
          user_namespace: Optional[Dict]=None,
          debug: bool = False, quiet: bool = False, **input_files):
@@ -368,8 +368,7 @@ def Calc(calc: MaybeSequence[str], outfile: Optional[PathLikeOrStr] = None, NoDa
             myOut.SetProjection(ProjectionCheck)
 
         if NoDataValue is None:
-            myOutNDV = None if hideNoData else DefaultNDVLookup[
-                myOutType]  # use the default noDataValue for this datatype
+            myOutNDV = DefaultNDVLookup[myOutType]  # use the default noDataValue for this datatype
         elif isinstance(NoDataValue, str) and NoDataValue.lower() == 'none':
             myOutNDV = None  # not to set any noDataValue
         else:
@@ -387,6 +386,9 @@ def Calc(calc: MaybeSequence[str], outfile: Optional[PathLikeOrStr] = None, NoDa
                 myOutB.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
 
             myOutB = None  # write to band
+
+        if hideNoData:
+            myOutNDV = None
 
     myOutTypeName = gdal.GetDataTypeName(myOutType)
     if debug:

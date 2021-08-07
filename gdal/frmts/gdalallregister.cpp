@@ -588,6 +588,10 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_STACTA();
 #endif
 
+#ifdef FRMT_stacit
+    GDALRegister_STACIT();
+#endif
+
     // NOTE: you need to generally your own driver before that line.
 
 /* -------------------------------------------------------------------- */
@@ -609,6 +613,10 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_ENVI();
     GDALRegister_EHdr();
     GDALRegister_ISCE();
+#endif
+
+#ifdef FRMT_zarr
+    GDALRegister_Zarr();
 #endif
 
 /* -------------------------------------------------------------------- */

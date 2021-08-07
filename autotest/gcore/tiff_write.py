@@ -612,6 +612,30 @@ def test_tiff_write_18():
     gdaltest.tiff_drv.Delete('tmp/tw_18.tif')
 
 ###############################################################################
+# Test writing a IMD files with space in values
+
+
+def test_tiff_write_imd_with_space_in_values():
+
+    ds = gdal.GetDriverByName('GTiff').Create('/vsimem/out.tif', 1, 1)
+    ds.SetMetadataItem('foo.key', 'value with space', 'IMD')
+    ds.SetMetadataItem('foo.key2', 'value with " double quote', 'IMD')
+    ds.SetMetadataItem('foo.key3', "value with ' single quote", 'IMD')
+    ds.SetMetadataItem('foo.key4', """value with " double and ' single quote""", 'IMD')
+    ds.SetMetadataItem('foo.key5', 'value_with_;', 'IMD')
+    ds.SetMetadataItem('foo.key6', 'regular_value', 'IMD')
+    ds = None
+
+    f = gdal.VSIFOpenL('/vsimem/out.IMD', 'rb')
+    assert f
+    data = gdal.VSIFReadL(1, 1000, f)
+    gdal.VSIFCloseL(f)
+
+    gdal.GetDriverByName('GTiff').Delete('/vsimem/out.tif')
+
+    assert data == b'BEGIN_GROUP = foo\n\tkey = "value with space";\n\tkey2 = \'value with " double quote\';\n\tkey3 = "value with \' single quote";\n\tkey4 = "value with \'\' double and \' single quote";\n\tkey5 = "value_with_;";\n\tkey6 = regular_value;\nEND_GROUP = foo\nEND;\n'
+
+###############################################################################
 # Test that above test still work with the optimization in the GDAL_DISABLE_READDIR_ON_OPEN
 # case (#3996)
 
@@ -3202,6 +3226,7 @@ def test_tiff_write_91():
         checksums[quality] = [ ds.GetRasterBand(1).Checksum(),
                                ds.GetRasterBand(1).GetOverview(0).Checksum(),
                                ds.GetRasterBand(1).GetOverview(1).Checksum() ]
+        ds = None
 
 
     gdaltest.tiff_drv.Delete('tmp/tiff_write_91.tif')
@@ -3478,6 +3503,7 @@ def test_tiff_write_96(other_options = [], nbands = 1, nbits = 8):
             [cs, cs_mask, cs_ovr_1, cs_ovr_mask_1, cs_ovr_2, cs_ovr_mask_2], \
             'did not get expected checksums'
         assert ds.GetMetadataItem('HAS_USED_READ_ENCODED_API', '_DEBUG_') == '0'
+        ds = None
 
     _check_cog('tmp/tiff_write_96_dst.tif', check_tiled=False, full_check=True)
 
@@ -3817,6 +3843,9 @@ Band 1}""".encode('ascii'))
 
 
 def test_tiff_write_102():
+
+    if int(gdal.GetDriverByName('GTiff').GetMetadataItem('LIBGEOTIFF')) < 1600:
+        pytest.skip('requires libgeotiff >= 1.6')
 
     ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_102.tif', 1, 1)
     sr = osr.SpatialReference()
@@ -7462,6 +7491,28 @@ def test_tiff_write_overviews_nan_nodata():
     assert ds.GetRasterBand(1).GetOverviewCount() == 2
     ds = None
     gdal.Unlink(filename)
+
+
+###############################################################################
+# Test support for coordinate epoch
+
+
+def test_tiff_write_coordinate_epoch():
+
+    ds = gdal.GetDriverByName('GTiff').Create('/vsimem/test_tiff_write_coordinate_epoch.tif', 1, 1)
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    srs.SetCoordinateEpoch(2021.3)
+    ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
+    ds.SetSpatialRef(srs)
+    ds = None
+
+    ds = gdal.Open('/vsimem/test_tiff_write_coordinate_epoch.tif')
+    srs = ds.GetSpatialRef()
+    assert srs.GetCoordinateEpoch() == 2021.3
+    ds = None
+
+    gdal.Unlink('/vsimem/test_tiff_write_coordinate_epoch.tif')
 
 
 def test_tiff_write_cleanup():

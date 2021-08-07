@@ -479,9 +479,7 @@ private:
                                    int bPreserveDataBuffer );
     bool         WriteEncodedStrip( uint32_t strip, GByte* pabyData,
                                     int bPreserveDataBuffer );
-    template<class T>
-    bool         HasOnlyNoDataT( const T* pBuffer, int nWidth, int nHeight,
-                                int nLineStride, int nComponents ) const;
+
     bool         HasOnlyNoData( const void* pBuffer, int nWidth, int nHeight,
                                 int nLineStride, int nComponents );
     inline bool  IsFirstPixelEqualToNoData( const void* pBuffer );
@@ -5948,7 +5946,7 @@ void GTiffRasterBand::NullBlock( void *pData )
     const int nChunkSize = std::max(1, GDALGetDataTypeSizeBytes(eDataType));
 
     int bNoDataSetIn = FALSE;
-    const double dfNoData = GetNoDataValue( &bNoDataSetIn );
+    double dfNoData = GetNoDataValue( &bNoDataSetIn );
     if( !bNoDataSetIn )
     {
 #ifdef ESRI_BUILD
@@ -5962,6 +5960,17 @@ void GTiffRasterBand::NullBlock( void *pData )
     }
     else
     {
+        // Hack for Signed Int8 case. As the data type is GDT_Byte (unsigned),
+        // we have to convert a negative nodata value in the range [-128,-1] in
+        // [128, 255]
+        if( m_poGDS->m_nBitsPerSample == 8 &&
+            m_poGDS->m_nSampleFormat == SAMPLEFORMAT_INT &&
+            dfNoData < 0 && dfNoData >= -128 &&
+            static_cast<int>(dfNoData) == dfNoData )
+        {
+            dfNoData = 256 + dfNoData;
+        }
+
         // Will convert nodata value to the right type and copy efficiently.
         GDALCopyWords64( &dfNoData, GDT_Float64, 0,
                        pData, eDataType, nChunkSize, nWords);
@@ -6515,7 +6524,7 @@ GTiffOddBitsBand::GTiffOddBitsBand( GTiffDataset *m_poGDSIn, int nBandIn )
 /*                            FloatToHalf()                             */
 /************************************************************************/
 
-static GUInt16 FloatToHalf( GUInt32 iFloat32, bool& bHasWarned )
+GUInt16 FloatToHalf( GUInt32 iFloat32, bool& bHasWarned )
 {
     GUInt32 iSign =     (iFloat32 >> 31) & 0x00000001;
     GUInt32 iExponent = (iFloat32 >> 23) & 0x000000ff;
@@ -8128,7 +8137,20 @@ void GTiffDataset::FillEmptyTiles()
         if( nDataTypeSize &&
             nDataTypeSize * 8 == static_cast<int>(m_nBitsPerSample) )
         {
-            GDALCopyWords64( &m_dfNoDataValue, GDT_Float64, 0,
+            double dfNoData = m_dfNoDataValue;
+
+            // Hack for Signed Int8 case. As the data type is GDT_Byte (unsigned),
+            // we have to convert a negative nodata value in the range [-128,-1] in
+            // [128, 255]
+            if( m_nBitsPerSample == 8 &&
+                m_nSampleFormat == SAMPLEFORMAT_INT &&
+                dfNoData < 0 && dfNoData >= -128 &&
+                static_cast<int>(dfNoData) == dfNoData )
+            {
+                dfNoData = 256 + dfNoData;
+            }
+
+            GDALCopyWords64( &dfNoData, GDT_Float64, 0,
                            pabyData, eDataType,
                            nDataTypeSize,
                            nBlockBytes / nDataTypeSize );
@@ -8325,155 +8347,23 @@ void GTiffDataset::FillEmptyTiles()
 /*                         HasOnlyNoData()                              */
 /************************************************************************/
 
-template<class T>
-static inline bool IsEqualToNoData( T value, T noDataValue )
-{
-    return value == noDataValue;
-}
-
-template<> bool IsEqualToNoData<float>( float value, float noDataValue )
-{
-    return
-        CPLIsNan(noDataValue) ?
-        CPL_TO_BOOL(CPLIsNan(value)) : value == noDataValue;
-}
-
-template<> bool IsEqualToNoData<double>( double value, double noDataValue )
-{
-    return
-        CPLIsNan(noDataValue) ?
-        CPL_TO_BOOL(CPLIsNan(value)) : value == noDataValue;
-}
-
-template<class T>
-bool GTiffDataset::HasOnlyNoDataT( const T* pBuffer, int nWidth, int nHeight,
-                                   int nLineStride, int nComponents ) const
-{
-    const T noDataValue = static_cast<T>((m_bNoDataSet) ? m_dfNoDataValue : 0.0);
-
-    CPLAssert(m_nBitsPerSample != 1 || noDataValue == 0);
-
-    // Fast test: check the 4 corners and the middle pixel.
-    for( int iBand = 0; iBand < nComponents; iBand++ )
-    {
-        if( !(IsEqualToNoData(pBuffer[iBand], noDataValue) &&
-              IsEqualToNoData(
-                  pBuffer[static_cast<size_t>(nWidth - 1) * nComponents +
-                          iBand],
-                  noDataValue) &&
-              IsEqualToNoData(
-                  pBuffer[(static_cast<size_t>(nHeight-1)/2 * nLineStride +
-                           (nWidth - 1)/2) * nComponents + iBand],
-                  noDataValue) &&
-              IsEqualToNoData(
-                  pBuffer[static_cast<size_t>(nHeight - 1) * nLineStride *
-                          nComponents + iBand], noDataValue) &&
-              IsEqualToNoData(
-                  pBuffer[(static_cast<size_t>(nHeight - 1) * nLineStride +
-                           nWidth - 1) * nComponents + iBand], noDataValue) ) )
-        {
-            return false;
-        }
-    }
-
-    // Test all pixels.
-    for( int iY = 0; iY < nHeight; iY++ )
-    {
-        for( int iX = 0; iX < nWidth * nComponents; iX++ )
-        {
-            if( !IsEqualToNoData(
-                   pBuffer[iY * static_cast<size_t>(nLineStride) * nComponents +
-                           iX], noDataValue) )
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 bool GTiffDataset::HasOnlyNoData( const void* pBuffer, int nWidth, int nHeight,
                                   int nLineStride, int nComponents )
 {
-    const GDALDataType eDT = GetRasterBand(1)->GetRasterDataType();
-
-    // In the case where the nodata is 0, we can compare several bytes at
-    // once. Select the largest natural integer type for the architecture.
-#if SIZEOF_VOIDP == 8 || defined(__x86_64__)
-    // We test __x86_64__ for x32 arch where SIZEOF_VOIDP == 4
-    typedef GUInt64 WordType;
-#else
-    typedef unsigned int WordType;
-#endif
-    if( (!m_bNoDataSet || m_dfNoDataValue == 0.0) && nWidth == nLineStride )
-    {
-        const GByte* pabyBuffer = static_cast<const GByte*>(pBuffer);
-        const size_t nSize = (static_cast<size_t>(nWidth) * nHeight *
-                                nComponents * m_nBitsPerSample + 7) / 8;
-        size_t i = 0;
-        const size_t nInitialIters = std::min(
-            sizeof(WordType) -
-                (reinterpret_cast<std::uintptr_t>(pabyBuffer) % sizeof(WordType)),
-            nSize);
-        for( ; i < nInitialIters; i++ )
-        {
-            if( pabyBuffer[i] )
-                return false;
-        }
-        for( ; i + sizeof(WordType) - 1 < nSize; i += sizeof(WordType) )
-        {
-            if( *(reinterpret_cast<const WordType*>(pabyBuffer + i)) )
-                return false;
-        }
-        for( ; i < nSize; i++ )
-        {
-            if( pabyBuffer[i] )
-                return false;
-        }
-        return true;
-    }
-
-    if( m_nBitsPerSample == 8 )
-    {
-        if( m_nSampleFormat == SAMPLEFORMAT_INT )
-        {
-            return HasOnlyNoDataT(static_cast<const signed char*>(pBuffer),
-                                  nWidth, nHeight, nLineStride, nComponents);
-        }
-        return HasOnlyNoDataT(static_cast<const GByte*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    if( m_nBitsPerSample == 16 && eDT == GDT_UInt16 )
-    {
-        return HasOnlyNoDataT(static_cast<const GUInt16*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    if( m_nBitsPerSample == 16 && eDT== GDT_Int16 )
-    {
-        return HasOnlyNoDataT(static_cast<const GInt16*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    if( m_nBitsPerSample == 32 && eDT == GDT_UInt32 )
-    {
-        return HasOnlyNoDataT(static_cast<const GUInt32*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    if( m_nBitsPerSample == 32 && eDT == GDT_Int32 )
-    {
-        return HasOnlyNoDataT(static_cast<const GInt32*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    if( m_nBitsPerSample == 32 && eDT == GDT_Float32 )
-    {
-        return HasOnlyNoDataT(static_cast<const float*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    if( m_nBitsPerSample == 64 && eDT == GDT_Float64 )
-    {
-        return HasOnlyNoDataT(static_cast<const double*>(pBuffer),
-                              nWidth, nHeight, nLineStride, nComponents);
-    }
-    return false;
+    if( m_nSampleFormat == SAMPLEFORMAT_COMPLEXINT ||
+        m_nSampleFormat == SAMPLEFORMAT_COMPLEXIEEEFP )
+        return false;
+    return GDALBufferHasOnlyNoData( pBuffer,
+                                    m_bNoDataSet ? m_dfNoDataValue : 0.0,
+                                    nWidth, nHeight,
+                                    nLineStride,
+                                    nComponents,
+                                    m_nBitsPerSample,
+                                    m_nSampleFormat == SAMPLEFORMAT_UINT ?
+                                        GSF_UNSIGNED_INT :
+                                    m_nSampleFormat == SAMPLEFORMAT_INT ?
+                                        GSF_SIGNED_INT :
+                                        GSF_FLOATING_POINT );
 }
 
 /************************************************************************/
@@ -10134,6 +10024,15 @@ CPLErr GTiffDataset::RegisterNewOverviewDataset(toff_t nOverviewOffset,
         return CE_Failure;
     }
 
+    // Assign color interpretation from main dataset
+    const int l_nBands = GetRasterCount();
+    for(int i = 1; i <= l_nBands; i++ )
+    {
+        auto poBand = dynamic_cast<GTiffRasterBand*>(poODS->GetRasterBand(i));
+        if( poBand )
+            poBand->m_eBandInterp = GetRasterBand(i)->GetColorInterpretation();
+    }
+
     // Do that now that m_nCompression is set
     poODS->RestoreVolatileParameters( poODS->m_hTIFF );
 
@@ -11234,7 +11133,8 @@ void GTiffDataset::WriteGeoTIFFInfo()
             if( pszProjection && pszProjection[0] &&
                 strstr(pszProjection, "custom_proj4") == nullptr )
             {
-                GTIFSetFromOGISDefnEx( psGTIF, pszProjection,
+                GTIFSetFromOGISDefnEx( psGTIF,
+                                       OGRSpatialReference::ToHandle(&m_oSRS),
                                        m_eGeoTIFFKeysFlavor,
                                        m_eGeoTIFFVersion );
             }
@@ -11545,13 +11445,14 @@ void GTiffDataset::WriteRPC( GDALDataset *poSrcDS, TIFF *l_hTIFF,
 }
 
 /************************************************************************/
-/*                  IsStandardColorInterpretation()                     */
+/*                 GTIFFIsStandardColorInterpretation()                 */
 /************************************************************************/
 
-static bool IsStandardColorInterpretation(GDALDataset* poSrcDS,
+bool GTIFFIsStandardColorInterpretation(GDALDatasetH hSrcDS,
                                           uint16_t nPhotometric,
-                                          char** papszCreationOptions)
+                                          CSLConstList papszCreationOptions)
 {
+    GDALDataset* poSrcDS = GDALDataset::FromHandle(hSrcDS);
     bool bStandardColorInterp = true;
     if( nPhotometric == PHOTOMETRIC_MINISBLACK )
     {
@@ -11675,8 +11576,8 @@ bool GTiffDataset::WriteMetadata( GDALDataset *poSrcDS, TIFF *l_hTIFF,
         nPhotometric = PHOTOMETRIC_MINISBLACK;
 
     const bool bStandardColorInterp =
-        IsStandardColorInterpretation(poSrcDS, nPhotometric,
-                                      l_papszCreationOptions);
+        GTIFFIsStandardColorInterpretation(
+            GDALDataset::ToHandle(poSrcDS), nPhotometric, l_papszCreationOptions);
 
 /* -------------------------------------------------------------------- */
 /*      We also need to address band specific metadata, and special     */
@@ -11891,7 +11792,8 @@ void GTiffDataset::PushMetadataToPam()
         return;
 
     const bool bStandardColorInterp =
-        IsStandardColorInterpretation(this, m_nPhotometric, m_papszCreationOptions);
+        GTIFFIsStandardColorInterpretation(GDALDataset::ToHandle(this),
+                                           m_nPhotometric, m_papszCreationOptions);
 
     for( int nBand = 0; nBand <= GetRasterCount(); ++nBand )
     {
@@ -15419,6 +15321,19 @@ void GTiffDataset::ScanDirectories()
         }
     }
 
+    // Assign color interpretation from main dataset
+    const int l_nBands = GetRasterCount();
+    for( int iOvr = 0; iOvr < m_nOverviewCount; ++iOvr )
+    {
+        for(int i = 1; i <= l_nBands; i++ )
+        {
+            auto poBand = dynamic_cast<GTiffRasterBand*>(
+                                    m_papoOverviewDS[iOvr]->GetRasterBand(i));
+            if( poBand )
+                poBand->m_eBandInterp = GetRasterBand(i)->GetColorInterpretation();
+        }
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Only keep track of subdatasets if we have more than one         */
 /*      subdataset (pair).                                              */
@@ -17922,7 +17837,9 @@ GTiffDataset::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             }
             if( eErr == OGRERR_NONE && strstr(pszWKT, "custom_proj4") == nullptr )
             {
-                GTIFSetFromOGISDefnEx( psGTIF, pszWKT,
+                GTIFSetFromOGISDefnEx( psGTIF,
+                                       OGRSpatialReference::ToHandle(
+                                           const_cast<OGRSpatialReference*>(l_poSRS)),
                                     GetGTIFFKeysFlavor(papszOptions),
                                     GetGeoTIFFVersion(papszOptions) );
             }
@@ -20084,7 +20001,7 @@ CPLString GTiffGetCompressValues(bool& bHasLZW,
             osCompressValues +=
                     "       <Value>CCITTFAX4</Value>";
         }
-        else if( c->scheme == COMPRESSION_LZMA && !bForCOG )
+        else if( c->scheme == COMPRESSION_LZMA )
         {
             bHasLZMA = true;
             osCompressValues +=
@@ -20311,6 +20228,8 @@ void GDALRegister_GTiff()
 #define STRINGIFY(x) #x
 #define XSTRINGIFY(x) STRINGIFY(x)
     poDriver->SetMetadataItem( "LIBGEOTIFF", XSTRINGIFY(LIBGEOTIFF_VERSION) );
+
+    poDriver->SetMetadataItem( GDAL_DCAP_COORDINATE_EPOCH, "YES" );
 
     poDriver->pfnOpen = GTiffDataset::Open;
     poDriver->pfnCreate = GTiffDataset::Create;

@@ -116,8 +116,8 @@ method.
 
 The block size (tile width and height) used for overviews (internal or
 external) can be specified by setting the GDAL_TIFF_OVR_BLOCKSIZE
-environment variable to a power-of-two value between 64 and 4096. The 
-default is 128, or starting with GDAL 3.1 to use the same block size 
+environment variable to a power-of-two value between 64 and 4096. The
+default is 128, or starting with GDAL 3.1 to use the same block size
 as the full-resolution dataset if possible (i.e. block height and width
 are equal, a power-of-two, and between 64 and 4096).
 
@@ -377,14 +377,17 @@ Creation Options
 -  **COMPRESS=[JPEG/LZW/PACKBITS/DEFLATE/CCITTRLE/CCITTFAX3/CCITTFAX4/LZMA/ZSTD/LERC/LERC_DEFLATE/LERC_ZSTD/WEBP/NONE]**:
    Set the compression to use.
 
-   * ``JPEG`` should generally only be used with
-     Byte data (8 bit per channel). But if GDAL is built with internal libtiff and
-     libjpeg, it is    possible to read and write TIFF files with 12bit JPEG compressed TIFF
-     files (seen as UInt16 bands with NBITS=12). See the `"8 and 12 bit
-     JPEG in TIFF" <http://trac.osgeo.org/gdal/wiki/TIFF12BitJPEG>`__ wiki
-     page for more details.
+   * ``JPEG`` should generally only be used with Byte data (8 bit per channel).
      Better compression for RGB images can be obtained by using the PHOTOMETRIC=YCBCR
      colorspace with a 4:2:2 subsampling of the Y,Cb,Cr components.
+
+     Starting with GDAL 3.4, if GDAL is built with its internal libtiff,
+     read and write support for JPEG-in-TIFF compressed images with 12-bit sample
+     is enabled by default (if JPEG support is also enabled), using GDAL internal libjpeg
+     (based on IJG libjpeg-6b, with additional changes for 12-bit sample support).
+     Support for JPEG with 12-bit sample is independent of whether
+     8-bit JPEG support is enabled through internal IJG libjpeg-6b or external libjpeg
+     (like libjpeg-turbo)
 
    * ``CCITTFAX3``, ``CCITTFAX4`` or ``CCITRLE`` compression should only be used with 1bit (NBITS=1) data
 
@@ -393,7 +396,9 @@ Creation Options
    * ``ZSTD`` is available since GDAL 2.3 when using internal libtiff and if GDAL
      built against libzstd >=1.0, or if built against external libtiff with zstd support.
 
-   * ``LERC`` and ``LERC_DEFLATE`` are available only when using internal libtiff.
+   * ``LERC`` and ``LERC_DEFLATE`` are available only when using internal libtiff for GDAL < 3.3.0.
+     Since GDAL 3.3.0, LERC compression is also available when building GDAL
+     against external libtiff >= 4.3.0, built itself against https://github.com/esri/lerc
 
    * ``LERC_ZSTD`` is available when ``LERC`` and ``ZSTD`` are available.
 

@@ -33,6 +33,8 @@
 #include <queue>
 #include <set>
 
+#include <ctype.h> // isalnum
+
 #include "gdal_priv.h"
 #include "gdal_pam.h"
 #include "gdal_utils.h"
@@ -97,6 +99,8 @@ public:
     }
 
     bool IsWritable() const override { return m_poParent->IsWritable(); }
+
+    const std::string& GetFilename() const override { return m_poParent->GetFilename(); }
 
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override { return m_poParent->GetDimensions(); }
 
@@ -3405,6 +3409,238 @@ bool GDALMDArray::IAdviseRead(const GUInt64*, const size_t*) const
 }
 //! @endcond
 
+
+/************************************************************************/
+/*                            MassageName()                             */
+/************************************************************************/
+
+static std::string MassageName(const std::string& inputName)
+{
+    std::string ret;
+    for( const char ch: inputName )
+    {
+        if( !isalnum(ch) )
+            ret += '_';
+        else
+            ret += ch;
+    }
+    return ret;
+}
+
+/************************************************************************/
+/*                              Cache()                                 */
+/************************************************************************/
+
+/** Cache the content of the array into an auxiliary filename.
+ *
+ * The main purpose of this method is to be able to cache views that are
+ * expensive to compute, such as transposed arrays.
+ *
+ * The array will be stored in a file whose name is the one of
+ * GetFilename(), with an extra .gmac extension (stands for GDAL Multidimensional
+ * Array Cache). The cache is a netCDF dataset.
+ * The GDALMDArray::Read() method will automatically use the cache when it exists.
+ * There is no timestamp checks between the source array and the cached array.
+ * If the source arrays changes, the cache must be manually deleted.
+ *
+ * This is the same as the C function GDALMDArrayCache()
+ *
+ * @note Driver implementation: optionally implemented.
+ *
+ * @param papszOptions List of options, null terminated, or NULL. Currently
+ *                     the only option supported is BLOCKSIZE=bs0,bs1,...,bsN
+ *                     to specify the block size of the cached array.
+ * @return true in case of success.
+ */
+bool GDALMDArray::Cache( CSLConstList papszOptions ) const
+{
+    const auto& osFilename = GetFilename();
+    if( osFilename.empty() )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot cache an array with an empty filename");
+        return false;
+    }
+    const char* pszDrvName = "netCDF";
+    GDALDriver* poDrv = GetGDALDriverManager()->GetDriverByName(pszDrvName);
+    if( poDrv == nullptr )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot get driver %s", pszDrvName);
+        return false;
+    }
+    const auto osCacheFilename = osFilename + ".gmac";
+    GDALOpenInfo oOpenInfo(osCacheFilename.c_str(),
+                           GDAL_OF_MULTIDIM_RASTER | GDAL_OF_UPDATE);
+    std::unique_ptr<GDALDataset> poDS(poDrv->pfnOpen( &oOpenInfo));
+    if( !poDS )
+    {
+        poDS.reset(poDrv->CreateMultiDimensional(osCacheFilename.c_str(),
+                                                 nullptr, nullptr));
+        if( !poDS )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot create %s", osCacheFilename.c_str());
+            return false;
+        }
+    }
+    auto poRG = poDS->GetRootGroup();
+    assert( poRG );
+
+    const std::string osCachedArrayName(MassageName(GetFullName()));
+    if( poRG->OpenMDArray(osCachedArrayName) )
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "An array with same name %s already exists in %s",
+                 osCachedArrayName.c_str(), osCacheFilename.c_str());
+        return false;
+    }
+
+    CPLStringList aosOptions;
+    aosOptions.SetNameValue("COMPRESS", "DEFLATE");
+    const auto& aoDims = GetDimensions();
+    std::vector<std::shared_ptr<GDALDimension>> aoNewDims;
+    if( !aoDims.empty() )
+    {
+        std::string osBlockSize(CSLFetchNameValueDef(papszOptions, "BLOCKSIZE", ""));
+        if( osBlockSize.empty() )
+        {
+            const auto anBlockSize = GetBlockSize();
+            int idxDim = 0;
+            for( auto nBlockSize: anBlockSize )
+            {
+                if( idxDim > 0 )
+                    osBlockSize += ',';
+                if( nBlockSize == 0 )
+                    nBlockSize = 256;
+                nBlockSize = std::min(nBlockSize, aoDims[idxDim]->GetSize());
+                osBlockSize += std::to_string(static_cast<uint64_t>(nBlockSize));
+                idxDim ++;
+            }
+        }
+        aosOptions.SetNameValue("BLOCKSIZE", osBlockSize.c_str());
+
+        int idxDim = 0;
+        for( const auto& poDim: aoDims )
+        {
+            auto poNewDim = poRG->CreateDimension(
+                osCachedArrayName + '_' + std::to_string(idxDim),
+                poDim->GetType(),
+                poDim->GetDirection(),
+                poDim->GetSize());
+            if( !poNewDim )
+                return false;
+            aoNewDims.emplace_back(poNewDim);
+            idxDim ++;
+        }
+    }
+
+    auto poCachedArray = poRG->CreateMDArray(osCachedArrayName,
+                                             aoNewDims,
+                                             GetDataType(),
+                                             aosOptions.List());
+    if( !poCachedArray )
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Cannot create %s in %s",
+                 osCachedArrayName.c_str(), osCacheFilename.c_str());
+        return false;
+    }
+
+    GUInt64 nCost = 0;
+    return poCachedArray->CopyFrom(nullptr, this,
+                                   false, // strict
+                                   nCost, GetTotalCopyCost(),
+                                   nullptr, nullptr);
+}
+
+/************************************************************************/
+/*                               Read()                                 */
+/************************************************************************/
+
+bool GDALMDArray::Read(const GUInt64* arrayStartIdx,
+                      const size_t* count,
+                      const GInt64* arrayStep,        // step in elements
+                      const GPtrDiff_t* bufferStride, // stride in elements
+                      const GDALExtendedDataType& bufferDataType,
+                      void* pDstBuffer,
+                      const void* pDstBufferAllocStart,
+                      size_t nDstBufferAllocSize) const
+{
+    if( !m_bHasTriedCachedArray )
+    {
+        m_bHasTriedCachedArray = true;
+        if( IsCacheable() )
+        {
+            const auto& osFilename = GetFilename();
+            if( !osFilename.empty() &&
+                !EQUAL(CPLGetExtension(osFilename.c_str()), "gmac") )
+            {
+                const auto osCacheFilename = osFilename + ".gmac";
+                std::unique_ptr<GDALDataset> poDS(GDALDataset::Open(
+                                osCacheFilename.c_str(), GDAL_OF_MULTIDIM_RASTER));
+                if( poDS )
+                {
+                    auto poRG = poDS->GetRootGroup();
+                    assert( poRG );
+
+                    const std::string osCachedArrayName(MassageName(GetFullName()));
+                    m_poCachedArray = poRG->OpenMDArray(osCachedArrayName);
+                    if( m_poCachedArray )
+                    {
+                        const auto& dims = GetDimensions();
+                        const auto& cachedDims = m_poCachedArray->GetDimensions();
+                        const size_t nDims = dims.size();
+                        bool ok =
+                            m_poCachedArray->GetDataType() == GetDataType() &&
+                            cachedDims.size() == nDims;
+                        for( size_t i = 0; ok && i < nDims; ++i )
+                        {
+                            ok = dims[i]->GetSize() == cachedDims[i]->GetSize();
+                        }
+                        if( !ok )
+                        {
+                            CPLError(CE_Warning, CPLE_AppDefined,
+                                     "Cached array %s in %s has incompatible "
+                                     "characteristics with current array.",
+                                     osCachedArrayName.c_str(),
+                                     osCacheFilename.c_str());
+                            m_poCachedArray.reset();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    const auto array = m_poCachedArray ? m_poCachedArray.get() : this;
+    if( !array->GetDataType().CanConvertTo(bufferDataType) )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Array data type is not convertible to buffer data type");
+        return false;
+    }
+
+    std::vector<GInt64> tmp_arrayStep;
+    std::vector<GPtrDiff_t> tmp_bufferStride;
+    if( !array->CheckReadWriteParams(arrayStartIdx,
+                                     count,
+                                     arrayStep,
+                                     bufferStride,
+                                     bufferDataType,
+                                     pDstBuffer,
+                                     pDstBufferAllocStart,
+                                     nDstBufferAllocSize,
+                                     tmp_arrayStep,
+                                     tmp_bufferStride) )
+    {
+        return false;
+    }
+
+    return array->IRead(arrayStartIdx, count, arrayStep,
+                        bufferStride, bufferDataType, pDstBuffer);
+}
+
 /************************************************************************/
 /*                       GDALSlicedMDArray                              */
 /************************************************************************/
@@ -3484,6 +3720,8 @@ public:
     }
 
     bool IsWritable() const override { return m_poParent->IsWritable(); }
+
+    const std::string& GetFilename() const override { return m_poParent->GetFilename(); }
 
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override { return m_dims; }
 
@@ -3924,6 +4162,8 @@ public:
 
     bool IsWritable() const override { return m_poParent->IsWritable(); }
 
+    const std::string& GetFilename() const override { return m_poParent->GetFilename(); }
+
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override
     { return m_poParent->GetDimensions(); }
 
@@ -4321,6 +4561,8 @@ public:
     }
 
     bool IsWritable() const override { return m_poParent->IsWritable(); }
+
+    const std::string& GetFilename() const override { return m_poParent->GetFilename(); }
 
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override { return m_dims; }
 
@@ -5003,6 +5245,8 @@ public:
     }
 
     bool IsWritable() const override { return false; }
+
+    const std::string& GetFilename() const override { return m_poParent->GetFilename(); }
 
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override { return m_poParent->GetDimensions(); }
 
@@ -5877,6 +6121,8 @@ public:
 
     bool IsWritable() const override { return false; }
 
+    const std::string& GetFilename() const override { return m_poParent->GetFilename(); }
+
     const std::vector<std::shared_ptr<GDALDimension>>& GetDimensions() const override { return m_apoDims; }
 
     const GDALExtendedDataType &GetDataType() const override { return m_dt; }
@@ -6457,6 +6703,7 @@ class GDALDatasetFromArray final: public GDALDataset
     double m_adfGeoTransform[6]{0,1,0,0,0,1};
     bool m_bHasGT = false;
     mutable std::shared_ptr<OGRSpatialReference> m_poSRS{};
+    GDALMultiDomainMetadata m_oMDD{};
 
 public:
     GDALDatasetFromArray(const std::shared_ptr<GDALMDArray>& array,
@@ -6508,7 +6755,7 @@ public:
             {
                 val += '}';
             }
-            SetMetadataItem(attr->GetName().c_str(), val.c_str());
+            m_oMDD.SetMetadataItem(attr->GetName().c_str(), val.c_str());
         }
 
         // Instantiate bands by iterating over non-XY variables
@@ -6565,6 +6812,21 @@ lbl_return_to_caller:
             m_poSRS->SetDataAxisToSRSAxisMapping(axisMapping);
         }
         return m_poSRS.get();
+    }
+
+    CPLErr SetMetadata(char** papszMetadata, const char* pszDomain) override
+    {
+        return m_oMDD.SetMetadata(papszMetadata, pszDomain);
+    }
+
+    char** GetMetadata(const char* pszDomain) override
+    {
+        return m_oMDD.GetMetadata(pszDomain);
+    }
+
+    const char* GetMetadataItem(const char* pszName, const char* pszDomain) override
+    {
+        return m_oMDD.GetMetadataItem(pszName, pszDomain);
     }
 };
 
@@ -7240,8 +7502,10 @@ GDALExtendedDataType::~GDALExtendedDataType() = default;
 /*                        GDALExtendedDataType()                        */
 /************************************************************************/
 
-GDALExtendedDataType::GDALExtendedDataType(size_t nMaxStringLength):
+GDALExtendedDataType::GDALExtendedDataType(size_t nMaxStringLength,
+                                           GDALExtendedDataTypeSubType eSubType):
     m_eClass(GEDTC_STRING),
+    m_eSubType(eSubType),
     m_nSize(sizeof(char*)),
     m_nMaxStringLength(nMaxStringLength)
 {}
@@ -7279,6 +7543,7 @@ GDALExtendedDataType::GDALExtendedDataType(
 GDALExtendedDataType::GDALExtendedDataType(const GDALExtendedDataType& other):
     m_osName(other.m_osName),
     m_eClass(other.m_eClass),
+    m_eSubType(other.m_eSubType),
     m_eNumericDT(other.m_eNumericDT),
     m_nSize(other.m_nSize),
     m_nMaxStringLength(other.m_nMaxStringLength)
@@ -7301,6 +7566,7 @@ GDALExtendedDataType& GDALExtendedDataType::operator= (GDALExtendedDataType&& ot
 {
     m_osName = std::move(other.m_osName);
     m_eClass = other.m_eClass;
+    m_eSubType = other.m_eSubType;
     m_eNumericDT = other.m_eNumericDT;
     m_nSize = other.m_nSize;
     m_nMaxStringLength = other.m_nMaxStringLength;
@@ -7384,10 +7650,12 @@ GDALExtendedDataType GDALExtendedDataType::Create(
  * This is the same as the C function GDALExtendedDataTypeCreateString().
  *
  * @param nMaxStringLength maximum length of a string in bytes. 0 if unknown/unlimited
+ * @param eSubType Subtype.
  */
-GDALExtendedDataType GDALExtendedDataType::CreateString(size_t nMaxStringLength)
+GDALExtendedDataType GDALExtendedDataType::CreateString(size_t nMaxStringLength,
+                                                        GDALExtendedDataTypeSubType eSubType)
 {
-    return GDALExtendedDataType(nMaxStringLength);
+    return GDALExtendedDataType(nMaxStringLength, eSubType);
 }
 
 /************************************************************************/
@@ -7401,6 +7669,7 @@ GDALExtendedDataType GDALExtendedDataType::CreateString(size_t nMaxStringLength)
 bool GDALExtendedDataType::operator==(const GDALExtendedDataType& other) const
 {
     if( m_eClass != other.m_eClass ||
+        m_eSubType != other.m_eSubType ||
         m_nSize != other.m_nSize ||
         m_osName != other.m_osName )
     {
@@ -7914,6 +8183,25 @@ int GDALExtendedDataTypeEquals(GDALExtendedDataTypeH hFirstEDT,
     VALIDATE_POINTER1( hSecondEDT, __func__, FALSE );
     return *(hFirstEDT->m_poImpl) == *(hSecondEDT->m_poImpl);
 }
+
+/************************************************************************/
+/*                    GDALExtendedDataTypeGetSubType()                  */
+/************************************************************************/
+
+/** Return the subtype of a type.
+ *
+ * This is the same as the C++ method GDALExtendedDataType::GetSubType()
+ *
+ * @param hEDT Data type.
+ * @return subtype.
+ * @since 3.4
+ */
+GDALExtendedDataTypeSubType GDALExtendedDataTypeGetSubType(GDALExtendedDataTypeH hEDT)
+{
+    VALIDATE_POINTER1( hEDT, __func__, GEDTST_NONE );
+    return hEDT->m_poImpl->GetSubType();
+}
+
 
 /************************************************************************/
 /*                     GDALExtendedDataTypeGetComponents()              */
@@ -9545,6 +9833,24 @@ void GDALReleaseArrays(GDALMDArrayH* arrays, size_t nCount)
 }
 
 /************************************************************************/
+/*                           GDALMDArrayCache()                         */
+/************************************************************************/
+
+/**
+ * \brief Cache the content of the array into an auxiliary filename.
+ *
+ * This is the same as the C++ method GDALMDArray::Cache().
+ *
+ * @since GDAL 3.4
+ */
+
+int GDALMDArrayCache( GDALMDArrayH hArray, CSLConstList papszOptions )
+{
+    VALIDATE_POINTER1( hArray, __func__, FALSE );
+    return hArray->m_poImpl->Cache(papszOptions);
+}
+
+/************************************************************************/
 /*                        GDALAttributeRelease()                        */
 /************************************************************************/
 
@@ -10199,9 +10505,11 @@ GDALDatasetH GDALMDArrayAsClassicDataset(GDALMDArrayH hArray,
 
 GDALAttributeString::GDALAttributeString(const std::string& osParentName,
                   const std::string& osName,
-                  const std::string& osValue):
+                  const std::string& osValue,
+                  GDALExtendedDataTypeSubType eSubType):
         GDALAbstractMDArray(osParentName, osName),
         GDALAttribute(osParentName, osName),
+        m_dt(GDALExtendedDataType::CreateString(0, eSubType)),
         m_osValue(osValue)
 {}
 

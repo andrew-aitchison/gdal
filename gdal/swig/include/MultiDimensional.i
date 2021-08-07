@@ -27,6 +27,12 @@
  * DEALINGS IN THE SOFTWARE.
  *****************************************************************************/
 
+%rename (ExtendedDataTypeSubType) GDALExtendedDataTypeSubType;
+typedef enum {
+    GEDTST_NONE = 0,
+    GEDTST_JSON = 1
+} GDALExtendedDataTypeSubType;
+
 %rename (Group) GDALGroupHS;
 
 %apply Pointer NONNULL {const char* name};
@@ -805,8 +811,42 @@ public:
     *val = GDALMDArrayGetNoDataValueAsDouble( self, hasval );
   }
 
+  retStringAndCPLFree* GetNoDataValueAsString() {
+    GDALExtendedDataTypeHS* selfType = GDALMDArrayGetDataType(self);
+    const size_t typeClass = GDALExtendedDataTypeGetClass(selfType);
+    GDALExtendedDataTypeRelease(selfType);
+
+    if( typeClass != GEDTC_STRING )
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg, "Data type is not string");
+        return NULL;
+    }
+    const void* pabyBuf = GDALMDArrayGetRawNoDataValue(self);
+    if( pabyBuf == NULL )
+    {
+      return NULL;
+    }
+    const char* ret = *reinterpret_cast<const char* const*>(pabyBuf);
+    if( ret )
+        return CPLStrdup(ret);
+    return NULL;
+  }
+
   CPLErr SetNoDataValueDouble( double d ) {
     return GDALMDArraySetNoDataValueAsDouble( self, d ) ? CE_None : CE_Failure;
+  }
+
+  CPLErr SetNoDataValueString( const char* nodata ) {
+    GDALExtendedDataTypeHS* selfType = GDALMDArrayGetDataType(self);
+    const size_t typeClass = GDALExtendedDataTypeGetClass(selfType);
+    GDALExtendedDataTypeRelease(selfType);
+
+    if( typeClass != GEDTC_STRING )
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg, "Data type is not string");
+        return CE_Failure;
+    }
+    return GDALMDArraySetRawNoDataValue(self, &nodata) ? CE_None : CE_Failure;
   }
 
 #if defined(SWIGPYTHON)
@@ -979,6 +1019,11 @@ public:
 %clear (int nDimensions, GDALDimensionHS **dimensions);
 %clear OSRSpatialReferenceShadow**;
 #endif
+
+  bool Cache( char** options = NULL )
+  {
+      return GDALMDArrayCache(self, options);
+  }
 
 } /* extend */
 }; /* GDALMDArrayH */
@@ -1290,6 +1335,10 @@ public:
   size_t GetMaxStringLength()
   {
     return GDALExtendedDataTypeGetMaxStringLength(self);
+  }
+
+  GDALExtendedDataTypeSubType GetSubType() {
+    return GDALExtendedDataTypeGetSubType(self);
   }
 
 #if defined(SWIGPYTHON)

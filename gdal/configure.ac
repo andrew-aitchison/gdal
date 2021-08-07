@@ -1689,6 +1689,77 @@ fi
 
 AC_SUBST(ZSTD_SETTING,$ZSTD_SETTING)
 
+
+dnl ---------------------------------------------------------------------------
+dnl Check if blosc is available.
+dnl ---------------------------------------------------------------------------
+
+AC_ARG_WITH(blosc,[  --with-blosc[=ARG]       Include blosc support (ARG=yes/no/installation_prefix)],,)
+
+if test "$with_blosc" = "" -o "$with_blosc" = "yes" ; then
+  AC_CHECK_LIB(blosc,blosc_cbuffer_validate,HAVE_BLOSC=yes,HAVE_BLOSC=no,)
+
+  if test "$HAVE_BLOSC" = "yes" ; then
+    LIBS="-lblosc $LIBS"
+  else
+    if test "$with_blosc" = "yes" ; then
+      AC_MSG_ERROR([libblosc not found])
+    else
+      echo "libblosc not found - BLOSC support disabled"
+    fi
+  fi
+elif test "$with_blosc" != "" -a "$with_blosc" != "no"; then
+
+  AC_CHECK_LIB(blosc,blosc_cbuffer_validate,HAVE_BLOSC=yes,HAVE_BLOSC=no,-L$with_blosc/lib)
+
+  if test "$HAVE_BLOSC" = "yes" -a -f "$with_blosc/include/blosc.h" ; then
+    LIBS="-L$with_blosc/lib -lblosc $LIBS"
+    EXTRA_INCLUDES="-I$with_blosc/include $EXTRA_INCLUDES"
+  else
+    AC_MSG_ERROR([libblosc not found])
+  fi
+
+else
+    HAVE_BLOSC=no
+fi
+
+AC_SUBST(HAVE_BLOSC,$HAVE_BLOSC)
+
+dnl ---------------------------------------------------------------------------
+dnl Check if lz4 is available.
+dnl ---------------------------------------------------------------------------
+
+AC_ARG_WITH(lz4,[  --with-lz4[=ARG]       Include lz4 support (ARG=yes/no/installation_prefix)],,)
+
+if test "$with_lz4" = "" -o "$with_lz4" = "yes" ; then
+  AC_CHECK_LIB(lz4,LZ4_decompress_safe,HAVE_LZ4=yes,HAVE_LZ4=no,)
+
+  if test "$HAVE_LZ4" = "yes" ; then
+    LIBS="-llz4 $LIBS"
+  else
+    if test "$with_lz4" = "yes" ; then
+      AC_MSG_ERROR([liblz4 not found])
+    else
+      echo "liblz4 not found - LZ4 support disabled"
+    fi
+  fi
+elif test "$with_lz4" != "" -a "$with_lz4" != "no"; then
+
+  AC_CHECK_LIB(lz4,LZ4_decompress_safe,HAVE_LZ4=yes,HAVE_LZ4=no,-L$with_lz4/lib)
+
+  if test "$HAVE_LZ4" = "yes" -a -f "$with_lz4/include/lz4.h" ; then
+    LIBS="-L$with_lz4/lib -llz4 $LIBS"
+    EXTRA_INCLUDES="-I$with_lz4/include $EXTRA_INCLUDES"
+  else
+    AC_MSG_ERROR([liblz4 not found])
+  fi
+
+else
+    HAVE_LZ4=no
+fi
+
+AC_SUBST(HAVE_LZ4,$HAVE_LZ4)
+
 dnl ---------------------------------------------------------------------------
 dnl Set up drivers and formats
 dnl ---------------------------------------------------------------------------
@@ -1699,7 +1770,7 @@ OGRFORMATS_ENABLED=
 OGRFORMATS_ENABLED_CFLAGS=
 OGRFORMATS_DISABLED=
 
-AC_DEFUN([INTERNAL_FORMATS],[aaigrid adrg aigrid airsar arg blx bmp bsb cals ceos ceos2 coasp cosar ctg dimap dted elas envisat ers esric fit gff gsg gxf hf2 idrisi ilwis ingr iris iso8211 jaxapalsar jdem kmlsuperoverlay l1b leveller map mrf msgn ngsgeoid nitf northwood pds prf r raw rmf rs2 safe saga sdts sentinel2 sgi sigdem srtmhgt stacta terragen tga til tsx usgsdem xpm xyz zmap])
+AC_DEFUN([INTERNAL_FORMATS],[aaigrid adrg aigrid airsar arg blx bmp bsb cals ceos ceos2 coasp cosar ctg dimap dted elas envisat ers esric fit gff gsg gxf hf2 idrisi ilwis ingr iris iso8211 jaxapalsar jdem kmlsuperoverlay l1b leveller map mrf msgn ngsgeoid nitf northwood pds prf r raw rmf rs2 safe saga sdts sentinel2 sgi sigdem srtmhgt stacit stacta terragen tga til tsx usgsdem xpm xyz zarr zmap])
 AC_DEFUN([INTERNAL_OPT_FORMATS],[grib ozi pdf rik])
 AC_DEFUN([INTERNAL_DRIVERS],[arcgen avc cad csv dgn dxf edigeo flatgeobuf geoconcept georss gml gmt gpsbabel gpx gtm jml mapml mvt ntf openfilegdb pgdump rec s57 selafin shape svg sxf tiger vdv wasp])dnl
 AC_DEFUN([CURL_FORMATS],[eeda plmosaic rda wcs wms wmts daas ogcapi])dnl
@@ -2454,7 +2525,7 @@ AC_SUBST(HAVE_CHARLS,$HAVE_CHARLS)
 AC_SUBST(CHARLS_INC,$CHARLS_INC)
 
 dnl ---------------------------------------------------------------------------
-dnl Check for BSB in the local tree.
+dnl Check for JPEG 12 bit
 dnl ---------------------------------------------------------------------------
 
 AC_ARG_WITH([jpeg12],
@@ -2467,34 +2538,19 @@ if test "$with_jpeg12" =  no ; then
     JPEG12_ENABLED=no
     AC_MSG_RESULT([disabled by user])
 
-elif test "$JPEG_SETTING" = "internal" -a "$TIFF_SETTING" = "internal" ; then
+elif test "$JPEG_SETTING" = "no" -a "$with_jpeg12" = ""; then
+    JPEG12_ENABLED=no
+    AC_MSG_RESULT([disabled, JPEG disabled])
+
+elif test "$TIFF_SETTING" = "internal" ; then
     AC_MSG_RESULT([enabled])
     JPEG12_ENABLED=yes
     TIFF_JPEG12_ENABLED=yes
 
-elif test "$with_jpeg12" = yes ; then
+else
     AC_MSG_RESULT([enabled])
     JPEG12_ENABLED=yes
 
-    echo '#include <stdlib.h>' > check_jpeg_abi.c
-    echo '#include <stdio.h>' >> check_jpeg_abi.c
-    echo '#include "jpeglib.h"' >> check_jpeg_abi.c
-    echo '#if JPEG_LIB_VERSION == 62' >> check_jpeg_abi.c
-    echo 'int main() { return 0; }' >> check_jpeg_abi.c
-    echo '#else' >> check_jpeg_abi.c
-    echo '#error "ABI difference"' >> check_jpeg_abi.c
-    echo '#endif' >> check_jpeg_abi.c
-    if test -z "`${CC} ${CFLAGS} ${EXTRA_INCLUDES} check_jpeg_abi.c -c -o check_jpeg_abi.o 2>&1`" ; then
-      TIFF_JPEG12_ENABLED=yes
-    else
-      TIFF_JPEG12_ENABLED=no
-      AC_MSG_WARN([Internal libjpeg12 has not the same ABI as libjpeg 8 bit. Disabling JPEG-in-TIFF 12 bit])
-    fi
-    rm -f check_jpeg_abi.*
-
-else
-    JPEG12_ENABLED=no
-    AC_MSG_RESULT([disabled, libjpeg or libtiff not internal])
 fi
 
 AC_SUBST(JPEG12_ENABLED,$JPEG12_ENABLED)
@@ -3022,9 +3078,9 @@ elif test "$with_hdf5" = "yes" -o "$with_hdf5" = "" ; then
     fi
 
     dnl Some Linux distros install hdf include files here.
-    if test "$HAVE_HDF5" = "yes" -a -r /usr/include/hdf5.h ; then
-        HDF5_INCLUDE="-I/usr/include"
-    fi
+    dnl if test "$HAVE_HDF5" = "yes" -a -r /usr/include/hdf5.h ; then
+    dnl    HDF5_INCLUDE="-I/usr/include"
+    dnl fi
   fi
 
 else
@@ -4917,7 +4973,7 @@ if test "$with_podofo" != "no" -a "$with_podofo" != ""; then
       [  --with-podofo-lib=ARG   podofo Link Flags (i.e. -L/xxx -lpodofo ...). Mainly for static libpodofo],,,)
 
     if test "$with_podofo" = "yes" ; then
-        TEST_PODOFO_INC="-I/usr/include -I/usr/include/podofo"
+        TEST_PODOFO_INC="-I/usr/include/podofo"
         PODOFO_LIB="-lpodofo"
     else
         TEST_PODOFO_INC="-I$with_podofo/include -I$with_podofo/include/podofo"
@@ -5013,7 +5069,7 @@ if test "$with_pdfium" != "no" -a "$with_pdfium" != ""; then
         PDFIUM_LIB="-L$with_pdfium/lib -lpdfium"
     fi
 
-    PDFIUM_LIB="$PDFIUM_LIB -ljpeg -lpng -lz -llcms2 -lpthread -lm -lstdc++"
+    PDFIUM_LIB="$PDFIUM_LIB -lopenjp2 -ljpeg -lpng -lz -llcms2 -lpthread -lm -lstdc++"
 
     if test ! -z "`uname | grep Darwin`" ; then
         PDFIUM_LIB="-stdlib=libstdc++ $PDFIUM_LIB"
@@ -5041,7 +5097,7 @@ if test "$with_pdfium" != "no" -a "$with_pdfium" != ""; then
     rm -f testpdfium
 
     if test "$HAVE_PDFIUM" = "no" -a "$with_pdfium" != ""; then
-        AC_MSG_ERROR([pdfium requested but not found. Must come from https://github.com/rouault/pdfium_build_gdal_3_2])
+        AC_MSG_ERROR([pdfium requested but not found. Must come from https://github.com/rouault/pdfium_build_gdal_3_4])
     fi
 else
     AC_MSG_RESULT([disabled])
@@ -5594,6 +5650,22 @@ AC_SUBST(RASDAMAN_ENABLED,$RASDAMAN_ENABLED)
 AC_SUBST(RASDAMAN_INC,    $RASDAMAN_INC)
 AC_SUBST(RASDAMAN_LIB,    $RASDAMAN_LIB)
 
+
+dnl ---------------------------------------------------------------------------
+dnl brunsli support
+dnl ---------------------------------------------------------------------------
+
+AC_ARG_WITH(brunsli,[  --with-brunsli    Include brunsli support via libbrunsli library],,)
+
+BRUNSLI_ENABLED=no
+
+if test "$with_brunsli" != "" -a "$with_brunsli" != "no" ; then
+  BRUNSLI_ENABLED="yes"
+  AC_SUBST(BRUNSLI_ENABLED, $BRUNSLI_ENABLED)
+  AC_SUBST(BRUNSLI_INCLUDE, -I$prefix/include)
+  AC_SUBST(BRUNSLI_LIB, "-lbrunslicommon -lbrunslienc -lbrunslidec -lbrotlicommon -lbrotlienc -lbrotlidec")
+fi
+
 dnl ---------------------------------------------------------------------------
 dnl RDB support
 dnl ---------------------------------------------------------------------------
@@ -6059,6 +6131,7 @@ LOC_MSG()
 LOC_MSG([  LIBTOOL support:           ${with_libtool}])
 LOC_MSG()
 LOC_MSG([  Armadillo support:         ${HAVE_ARMADILLO}])
+LOC_MSG([  Blosc support:             ${HAVE_BLOSC}])
 LOC_MSG([  CFITSIO support:           ${FITS_SETTING}])
 LOC_MSG([  crypto/openssl support:    ${HAVE_OPENSSL_CRYPTO}])
 LOC_MSG([  cryptopp support:          ${HAVE_CRYPTOPP}])
@@ -6093,6 +6166,7 @@ LOC_MSG([  JPEG-Lossless/CharLS:      ${HAVE_CHARLS}])
 LOC_MSG([  Kakadu support:            ${HAVE_KAKADU}])
 LOC_MSG([  Kea support:               ${HAVE_KEA}])
 LOC_MSG([  LERC support:              ${HAVE_LERC}])
+LOC_MSG([  libbrunsli support:        ${BRUNSLI_ENABLED}])
 LOC_MSG([  libdeflate support:        ${LIBDEFLATE_SETTING}])
 LOC_MSG([  LIBGEOTIFF support:        ${GEOTIFF_SETTING}])
 LOC_MSG([  LIBGIF support:            ${GIF_SETTING}])
@@ -6102,6 +6176,7 @@ LOC_MSG([  LIBPNG support:            ${PNG_SETTING}])
 LOC_MSG([  LIBTIFF support:           ${TIFF_SETTING} (BigTIFF=${HAVE_BIGTIFF})])
 LOC_MSG([  libxml2 support:           ${HAVE_LIBXML2}])
 LOC_MSG([  LIBZ support:              ${LIBZ_SETTING}])
+LOC_MSG([  LZ4 support:               ${HAVE_LZ4}])
 LOC_MSG([  MDB support:               ${MDB_ENABLED}])
 LOC_MSG([  MongoCXX v3 support:       ${MONGOCXXV3_ENABLED}])
 LOC_MSG([  MongoDB support:           ${MONGODB_ENABLED}])

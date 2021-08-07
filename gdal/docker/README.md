@@ -7,7 +7,7 @@ Each directory contains a `./build.sh` for convenient building of the image.
 Note: the mention of the overall licensing terms of the GDAL build is to the
 best of our knowledge and not guaranteed. Users should check by themselves.
 
-# Alpine based (3.13)
+# Alpine based (3.14)
 
 ## Ultra small: `osgeo/gdal:alpine-ultrasmall-latest`
 
@@ -42,7 +42,7 @@ See [alpine-small/Dockerfile](alpine-small/Dockerfile)
 * Using internal libtiff and libgeotiff
 * External libraries enabled: small + libgeos, libhdf5, libhdf5, libkea, libnetcdf, libfreexl,
   libspatialite, libxml2, libpoppler, openexr, libheif, libdeflate
-* GDAL Python (Python 3.8)
+* GDAL Python (Python 3.9)
 * Base PROJ grid package
 * Overall licensing terms of the GDAL build: copy-left (GPL) + LGPL + permissive
 
@@ -93,12 +93,12 @@ docker run --rm -v /home:/home osgeo/gdal:alpine-small-latest gdalinfo $PWD/my.t
 
 # Images of releases
 
-Tagged images of recent past releases are available. The last ones (at time of writing) are for GDAL 3.2.2 and PROJ 8.0.0:
-* osgeo/alpine-ultrasmall-3.2.2
-* osgeo/alpine-small-3.2.2
-* osgeo/alpine-normal-3.2.2
-* osgeo/ubuntu-small-3.2.2
-* osgeo/ubuntu-full-3.2.2
+Tagged images of recent past releases are available. The last ones (at time of writing) are for GDAL 3.3.1 and PROJ 8.1.0, for linux/amd64 and linux/arm64:
+* osgeo/gdal:alpine-ultrasmall-3.3.1
+* osgeo/gdal:alpine-small-3.3.1
+* osgeo/gdal:alpine-normal-3.3.1
+* osgeo/gdal:ubuntu-small-3.3.1
+* osgeo/gdal:ubuntu-full-3.3.1
 
 ## Multi-arch Images
 
