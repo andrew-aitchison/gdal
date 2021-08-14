@@ -822,6 +822,20 @@ def test_mem_md_group_attribute_single_string():
     assert attr.Read() == 'bar'
 
 
+def test_mem_md_group_attribute_string_json():
+
+    drv = gdal.GetDriverByName('MEM')
+    ds = drv.CreateMultiDimensional('myds')
+    rg = ds.GetRootGroup()
+
+    attr = rg.CreateAttribute('attr', [], gdal.ExtendedDataType.CreateString(0, gdal.GEDTST_JSON))
+    assert attr
+    assert attr.GetDataType().GetSubType() == gdal.GEDTST_JSON
+    assert attr.Read() is None
+    assert attr.Write({"foo":"bar"}) == gdal.CE_None
+    assert attr.Read() == {"foo" : "bar"}
+
+
 def test_mem_md_group_attribute_multiple_string():
 
     drv = gdal.GetDriverByName('MEM')
@@ -1845,17 +1859,17 @@ def test_mem_md_array_statistics():
     data = struct.pack('d' * 6, 1, 2, 3, 4, 5, 6)
     ar.Write(data)
 
-    stats = ar.ComputeStatistics(None, False)
+    stats = ar.ComputeStatistics(False)
     assert stats.min == 1.0
     assert stats.max == 5.0
     assert stats.mean == 3.0
     assert stats.std_dev == pytest.approx(1.4142135623730951)
     assert stats.valid_count == 5
 
-    stats = ar.GetStatistics(None, False, False)
+    stats = ar.GetStatistics(False, False)
     assert stats is None
 
-    stats = ar.GetStatistics(None, False, True)
+    stats = ar.GetStatistics(False, True)
     assert stats is not None
     assert stats.min == 1.0
     assert stats.max == 5.0
@@ -1877,7 +1891,7 @@ def test_mem_md_array_statistics_float32():
     data = struct.pack('f' * 6, 1, 2, 3, 4, 5, 6)
     ar.Write(data)
 
-    stats = ar.ComputeStatistics(None, False)
+    stats = ar.ComputeStatistics(False)
     assert stats.min == 1.0
     assert stats.max == 5.0
     assert stats.mean == 3.0
