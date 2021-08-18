@@ -1,11 +1,12 @@
 /******************************************************************************
+ * $Id$
  *
- * Project:  GDAL
- * Purpose:  Fuzzer
- * Author:   Even Rouault, even.rouault at spatialys.com
+ * Project:  OpenGIS Simple Features Reference Implementation
+ * Purpose:  Creation of a SQLite3 VFS
+ * Author:   Even Rouault <even dot rouault at spatialys.com>
  *
  ******************************************************************************
- * Copyright (c) 2017, Even Rouault <even.rouault at spatialys.com>
+ * Copyright (c) 2021, Even Rouault <even dot rouault at spatialys.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -26,29 +27,15 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-#include <stddef.h>
-#include <stdint.h>
+#ifndef OGR_SQLITE_VFS_H_INCLUDED
+#define OGR_SQLITE_VFS_H_INCLUDED
 
-#include "ogr_api.h"
-#include "cpl_error.h"
-#include "ogrsqlitebase.h"
+#include "cpl_vsi.h"
 
-extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv);
+#include <sqlite3.h>
 
-int LLVMFuzzerInitialize(int* /*argc*/, char*** /*argv*/)
-{
-    return 0;
-}
+typedef void (*pfnNotifyFileOpenedType)(void* pfnUserData, const char* pszFilename, VSILFILE* fp);
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len);
+sqlite3_vfs* OGRSQLiteCreateVFS(pfnNotifyFileOpenedType pfn, void* pfnUserData);
 
-int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len)
-{
-    OGRGeometry* poGeom = nullptr;
-    CPLPushErrorHandler(CPLQuietErrorHandler);
-    OGRSQLiteImportSpatiaLiteGeometry(
-        const_cast<unsigned char*>(buf), static_cast<int>(len), &poGeom );
-    CPLPopErrorHandler();
-    delete poGeom;
-    return 0;
-}
+#endif // OGR_SQLITE_VFS_H_INCLUDED
