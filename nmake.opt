@@ -690,6 +690,9 @@ INGRES_LIB = "$(INGRES_HOME)\lib\iilibapi.lib" \
 # Comment out to disable GRIB support.
 GRIB_SETTING=yes
 
+# Comment out to disable VRC support.
+VRC_SETTING=yes
+
 # Uncomment the following to enable NetCDF format.
 #NETCDF_PLUGIN = NO
 #NETCDF_SETTING=yes

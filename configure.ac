@@ -1759,7 +1759,7 @@ OGRFORMATS_ENABLED_CFLAGS=
 OGRFORMATS_DISABLED=
 
 AC_DEFUN([INTERNAL_FORMATS],[aaigrid adrg aigrid airsar arg blx bmp bsb cals ceos ceos2 coasp cosar ctg dimap dted elas envisat ers esric fit gff gsg gxf hf2 idrisi ilwis ingr iris iso8211 jaxapalsar jdem kmlsuperoverlay l1b leveller map mrf msgn ngsgeoid nitf northwood pds prf r raw rmf rs2 safe saga sdts sentinel2 sgi sigdem srtmhgt stacit stacta terragen tga til tsx usgsdem xpm xyz zarr zmap])
-AC_DEFUN([INTERNAL_OPT_FORMATS],[grib ozi pdf rik])
+AC_DEFUN([INTERNAL_OPT_FORMATS],[grib ozi pdf rik vrc])
 AC_DEFUN([INTERNAL_DRIVERS],[arcgen avc cad csv dgn dxf edigeo flatgeobuf geoconcept georss gml gmt gpsbabel gpx gtm jml mapml mvt ntf openfilegdb pgdump rec s57 selafin shape svg sxf tiger vdv wasp])dnl
 AC_DEFUN([CURL_FORMATS],[eeda plmosaic wcs wms wmts daas ogcapi])dnl
 AC_DEFUN([CURL_DRIVERS],[amigocloud carto cloudant couchdb csw elastic ngw plscenes wfs])dnl
@@ -2259,6 +2259,10 @@ if test "$PNG_SETTING" != "no" ; then
   OPT_GDAL_FORMATS="png $OPT_GDAL_FORMATS"
   if test "x$INTERNAL_FORMAT_grib_ENABLED" = "xyes"; then
   	GDALFORMATS_ENABLED="$GDALFORMATS_ENABLED grib"
+  fi
+
+  if test "x$INTERNAL_FORMAT_vrc_ENABLED" = "xyes"; then
+  	GDALFORMATS_ENABLED="$GDALFORMATS_ENABLED vrc"
   fi
 fi
 
