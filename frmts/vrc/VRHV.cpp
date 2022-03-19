@@ -154,7 +154,7 @@ char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
       VSIFree(pszNewString);
       CPLError(CE_Failure, CPLE_AppDefined,
                "problem reading string\n");
-      return nullptr;     
+      return nullptr;
     }
 
     pszNewString[string_length] = 0;
@@ -217,6 +217,8 @@ VRHRasterBand::VRHRasterBand(
                              VRHVDataset *poDSIn,
                              int nBandIn,
                              int iOverviewIn )
+    :
+    pVRHVData(nullptr)
 {
     this->poDS = poDSIn;
     (void)iOverviewIn;
@@ -235,8 +237,6 @@ VRHRasterBand::VRHRasterBand(
 
     CPLDebug("ViewrangerHV", "eBandInterp x%08x, (Blue=x%08x)",
              eBandInterp, GCI_BlueBand);
-
-    pVRHVData = nullptr;
 
     if (poDSIn->nMagic == vrh_magic) {
         eDataType = GDT_Int16;
@@ -631,6 +631,9 @@ int VRHVDataset::Identify( GDALOpenInfo * poOpenInfo )
 GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 
 {
+    if (nullptr==poOpenInfo)
+        return nullptr;
+
     if (!Identify(poOpenInfo))
         return nullptr;
 
@@ -927,15 +930,16 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 /*      Create band information objects.                                */
 /* -------------------------------------------------------------------- */
     auto *poBand = new VRHRasterBand( poDS, 1, 01);
-    poDS->SetBand( 1, poBand);
-    if (poDS->nMagic == vrh_magic) {
-        poBand->SetNoDataValue( nVRHNoData );
-    } else if (poDS->nMagic == vrv_magic) {
-        poBand->SetNoDataValue( nVRVNoData );
-    } else {
-        poBand->SetNoDataValue( nVRNoData );
+    if (nullptr!=poBand) {
+        poDS->SetBand( 1, poBand);
+        if (poDS->nMagic == vrh_magic) {
+            poBand->SetNoDataValue( nVRHNoData );
+        } else if (poDS->nMagic == vrv_magic) {
+            poBand->SetNoDataValue( nVRVNoData );
+        } else {
+            poBand->SetNoDataValue( nVRNoData );
+        }
     }
-
 
     poDS->SetDescription( poOpenInfo->pszFilename );
 
