@@ -2942,15 +2942,16 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
     anPngIndex.reserve(static_cast<size_t>(nPNGXcount)*nPNGYcount +1 );
     for (unsigned long loop=0;
          loop <= static_cast<unsigned long>(nPNGXcount)*nPNGYcount;
+         // <= because there is an extra entry
+         //    pointing just passed the last png sub-tile.
          loop++) {
-        // <= because there is an extra entry
-        //    pointing just passed the last png sub-tile.
-        anPngIndex[loop] = VRReadUInt(fp);
-        if (anPngIndex[loop] > static_cast<VRCDataset *>(poDS)->oStatBufL.st_size) {
+        // was anPngIndex[loop] = VRReadUInt(fp);
+        anPngIndex.push_back(VRReadUInt(fp));
+        if (anPngIndex.back() > static_cast<VRCDataset *>(poDS)->oStatBufL.st_size) {
             CPLDebug("Viewranger",
                      "Band %d ovrvw %d block [%d,%d] png image %lu at x%x is beyond EOF - is file truncated ?",
-                     nBand, nThisOverview, block_xx, block_yy, loop, anPngIndex[loop] );
-            anPngIndex[loop] = 0;
+                     nBand, nThisOverview, block_xx, block_yy, loop, anPngIndex.back() );
+            anPngIndex.back() = 0;
         }
     }
 

@@ -9,24 +9,20 @@ add_gdal_driver(
           VRC.h
           VRCutils.cpp
           PLUGIN_CAPABLE_IF
-          "NOT GDAL_USE_LIBPNG_INTERNAL;NOT GDAL_USE_LIBZ_INTERNAL")
+          "NOT GDAL_USE_PNG_INTERNAL;NOT GDAL_USE_ZLIB_INTERNAL")
 
 gdal_standard_includes(gdal_VRC)
 
-target_compile_definitions(gdal_VRC PRIVATE -DHAVE_LIBZ -DZIP_SUPPORT)
+target_compile_definitions(gdal_VRC PRIVATE -DHAVE_ZLIB -DZIP_SUPPORT)
 
-if (GDAL_USE_LIBPNG_INTERNAL)
+if (GDAL_USE_PNG_INTERNAL)
   gdal_add_vendored_lib(gdal_PNG libpng)
 else ()
   gdal_target_link_libraries(gdal_VRC PRIVATE PNG::PNG)
 endif ()
 
-if (GDAL_USE_LIBZ_INTERNAL)
+if (GDAL_USE_ZLIB_INTERNAL)
   gdal_add_vendored_lib(gdal_PNG libz)
 else ()
-  target_compile_definitions(gdal_VRC PRIVATE -DHAVE_ZLIB_H -DHAVE_ZLIB)
   gdal_target_link_libraries(gdal_VRC PRIVATE ZLIB::ZLIB)
-  if (MSVC)
-    target_compile_definitions(gdal_VRC PRIVATE -DZLIB_DLL)
-  endif ()
 endif ()
