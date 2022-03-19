@@ -18,6 +18,9 @@ LD_SHARED		= $(LD) -shared
 
 ifeq ($(PNG_SETTING),internal)
 EXTRAFLAGS      :=      $(EXTRAFLAGS) -I../png/libpng -DUSE_PNG
+ifeq ($(RENAME_INTERNAL_PNG_SYMBOLS),yes)
+EXTRAFLAGS      :=      $(EXTRAFLAGS) -DRENAME_INTERNAL_PNG_SYMBOLS
+endif
 ifeq ($(LIBZ_SETTING),internal)
 EXTRAFLAGS      :=      $(EXTRAFLAGS) -I../zlib
 endif
