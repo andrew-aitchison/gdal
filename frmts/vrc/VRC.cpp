@@ -51,7 +51,7 @@ void VRC_file_strerror_r(int nFileErr, char* const buf, size_t buflen)
 
     STRERR_DEBUG("Viewranger",
                  "%s", VSIStrerror(nFileErr));
-    snprintf(buf, buflen, "%s", VSIStrerror(nFileErr));
+    (void)snprintf(buf, buflen, "%s", VSIStrerror(nFileErr));
 #undef STRERR_DEBUG
 } // VRC_file_strerror_r()
 
@@ -699,9 +699,9 @@ CPLErr VRCDataset::GetGeoTransform( double * padfTransform )
 
     if (nCountry == 17) {
         // This may not be correct
-        // USA, Discovery (Spain) and some Belgium (VRH height) maps have coordinate unit of
+        // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps have coordinate unit of
         //   1 degree/ten million
-        CPLDebug("Viewranger", "country/srs 17 USA?Belgium?Discovery(Spain) grid is unknown. Current guess is unlikely to be correct.");
+        CPLDebug("Viewranger", "country/srs 17 USA?Discovery(Spain, Greece)?Belgium grid is unknown. Current guess is unlikely to be correct.");
         const double nineMillion = 9.0 * 1000 * 1000;
         dLeft   /= nineMillion;
         dRight  /= nineMillion;
@@ -1049,6 +1049,8 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     // https://github.com/OSGeo/gdal/pull/4092
     // auto *poDS = std::unique_ptr<VRCDataset>(new VRCDataset());
     auto* poDS = new VRCDataset();
+    // std::unique_ptr<VRCDataset> poDS(new VRCDataset());
+
     if( poDS == nullptr ) {
         return nullptr;
     }
@@ -1417,11 +1419,12 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
             // but without the division and floating-point equality test.
             // Appease cppcheck.
             // It ignores CPLDebug then deduces that dfheight2 is not used.
-            double dfheight2 =
-                (anCorners[3]-anCorners[1]) / poDS->dfPixelMetres;
+            // double dfheight2 =
+            //    (anCorners[3]-anCorners[1]) / poDS->dfPixelMetres;
             CPLDebug("Viewranger",
                      "height either %d %g or %g pixels",
-                     poDS->nRasterYSize, dfHeightPix, dfheight2
+                     poDS->nRasterYSize, dfHeightPix,
+                     (anCorners[3]-anCorners[1]) / poDS->dfPixelMetres // dfheight2
                      );
         }
 
@@ -1546,8 +1549,9 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     // Until we support overviews, large files are very slow.
     // This environment variable allows users to skip them.
     int fSlowFile=FALSE;
-    if (getenv("VRC_MAX_SIZE")!=nullptr) {
-        long long nMaxSize = strtoll(getenv("VRC_MAX_SIZE"),nullptr,10);
+    char* szVRCmaxSize=getenv("VRC_MAX_SIZE");
+    if (szVRCmaxSize!=nullptr) {
+        long long nMaxSize = strtoll(szVRCmaxSize,nullptr,10);
         // Should support KMGTP... suffixes.
         if (nMaxSize > poDS->oStatBufL.st_size) {
             fSlowFile=TRUE;
@@ -2035,11 +2039,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     std::vector<unsigned char*> apc_row_pointers;
     apc_row_pointers.reserve(static_cast<size_t>(nPNGheight));
     for (unsigned int ii=0; ii<nPNGheight; ii++) {
-        // clag-tidy readability-simplify-subscript-expr objects to
-        apc_row_pointers.data()[ii] = 
-        // but g++ -Werror,-Wsign-conversion objects to
-        // apc_row_pointers[ii] = static_cast<unsigned char*>
-            (&((static_cast<GByte*>(pbyPNGbuffer))[3L*nPNGwidth*ii]));
+        apc_row_pointers.push_back(
+                            &(pbyPNGbuffer[3L*nPNGwidth*ii]) );
     }
     png_set_rows(png_ptr, info_ptr, apc_row_pointers.data());
 
@@ -2322,9 +2323,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         }
     }
 
-    if (getenv("VRC_DUMP_PNG")) {
+    char* szDumpPNG=getenv("VRC_DUMP_PNG");
+    if (szDumpPNG!=nullptr) {
         auto nEnvPNGDump = static_cast<unsigned int>
-            (strtol(getenv("VRC_DUMP_PNG"),nullptr,10));
+            (strtol(szDumpPNG,nullptr,10));
         CPLString osBaseLabel
             = CPLString().
             Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03d.%03d.%02u.x%012x",
@@ -3030,9 +3032,9 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                     CPLDebug("Viewranger",
                              "read_PNG() returned %p: %d x %d tile",
                              pbyPNGbuffer, nPNGwidth, nPNGheight);
-                    if (getenv("VRC_DUMP_TILE")) {
+                    if (char*szDumpTile= getenv("VRC_DUMP_TILE")) {
                         auto nEnvTile = static_cast<unsigned int>
-                            (strtol(getenv("VRC_DUMP_TILE"),nullptr,10));
+                            (strtol(szDumpTile,nullptr,10));
                         // Dump pbyPNGbuffer as .ppm, one for each band, they should be full-colour and the same.
                         CPLString osBaseLabel = CPLString().Printf
                             ("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03d.%03d.%02ua.x%012x.rvtm_pngsize",
@@ -3181,9 +3183,9 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         nLeftCol=nRightCol;
     } // for (loopX
 
-    if (getenv("VRC_DUMP_TILE")) {
+    if (char*szDumpTile=getenv("VRC_DUMP_TILE")) {
         auto nPPMcount = static_cast<unsigned int>
-            (strtol(getenv("VRC_DUMP_TILE"),nullptr,10));
+            (strtol(szDumpTile,nullptr,10));
         // Dump VRC tile as .pgm, one for each band, they will be monochrome.
         CPLString osBaseLabel
             = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%02u.x%012x.rvtm_blocksize",

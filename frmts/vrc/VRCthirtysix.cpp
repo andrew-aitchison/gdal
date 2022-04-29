@@ -46,6 +46,9 @@ void VRCRasterBand::read_VRC_Tile_36( VSILFILE *fp,
                                 void *pImage)
 {
     auto *poGDS = dynamic_cast<VRCDataset *>(poDS);
+    if(poGDS==nullptr) {
+        return;
+    }
     if (block_xx < 0 || block_xx >= nRasterXSize ) {
         CPLError( CE_Failure, CPLE_NotSupported,
                   "read_VRC_Tile_36 invalid row %d", block_xx );
@@ -499,8 +502,9 @@ void VRCRasterBand::read_VRC_Tile_36( VSILFILE *fp,
         } // for loopY
     } // for loopX
 
-    if (getenv("VRC_DUMP_TILE") && 1==nBand) {
-        long nDumpCount = strtol(getenv("VRC_DUMP_TILE"),nullptr,10);
+    char*szDumpTile=getenv("VRC_DUMP_TILE");
+    if (szDumpTile!=nullptr && 1==nBand) {
+        long nDumpCount = strtol(szDumpTile,nullptr,10);
         // Dump first band of VRC tile as a (monochrome) .pgm.
         // The bands are currently all the same.
         CPLString osBaseLabel
