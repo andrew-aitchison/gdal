@@ -83,8 +83,8 @@ extern const char* CharsetFromCountry(int nCountry);
 /************************************************************************/
 
 
-class VRCDataset : public GDALPamDataset
-// class VRCDataset : public GDALDataset
+// class VRCDataset : public GDALPamDataset
+class VRCDataset : public GDALDataset
 {
     friend class VRCRasterBand;
     
@@ -144,8 +144,8 @@ public:
 /* ==================================================================== */
 /************************************************************************/
 
-class VRCRasterBand : public GDALPamRasterBand
-//class VRCRasterBand : public GDALRasterBand
+// class VRCRasterBand : public GDALPamRasterBand
+class VRCRasterBand : public GDALRasterBand
 {
     friend class VRCDataset;
     
