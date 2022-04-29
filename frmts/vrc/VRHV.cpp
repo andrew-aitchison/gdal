@@ -631,10 +631,7 @@ int VRHVDataset::Identify( GDALOpenInfo * poOpenInfo )
 GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 
 {
-    if (nullptr==poOpenInfo)
-        return nullptr;
-
-    if (!Identify(poOpenInfo))
+    if (nullptr==poOpenInfo || !Identify(poOpenInfo))
         return nullptr;
 
     /* Check that the file pointer from GDALOpenInfo* is available */ 
@@ -659,7 +656,10 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 /* -------------------------------------------------------------------- */
     // unsigned int nVRHVersion;
     auto* poDS = new VRHVDataset();
-
+    if (poDS==nullptr) {
+        return nullptr;
+    }
+    
     /* Borrow the file pointer from GDALOpenInfo* */
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
