@@ -2528,7 +2528,7 @@ GDALRasterBand *VRCRasterBand::GetOverview( int iOverviewIn )
     if (poFullBand == nullptr) {
         CPLDebug("VRC",
                  "%p->GetOverview(%d) - dataset %p has no band %d",
-                 this, iOverviewIn,poVRCDS, nBand );
+                 this, iOverviewIn, poVRCDS, nBand );
         return nullptr;
     }
 
@@ -2657,13 +2657,14 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                              int block_xx, int block_yy,
                              void *pImage)
 {
+    auto *const poVRCDS = static_cast<VRCDataset *>(poDS);
 
-    if (block_xx < 0 || block_xx >= static_cast<VRCDataset *>(poDS)->nRasterXSize ) {
+    if (block_xx < 0 || block_xx >= poVRCDS->nRasterXSize ) {
         CPLError(CE_Failure, CPLE_NotSupported,
                   "read_VRC_Tile_Metres invalid row %d", block_xx );
         return ;
     }
-    if (block_yy < 0 || block_yy >= static_cast<VRCDataset *>(poDS)->nRasterYSize ) {
+    if (block_yy < 0 || block_yy >= poVRCDS->nRasterYSize ) {
         CPLError(CE_Failure, CPLE_NotSupported,
                   "read_VRC_Tile_Metres invalid column %d", block_yy );
         return ;
@@ -2673,13 +2674,13 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                   "read_VRC_Tile_Metres passed no image" );
         return ;
     }
-    if (static_cast<VRCDataset *>(poDS)->nMagic != vrc_magic_metres) {
+    if (poVRCDS->nMagic != vrc_magic_metres) {
         // Second "if" will be temporary
         // if we can read "VRC36" file data at the subtile/block level.
-        if (static_cast<VRCDataset *>(poDS)->nMagic != vrc_magic36) {
+        if (poVRCDS->nMagic != vrc_magic36) {
             CPLError(CE_Failure, CPLE_AppDefined,
                       "read_VRC_Tile_Metres called with wrong magic number x%08x",
-                      static_cast<VRCDataset *>(poDS)->nMagic );
+                      poVRCDS->nMagic );
             return ;
         }
     }
@@ -2689,12 +2690,12 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
              );
 
 
-    // int tilenum = static_cast<VRCDataset *>(poDS)->nRasterXSize * block_xx + block_yy;
+    // int tilenum = poVRCDS->nRasterXSize * block_xx + block_yy;
     // int tilenum = nBlockYSize * block_xx + block_yy;
-    // int tilenum = static_cast<VRCDataset *>(poDS)->tileYcount * block_xx + block_yy;
-    int tilenum = static_cast<VRCDataset *>(poDS)->tileXcount * block_yy + block_xx;
+    // int tilenum = poVRCDS->tileYcount * block_xx + block_yy;
+    int tilenum = poVRCDS->tileXcount * block_yy + block_xx;
 
-    unsigned int nTileIndex = static_cast<VRCDataset *>(poDS)->anTileIndex[tilenum];
+    unsigned int nTileIndex = poVRCDS->anTileIndex[tilenum];
     // CPLDebug("Viewranger", "vrcmetres_pixel_is_pixel");
     CPLDebug("Viewranger", "\tblock %d x %d, (%d, %d) tilenum %d tileIndex x%08x",
              nBlockXSize,
@@ -2733,7 +2734,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         return;
     }  // nTileIndex==0 No data for this tile
 
-    if (nTileIndex >= static_cast<VRCDataset *>(poDS)->oStatBufL.st_size) {
+    if (nTileIndex >= poVRCDS->oStatBufL.st_size) {
         // No data for this tile
         CPLDebug("Viewranger",
                  "VRCRasterBand::read_VRC_Tile_Metres(.. %d %d ..) tileIndex %d beyond end of file",
@@ -2751,7 +2752,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
     if (nOverviewCount != 7) {
         CPLDebug("Viewranger OVRV", "read_VRC_Tile_Metres: nOverviewCount is %d - expected seven - MapID %d",
                  nOverviewCount,
-                 static_cast<VRCDataset *>(poDS)->nMapID
+                 poVRCDS->nMapID
                  );
         return;
     }
@@ -2822,7 +2823,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         return;
     }
 
-    if (anTileOverviewIndex[nThisOverview+1] >= static_cast<VRCDataset *>(poDS)->oStatBufL.st_size) {
+    if (anTileOverviewIndex[nThisOverview+1] >= poVRCDS->oStatBufL.st_size) {
         CPLDebug("Viewranger OVRV",
                  "\toverview level %d data at x%08x is beyond end of file",
                  nThisOverview, anTileOverviewIndex[nThisOverview+1] );
@@ -2843,8 +2844,8 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
             return;
         }
 
-        unsigned int nTileMax = static_cast<VRCDataset *>(poDS)->tileSizeMax;
-        unsigned int nTileMin = static_cast<VRCDataset *>(poDS)->tileSizeMin;
+        unsigned int nTileMax = poVRCDS->tileSizeMax;
+        unsigned int nTileMin = poVRCDS->tileSizeMin;
 
         CPLDebug("Viewranger OVRV",
                  "\tblock %d x %d, max %d min %d overview %d",
@@ -2949,7 +2950,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
          loop++) {
         // was anPngIndex[loop] = VRReadUInt(fp);
         anPngIndex.push_back(VRReadUInt(fp));
-        if (anPngIndex.back() > static_cast<VRCDataset *>(poDS)->oStatBufL.st_size) {
+        if (anPngIndex.back() > poVRCDS->oStatBufL.st_size) {
             CPLDebug("Viewranger",
                      "Band %d ovrvw %d block [%d,%d] png image %lu at x%x is beyond EOF - is file truncated ?",
                      nBand, nThisOverview, block_xx, block_yy, loop, anPngIndex.back() );
@@ -3015,7 +3016,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
             }
             //unsigned int nPalette = nPNGplteIndex;
 
-            if ( static_cast<VRCDataset *>(poDS)->nMagic == vrc_magic_metres) {
+            if ( poVRCDS->nMagic == vrc_magic_metres) {
                 unsigned int nPNGwidth=0;
                 unsigned int nPNGheight=0;
 
@@ -3039,7 +3040,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                         CPLString osBaseLabel = CPLString().Printf
                             ("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03d.%03d.%02ua.x%012x.rvtm_pngsize",
                              // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                             static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(),
+                             poVRCDS->sLongTitle.c_str(),
                              nThisOverview, block_xx, block_yy,
                              loopX, loopY,
                              nBand,
@@ -3172,11 +3173,11 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                          block_xx, block_yy
                          );
                 
-            } else if (static_cast<VRCDataset *>(poDS)->nMagic == vrc_magic36) {
+            } else if (poVRCDS->nMagic == vrc_magic36) {
             } else {
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "We should not be here with magic=x%08x",
-                         static_cast<VRCDataset *>(poDS)->nMagic);
+                         poVRCDS->nMagic);
                 return;
             } // if (magic ...)
         } // for (loopY
@@ -3190,7 +3191,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         CPLString osBaseLabel
             = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%02u.x%012x.rvtm_blocksize",
                                  // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                                 static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(),
+                                 poVRCDS->sLongTitle.c_str(),
                                  nThisOverview, block_xx, block_yy,
                                  nBand,
                                  anTileOverviewIndex[nThisOverview+1]
