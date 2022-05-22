@@ -1,0 +1,44 @@
+#
+# ViewRanger files
+#
+0	belong  0x7e1f2e00
+>6 leshort 17  ViewRanger VRC PNG-based file unsupported CRS (US/BE/ES)
+>6 leshort !17 ViewRanger VRC PNG-based file
+# Pay-by-tile files have a 32bit null before the string count ...
+>>18 belong  0
+>>>26  	pstring/l x	   name %s
+# ... most other maps do not have this null32.
+>>18 default x
+>>>22  	pstring/l x	   name %s
+# position and scale after a variable number of pstring/l s
+#
+0	belong  0x3663ce01
+#  (US/BE/ES)
+>6 leshort 17 ViewRanger VRC "type-36" file unsupported CRS (US/BE/ES)
+>6 leshort !17  ViewRanger VRC "type-36" file
+#
+>22 	pstring/l x	   name %s
+#>26	string  x	   name %s
+# position and scale after a variable number of pstring/l s
+#
+# guessing
+0	lelong  0x00227197 ViewRanger VRG Gazetteer
+# guessing
+0	belong  0x4f80c6fa
+>8 leshort 17  ViewRanger VRH height file unsupported CRS (US/BE/ES)
+>8 leshort !17 ViewRanger VRH height file
+# guessing
+0	lelong  0x00000002 ViewRanger VRV
+>8	lelong  x	   \b, %d x
+>12	lelong	x	   \b %d tiles
+>32	lelong	x	   \b scale 1:%d
+#
+>36	pstring/l x	   name %s
+# guessing
+0	lelong  0x00000001 ViewRanger Map Chooser (.vmc) file
+# >8	lelong	x	   \b scale 1:%d/2 ?? can we divide %d by 2 ??
+>8	lelong	x	   \b pixmetres 2:%d
+>16	lelong  x	   \b, %d x
+>20	lelong	x	   \b %d tiles
+>32	lelong	x	   \b scale 2:%d
+#
