@@ -35,7 +35,6 @@
 #define FRMT_viewranger
 #endif
 
-
 #include "gdal_pam.h"
 #include "ogr_spatialref.h"
 //#include "cpl_string.h"
@@ -117,7 +116,7 @@ class VRCDataset : public GDALDataset
     VSIStatBufL oStatBufL;
 
 public:
-    VRCDataset() = default;
+    VRCDataset() = default;  // This does not initialize abyHeader
     ~VRCDataset() override;
 
     static GDALDataset *Open( GDALOpenInfo * );
@@ -229,6 +228,7 @@ public:
     ~VRCRasterBand() override;
     
     virtual GDALColorInterp GetColorInterpretation() override;
+    virtual CPLErr SetColorInterpretation(GDALColorInterp eColorInterp) override;
     virtual GDALColorTable  *GetColorTable() override;
 
     // virtual double GetNoDataValue( int *pbSuccess = NULL );
