@@ -221,8 +221,8 @@ VRHRasterBand::VRHRasterBand(
     pVRHVData(nullptr)
 {
     this->poDS = poDSIn;
-    (void)iOverviewIn;
     this->nBand = nBandIn;
+    (void)iOverviewIn;
     CPLDebug("ViewrangerHV", "VRHRasterBand(%p, %d, %d)",
              static_cast<void*>(poDS), nBand, iOverviewIn);
     
@@ -238,7 +238,8 @@ VRHRasterBand::VRHRasterBand(
     CPLDebug("ViewrangerHV", "eBandInterp x%08x, (Blue=x%08x)",
              eBandInterp, GCI_BlueBand);
 
-    if (poDSIn->nMagic == vrh_magic) {
+    switch (poDSIn->nMagic) {
+    case vrh_magic:
         eDataType = GDT_Int16;
         eBandInterp = GCI_GrayIndex;
 
@@ -248,7 +249,10 @@ VRHRasterBand::VRHRasterBand(
         nBlockXSize = 1;
         nBlockYSize = poDSIn->nRasterYSize;
         nRecordSize = /* nBlockXSize* */ nBlockYSize; // * sizeof(short) ?
-    } else if (poDSIn->nMagic == vrv_magic || poDSIn->nMagic == vmc_magic) {
+
+        break;
+    case vrv_magic:
+    case vmc_magic:
         eDataType = GDT_Byte;
         eBandInterp = GCI_GrayIndex;
         
@@ -267,9 +271,15 @@ VRHRasterBand::VRHRasterBand(
          * in VRHVDataset::Open()
          */
         nRecordSize = nBlockXSize*nBlockYSize;
+
+        break;
+    default:
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Unknown magic number %08x", poDSIn->nMagic);
+        nRecordSize = 0;
+        eBandInterp = GCI_GrayIndex;
+        break;
     }
-    CPLDebug("ViewrangerHV", "eBandInterp x%08x, (Red==x%08x)",
-             eBandInterp, GCI_RedBand);
 } // VRHRasterBand()
 
 /************************************************************************/
@@ -419,7 +429,8 @@ VRHVDataset::VRHVDataset() :
 VRHVDataset::~VRHVDataset()
 
 {
-    FlushCache();
+    GDALDataset::FlushCache(TRUE);
+
     if( fp != nullptr )
         VSIFCloseL( fp );
 
@@ -656,9 +667,6 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 /* -------------------------------------------------------------------- */
     // unsigned int nVRHVersion;
     auto* poDS = new VRHVDataset();
-    if (poDS==nullptr) {
-        return nullptr;
-    }
     
     /* Borrow the file pointer from GDALOpenInfo* */
     poDS->fp = poOpenInfo->fpL;
@@ -742,6 +750,7 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
             if ( seekres ) {
                 CPLError( CE_Failure, CPLE_AppDefined,
                           "cannot seek to VRH column index" );
+                delete(poDS);
                 return nullptr;
             }
             
@@ -752,6 +761,7 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
                 CPLError(CE_Failure, CPLE_OutOfMemory,
                          "Cannot allocate %d bytes of memory for column index",
                          poDS->nRasterXSize);
+                delete(poDS);
                 return nullptr;
             }
             for (int ii=0; ii<poDS->nRasterXSize; ii++) {
@@ -930,15 +940,13 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 /*      Create band information objects.                                */
 /* -------------------------------------------------------------------- */
     auto *poBand = new VRHRasterBand( poDS, 1, 01);
-    if (nullptr!=poBand) {
-        poDS->SetBand( 1, poBand);
-        if (poDS->nMagic == vrh_magic) {
-            poBand->SetNoDataValue( nVRHNoData );
-        } else if (poDS->nMagic == vrv_magic) {
-            poBand->SetNoDataValue( nVRVNoData );
-        } else {
-            poBand->SetNoDataValue( nVRNoData );
-        }
+    poDS->SetBand( 1, poBand);
+    if (poDS->nMagic == vrh_magic) {
+        poBand->SetNoDataValue( nVRHNoData );
+    } else if (poDS->nMagic == vrv_magic) {
+        poBand->SetNoDataValue( nVRVNoData );
+    } else {
+        poBand->SetNoDataValue( nVRNoData );
     }
 
     poDS->SetDescription( poOpenInfo->pszFilename );
@@ -965,12 +973,6 @@ void GDALRegister_VRHV()
     if( GDALGetDriverByName( "ViewrangerVRH/VRV" ) == nullptr )
     {
         auto *poDriver = new GDALDriver();
-        if (poDriver==nullptr) {
-            CPLError( CE_Failure, CPLE_ObjectNull,
-                      "Could not build a driver for ViewrangerHV"
-                     );
-            return;
-        }
 
         poDriver->SetDescription( "ViewrangerVRH/VRV" );
 
