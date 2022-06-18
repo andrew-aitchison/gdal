@@ -363,11 +363,11 @@ void VRCRasterBand::read_VRC_Tile_36( VSILFILE *fp,
     anSubTileIndex.reserve
         (static_cast<size_t>(nRawXcount)*static_cast<size_t>(nRawYcount) +1);
     for (size_t loop=0;
-         loop <= static_cast<size_t>(nRawXcount*nRawYcount);
+         loop <= static_cast<size_t>(nRawXcount)*static_cast<size_t>(nRawYcount);
          loop++) {
-        anSubTileIndex[loop] = VRReadUInt(fp);
+        anSubTileIndex.push_back(VRReadUInt(fp));
         if (anSubTileIndex[loop] >= poGDS->oStatBufL.st_size) {
-            anSubTileIndex[loop] = 0;
+            anSubTileIndex.data()[loop] = 0;
         }
     }
     

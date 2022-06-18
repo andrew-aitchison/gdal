@@ -126,12 +126,6 @@ extern OGRSpatialReference* CRSfromCountry(int nCountry)
 {
     // OGRSpatialReference* poSRS=nullptr;
     auto* poSRS=new OGRSpatialReference();
-    if (poSRS==nullptr) {
-        CPLDebug("Viewranger",
-                 "CRSfromCountry(%d) failed to create a spatial reference",
-                 nCountry);
-        return nullptr;
-    }
 
     OGRErr errImport=OGRERR_NONE;
 
@@ -162,9 +156,7 @@ extern OGRSpatialReference* CRSfromCountry(int nCountry)
         // Spain (Including Discovery Walking Guides)
         break;
     case 132: VRC_EPSG(25832);  break; // Austria/Germany/Denmark 
-    case 133: VRC_EPSG(25833);
-        // Czech Republic / Slovakia, EPSG:25833 tbc may be 32633 or 3045
-        break;
+    case 133: VRC_EPSG(32633);  break; // Czech Republic / Slovakia
     case 155: VRC_EPSG(28355); // not VRC_EPSG(4283);
         // Australia
         // Note that in VRCDataset::GetGeoTransform()
