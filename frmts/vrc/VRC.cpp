@@ -1549,6 +1549,10 @@ void dumpPPM(unsigned int width,
                  "dumpPPM: null osBaseLabel\n");
         return;
     }
+
+    // At least on unix, spaces make filenames harder to work with.
+    osBaseLabel.replaceAll(' ', '_');
+
     if (rowlength==0) {
         rowlength=width;
         CPLDebug("Viewranger PPM",
@@ -1654,6 +1658,12 @@ void dumpPPM(unsigned int width,
                      pszPPMname, nWriteErr, errstr);
         }
 
+        if (0!=VSIFCloseL(fpPPM)) {
+            CPLDebug("Viewranger PPM",
+                     "Failed to close PPM data dump file %s; errno=%d",
+                     pszPPMname, errno
+                     );
+        }
     }
 
     nPPMcount++;
@@ -1687,6 +1697,9 @@ void dumpPNG(
                  "dumpPNG: null osBaseLabel\n");
         return;
     }
+
+    // At least on unix, spaces make filenames harder to work with.
+    osBaseLabel.replaceAll(' ', '_');
 
     CPLString osPPMname =
         CPLString().Printf("%s.%05d.png", osBaseLabel.c_str(), nPNGcount);
@@ -3089,44 +3102,20 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                              );
                     
                 }
-            break;
-        case vrc_magic36:
-            {
-            }
-            break;
-        default:
+                break;
+            case vrc_magic36:
+                {
+                }
+                break;
+            default:
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "We should not be here with magic=x%08x",
                          poVRCDS->nMagic);
                 return;
-        } // switch (poVRCDS->nMagic)
-    } // for (loopY
-    nLeftCol=nRightCol;
-} // for (loopX
-
-    if (char*szDumpTile=getenv("VRC_DUMP_TILE")) {
-        auto nPPMcount = static_cast<unsigned int>
-            (strtol(szDumpTile,nullptr,10));
-        // Dump VRC tile as .pgm, one for each band, they will be monochrome.
-        CPLString osBaseLabel
-            = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%02u.x%012x.rvtm_blocksize",
-                                 // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                                 poVRCDS->sLongTitle.c_str(),
-                                 nThisOverview, block_xx, block_yy,
-                                 nBand,
-                                 anTileOverviewIndex[nThisOverview+1]
-                                 );
-
-        dumpPPM(
-                static_cast<unsigned int>(nBlockXSize),
-                static_cast<unsigned int>(nBlockYSize),
-                static_cast<unsigned char*>(pImage),
-                static_cast<unsigned int>(nBlockXSize),
-                osBaseLabel,
-                band,
-                nPPMcount
-                );
-    }
+            } // switch (poVRCDS->nMagic)
+        } // for (loopY
+        nLeftCol=nRightCol;
+    } // for (loopX
 
 } // VRCRasterBand::read_VRC_Tile_Metres
 
