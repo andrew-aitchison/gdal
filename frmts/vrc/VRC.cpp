@@ -42,6 +42,9 @@
 #include <algorithm>  // for std::max and std::min
 
 
+#include <sys/types.h>
+#include <md5.h>
+
 void VRC_file_strerror_r(int nFileErr, char* const buf, size_t buflen)
 {
     if (buf==nullptr || buflen<1) {
@@ -1673,6 +1676,92 @@ void dumpPPM(unsigned int width,
 } // dumpPPM
 
 static
+void reportPPMmd5sum(
+        unsigned int width,
+        unsigned int height,
+        unsigned char* const data,
+        unsigned int rowlength,
+        CPLString osBaseLabel,
+        VRCinterleave eInterleave
+        )
+{
+    // Is static the best way to count the PPMs ?
+    static unsigned int nPPMcount = 0;
+
+    if (rowlength==0) {
+        rowlength=width;
+        CPLDebug("Viewranger PPM",
+                 "dumpPPM(... %d %s) no rowlength, setting to width = %d",
+                 0, osBaseLabel.c_str(), rowlength);
+    }
+
+    // At least on unix, spaces make filenames harder to work with.
+    osBaseLabel.replaceAll(' ', '_');
+
+    CPLString osPPMname =
+        CPLString().Printf("%s.%05d.%s", osBaseLabel.c_str(), nPPMcount,
+                           (eInterleave==pixel) ? "ppm" : "pgm"
+                           );
+    if (osPPMname==nullptr) {
+        CPLDebug("Viewranger PPM",
+                 "osPPMname truncated %s %d",
+                 osBaseLabel.c_str(), nPPMcount);
+    }
+    char const*pszPPMname = osPPMname.c_str();
+
+    const size_t nHeaderBufSize = 40;
+    char acHeaderBuf[nHeaderBufSize]="";
+    size_t nHeaderSize=0;
+    switch (eInterleave) {
+    case pixel:
+        nHeaderSize=static_cast<size_t>
+            (CPLsnprintf(acHeaderBuf, nHeaderBufSize,
+                         "P6\n%u %u\n255\n",
+                         width, height) );
+        break;
+    case band:
+        nHeaderSize=static_cast<size_t>
+            (CPLsnprintf(acHeaderBuf, nHeaderBufSize,
+                         "P5\n%u %u\n255\n",
+                         width, height) );
+        break;
+    }
+    // CPLsnprintf may return negative values;
+    // the cast to size_t converts these to large positive
+    // values, so we only need one test.
+    if (nHeaderSize>=nHeaderBufSize) {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "dumpPPM error generating header for %s\n",
+                 pszPPMname);
+        return;
+    }
+
+    MD5_CTX MD5ctx;
+    MD5Init(&MD5ctx);
+    MD5Update(&MD5ctx, reinterpret_cast<uint8_t*>(acHeaderBuf), nHeaderBufSize);
+    uint8_t* rowstart = static_cast<uint8_t*>(data);
+    for (unsigned int ii=0; ii<height; ii++) {
+        MD5Update(&MD5ctx, rowstart, width);
+        rowstart += rowlength;
+    }
+    char digest[MD5_DIGEST_LENGTH];
+    char*res=MD5End(&MD5ctx, digest);
+    if (res!=digest) {
+        CPLDebug("Viewranger",
+                 "MD5End returned %p - expected %p",
+                 res, digest); 
+    }
+    CPLDebug("Viewranger MD5",
+             "PPM/PGM data md5sum %s not dumped to file %s",
+             digest, pszPPMname
+             );
+
+    nPPMcount++;
+
+    return;
+} // reportPPMmd5sum
+
+static
 void dumpPNG(
         // unsigned int width,
         // unsigned int height,
@@ -3117,6 +3206,26 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         nLeftCol=nRightCol;
     } // for (loopX
 
+    {
+        // Dump VRC tile as .pgm, one for each band, they will be monochrome.
+        CPLString osBaseLabel
+            = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%02u.x%012x.rvtm_blocksize",
+                                 // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
+                                 poVRCDS->sLongTitle.c_str(),
+                                 nThisOverview, block_xx, block_yy,
+                                 nBand,
+                                 anTileOverviewIndex[nThisOverview+1]
+                                 );
+
+        reportPPMmd5sum(
+                        static_cast<unsigned int>(nBlockXSize),
+                        static_cast<unsigned int>(nBlockYSize),
+                        static_cast<unsigned char*>(pImage),
+                        static_cast<unsigned int>(nBlockXSize),
+                        osBaseLabel,
+                        band
+                        );
+    }
 } // VRCRasterBand::read_VRC_Tile_Metres
 
 int VRCRasterBand::Copy_Tile_into_Block
