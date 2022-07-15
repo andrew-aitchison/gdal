@@ -53,7 +53,7 @@ static const unsigned int vrc_magic36 = 0x01ce6336; // 0x3663ce01; //
 // static const unsigned int nVRCNoData = 0xffffffff;
 // static const unsigned int nVRCNoData = 255;
 // static const unsigned int nVRCNoData = 0;
-// Many maps have 0, black, or 255, white as important colours.
+// Many maps have 0, black, or 255, white, as important colours.
 // Unless we use alpha or a mask layer (good idea)
 // we are stuck with 1 value in red green and blue
 // (any one will trigger nodata).
