@@ -42,9 +42,6 @@
 #include <algorithm>  // for std::max and std::min
 
 
-#include <sys/types.h>
-#include <md5.h>
-
 void VRC_file_strerror_r(int nFileErr, char* const buf, size_t buflen)
 {
     if (buf==nullptr || buflen<1) {
@@ -772,7 +769,7 @@ int VRCDataset::Identify( GDALOpenInfo * poOpenInfo )
     // unsigned int version = VRGetUInt(poOpenInfo->pabyHeader, 4);
 
     unsigned int nb64k1 = VRGetUInt(poOpenInfo->pabyHeader, 8);
-    const bool b64k1 = nb64k1 == 0x00010001;
+    const bool b64k1 = (nb64k1 == 0x00010001);
 
     if( nMagic == vrc_magic_metres ) {
         CPLDebug("Viewranger", "VRCmetres file %s supported",
@@ -970,10 +967,10 @@ unsigned int* VRCDataset::VRCBuildTileIndex( unsigned int nTileIndexStart )
                                     // and read the "pointer to end of last tile"
                                )*sizeof(int) );
                 nLastTileFound=anNewTileIndex[nGdalTile];
-            CPLDebug("Viewranger",
-                     "\tanNewTileIndex[%d] = 0x%08x=%d",
-                     nGdalTile, nLastTileFound, nLastTileFound);
-                 nFound = 1;
+                CPLDebug("Viewranger",
+                         "\tanNewTileIndex[%d] = 0x%08x=%d",
+                         nGdalTile, nLastTileFound, nLastTileFound);
+                nFound = 1;
                 break;
             }
         }
@@ -1137,7 +1134,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
         }
     }
     if (nStringCount > 0) {
-        poDS->sLongTitle = CPLRecode(paszStrings[0],
+        poDS->sLongTitle = CPLRecode(CPLGetBasename(poOpenInfo->pszFilename),
                                      szInCharset, szOutCharset);
         poDS->SetMetadataItem("TIFFTAG_IMAGEDESCRIPTION",
                               poDS->sLongTitle.c_str(), "" );
@@ -1463,16 +1460,6 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
             CPLDebug("Viewranger", "nMagic x%08x unknown", poDS->nMagic);
         }
     }
-    if (nullptr!=paszStrings) { //-V547
-        for (unsigned int ii=0; ii<nStringCount; ++ii) {
-            if (paszStrings[ii]) {
-                VSIFree(paszStrings[ii]);
-                paszStrings[ii] = nullptr;
-            }
-        }
-        VSIFree(paszStrings);
-        paszStrings= nullptr ;
-    }
 
     /********************************************************************/
     /*                              Set CRS                             */
@@ -1485,10 +1472,22 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     /********************************************************************/
     /*             Report some strings found in the file                */
     /********************************************************************/
-    CPLDebug("Viewranger", "Long Title: %s",poDS->sLongTitle.c_str());
+    CPLDebug("Viewranger", "Long Title: %s",
+             paszStrings[0] //sLongTitle.c_str()
+             );
     CPLDebug("Viewranger", "Copyright: %s",poDS->sCopyright.c_str());
     CPLDebug("Viewranger", "%g metre pixels",poDS->dfPixelMetres);
 
+    if (nullptr!=paszStrings) { //-V547
+        for (unsigned int ii=0; ii<nStringCount; ++ii) {
+            if (paszStrings[ii]) {
+                VSIFree(paszStrings[ii]);
+                paszStrings[ii] = nullptr;
+            }
+        }
+        VSIFree(paszStrings);
+        paszStrings= nullptr ;
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Create band information objects.                                */
@@ -1537,7 +1536,7 @@ void dumpPPM(unsigned int width,
              unsigned int nMaxPPM
              )
 {
-    // Is static the best way to count the PPMs ?
+    // is static the best way to count the PPMs ?
     static unsigned int nPPMcount = 0;
 
     CPLDebug("Viewranger PPM",
@@ -1597,118 +1596,9 @@ void dumpPPM(unsigned int width,
                  "PPM data dump file %s failed; errno=%d %s",
                  pszPPMname, nFileErr, errstr
                  );
-    } else {
-        const size_t nHeaderBufSize = 40;
-        char acHeaderBuf[nHeaderBufSize]="";
-        size_t nHeaderSize=0;
-        switch (eInterleave) {
-        case pixel:
-            nHeaderSize=static_cast<size_t>
-                (CPLsnprintf(acHeaderBuf, nHeaderBufSize,
-                          "P6\n%u %u\n255\n",
-                          width, height) );
-            break;
-        case band:
-            nHeaderSize=static_cast<size_t>
-                (CPLsnprintf(acHeaderBuf, nHeaderBufSize,
-                          "P5\n%u %u\n255\n",
-                          width, height) );
-            break;
-        }
-        // CPLsnprintf may return negative values;
-        // the cast to size_t converts these to large positive
-        // values, so we only need one test.
-        if (nHeaderSize>=nHeaderBufSize) {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                      "dumpPPM error generating header for %s\n",
-                      pszPPMname);
-            VSIFCloseL(fpPPM);
-            return;
-        }
-        size_t nHeaderWriteResult=VSIFWriteL(acHeaderBuf, 1, nHeaderSize, fpPPM);
-        if (nHeaderSize==nHeaderWriteResult) {
-            const unsigned char* pRow = data;
-            for (unsigned int r=0; r<height; r++) {
-                if (eInterleave==pixel) {
-                    if (width!=VSIFWriteL(pRow, 3, width, fpPPM)) {
-                        int nWriteErr = errno;
-                        VRC_file_strerror_r(nWriteErr, errstr, 255);
-                        CPLError(CE_Failure, CPLE_AppDefined,
-                                  "dumpPPM error writing %s row %d errno=%d %s\n",
-                                  pszPPMname, r, nWriteErr, errstr);
-                        break;
-                    }
-                    pRow += 3*static_cast<size_t>(rowlength);
-                } else { // must be band interleaved
-                    size_t rowwriteresult=VSIFWriteL(pRow, 1, width, fpPPM);
-                    if (width!=rowwriteresult) {
-                        int nWriteErr = errno;
-                        VRC_file_strerror_r(nWriteErr, errstr, 255);
-                        CPLError(CE_Failure, CPLE_AppDefined,
-                                  "dumpPPM error writing %s row %u: errno=%d %s",
-                                  pszPPMname, r, nWriteErr, errstr);
-                        break;
-                    }
-                    pRow += rowlength;
-                } // pixel or band interleaved ?
-            } // for row r
-        } else { // nHeaderSize!=nHeaderWriteResult
-            int nWriteErr=errno;
-            VRC_file_strerror_r(nWriteErr, errstr, 255);
-            // CPLError(CE_Failure, CPLE_AppDefined,
-            CPLDebug("Viewranger PPM",
-                     "dumpPPM error writing header for %s errno=%u %s",
-                     pszPPMname, nWriteErr, errstr);
-        }
-
-        if (0!=VSIFCloseL(fpPPM)) {
-            CPLDebug("Viewranger PPM",
-                     "Failed to close PPM data dump file %s; errno=%d",
-                     pszPPMname, errno
-                     );
-        }
+        return;
     }
-
-    nPPMcount++;
-
-    // return;
-
-} // dumpPPM
-
-static
-void reportPPMmd5sum(
-        unsigned int width,
-        unsigned int height,
-        unsigned char* const data,
-        unsigned int rowlength,
-        CPLString osBaseLabel,
-        VRCinterleave eInterleave
-        )
-{
-    // Is static the best way to count the PPMs ?
-    static unsigned int nPPMcount = 0;
-
-    if (rowlength==0) {
-        rowlength=width;
-        CPLDebug("Viewranger PPM",
-                 "dumpPPM(... %d %s) no rowlength, setting to width = %d",
-                 0, osBaseLabel.c_str(), rowlength);
-    }
-
-    // At least on unix, spaces make filenames harder to work with.
-    osBaseLabel.replaceAll(' ', '_');
-
-    CPLString osPPMname =
-        CPLString().Printf("%s.%05d.%s", osBaseLabel.c_str(), nPPMcount,
-                           (eInterleave==pixel) ? "ppm" : "pgm"
-                           );
-    if (osPPMname==nullptr) {
-        CPLDebug("Viewranger PPM",
-                 "osPPMname truncated %s %d",
-                 osBaseLabel.c_str(), nPPMcount);
-    }
-    char const*pszPPMname = osPPMname.c_str();
-
+    
     const size_t nHeaderBufSize = 40;
     char acHeaderBuf[nHeaderBufSize]="";
     size_t nHeaderSize=0;
@@ -1733,33 +1623,61 @@ void reportPPMmd5sum(
         CPLError(CE_Failure, CPLE_AppDefined,
                  "dumpPPM error generating header for %s\n",
                  pszPPMname);
+        VSIFCloseL(fpPPM);
         return;
     }
 
-    MD5_CTX MD5ctx;
-    MD5Init(&MD5ctx);
-    MD5Update(&MD5ctx, reinterpret_cast<uint8_t*>(acHeaderBuf), nHeaderBufSize);
-    uint8_t* rowstart = static_cast<uint8_t*>(data);
-    for (unsigned int ii=0; ii<height; ii++) {
-        MD5Update(&MD5ctx, rowstart, width);
-        rowstart += rowlength;
+    size_t nHeaderWriteResult=VSIFWriteL(acHeaderBuf, 1, nHeaderSize, fpPPM);
+    if (nHeaderSize==nHeaderWriteResult) {
+        const unsigned char* pRow = data;
+        for (unsigned int r=0; r<height; r++) {
+            if (eInterleave==pixel) {
+                if (width!=VSIFWriteL(pRow, 3, width, fpPPM)) {
+                    int nWriteErr = errno;
+                    VRC_file_strerror_r(nWriteErr, errstr, 255);
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "dumpPPM error writing %s row %d errno=%d %s\n",
+                             pszPPMname, r, nWriteErr, errstr);
+                    break;
+                }
+    
+                pRow += 3*static_cast<size_t>(rowlength);
+
+            } else { // must be band interleaved
+
+                size_t rowwriteresult=VSIFWriteL(pRow, 1, width, fpPPM);
+                if (width!=rowwriteresult) {
+                    int nWriteErr = errno;
+                    VRC_file_strerror_r(nWriteErr, errstr, 255);
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "dumpPPM error writing %s row %u: errno=%d %s",
+                             pszPPMname, r, nWriteErr, errstr);
+                    break;
+                }
+                pRow += rowlength;
+            } // pixel or band interleaved ?
+        } // for row r
+    } else { // nHeaderSize!=nHeaderWriteResult
+        int nWriteErr=errno;
+        VRC_file_strerror_r(nWriteErr, errstr, 255);
+        // CPLError(CE_Failure, CPLE_AppDefined,
+        CPLDebug("Viewranger PPM",
+                 "dumpPPM error writing header for %s errno=%u %s",
+                 pszPPMname, nWriteErr, errstr);
     }
-    char digest[MD5_DIGEST_LENGTH];
-    char*res=MD5End(&MD5ctx, digest);
-    if (res!=digest) {
-        CPLDebug("Viewranger",
-                 "MD5End returned %p - expected %p",
-                 res, digest); 
+
+    if (0!=VSIFCloseL(fpPPM)) {
+        CPLDebug("Viewranger PPM",
+                 "Failed to close PPM data dump file %s; errno=%d",
+                 pszPPMname, errno
+                 );
     }
-    CPLDebug("Viewranger MD5",
-             "PPM/PGM data md5sum %s not dumped to file %s",
-             digest, pszPPMname
-             );
 
     nPPMcount++;
 
-    return;
-} // reportPPMmd5sum
+    // return;
+
+} // dumpPPM
 
 static
 void dumpPNG(
@@ -3206,26 +3124,6 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         nLeftCol=nRightCol;
     } // for (loopX
 
-    {
-        // Dump VRC tile as .pgm, one for each band, they will be monochrome.
-        CPLString osBaseLabel
-            = CPLString().Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%02u.x%012x.rvtm_blocksize",
-                                 // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                                 poVRCDS->sLongTitle.c_str(),
-                                 nThisOverview, block_xx, block_yy,
-                                 nBand,
-                                 anTileOverviewIndex[nThisOverview+1]
-                                 );
-
-        reportPPMmd5sum(
-                        static_cast<unsigned int>(nBlockXSize),
-                        static_cast<unsigned int>(nBlockYSize),
-                        static_cast<unsigned char*>(pImage),
-                        static_cast<unsigned int>(nBlockXSize),
-                        osBaseLabel,
-                        band
-                        );
-    }
 } // VRCRasterBand::read_VRC_Tile_Metres
 
 int VRCRasterBand::Copy_Tile_into_Block
