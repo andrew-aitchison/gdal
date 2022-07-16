@@ -109,6 +109,7 @@ class VRCDataset : public GDALDataset
     short nCountry=-1;
     OGRSpatialReference* poSRS = nullptr;
 
+    std::string sFileName;
     std::string sLongTitle;
     std::string sCopyright;
     // std::string sDatum;
