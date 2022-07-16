@@ -278,7 +278,9 @@ VRCRasterBand::VRCRasterBand(
     poDS = static_cast<GDALDataset *>(poVRCDS);
     nBand = nBandIn;
     CPLDebug("Viewranger", "%s %p->VRCRasterBand(%p, %d, %d, %d, %p)",
-             poVRCDS->sLongTitle.c_str(), this,
+             poVRCDS->sFileName.c_str(),
+             // poVRCDS->sLongTitle.c_str(),
+             this,
              poVRCDS, nBand, nThisOverview, nOverviewCount, papoOverviewBands);
 
     if (nOverviewCount >=32) {
@@ -367,7 +369,8 @@ VRCRasterBand::VRCRasterBand(
         if (papoOverviewBands != nullptr) {
             CPLDebug("Viewranger OVRV",
                      "%s nThisOverview==-1 but %d papoOverviewBands already set at %p",
-                     poVRCDS->sLongTitle.c_str(),
+                     poVRCDS->sFileName.c_str(),
+                     // poVRCDS->sLongTitle.c_str(),
                      nOverviewCount+1, papoOverviewBands);
         } else {
             if (nOverviewCount!=6) {
@@ -383,7 +386,8 @@ VRCRasterBand::VRCRasterBand(
                 // nOverviewCount=32;
                 CPLDebug("Viewranger OVRV",
                          "%s Reducing nOverviewCount from %d to 6",
-                         poVRCDS->sLongTitle.c_str(),
+                         poVRCDS->sFileName.c_str(),
+                         // poVRCDS->sLongTitle.c_str(),
                          nOverviewCount);
                 nOverviewCount=6;
             }
@@ -393,7 +397,8 @@ VRCRasterBand::VRCRasterBand(
             }
             CPLDebug("Viewranger OVRV",
                      "%s this = %p VRCRasterBand(%p, %d, %d, %d, %p)",
-                     poVRCDS->sLongTitle.c_str(),
+                     poVRCDS->sFileName.c_str(),
+                     // poVRCDS->sLongTitle.c_str(),
                      this, poVRCDS, nBandIn, nThisOverview,
                      nOverviewCount, papoOverviewBands);
 // #pragma unroll
@@ -418,7 +423,8 @@ VRCRasterBand::VRCRasterBand(
         if (nThisOverview<-1 || nThisOverview>nOverviewCount) { // Off-by-one somewhere ?
             CPLDebug("ViewrangerOverview",
                      "%s %p nThisOverview==%d out of range [-1,%d]",
-                     poVRCDS->sLongTitle.c_str(),
+                     poVRCDS->sFileName.c_str(),
+                     // poVRCDS->sLongTitle.c_str(),
                      this,
                      nThisOverview, nOverviewCount);
         }
@@ -426,7 +432,8 @@ VRCRasterBand::VRCRasterBand(
     
     CPLDebug("Viewranger",
              "%s %p->VRCRasterBand(%p, %d, %d, %d, %p) finished",
-             poVRCDS->sLongTitle.c_str(),
+             poVRCDS->sFileName.c_str(),
+             // poVRCDS->sLongTitle.c_str(),
              this, poVRCDS, nBand, nThisOverview,
              nOverviewCount, papoOverviewBands
              );
@@ -1133,9 +1140,19 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
             }
         }
     }
+
+    if (poOpenInfo->pszFilename) {
+        poDS->sFileName = // CPLRecode(
+            CPLGetBasename(poOpenInfo->pszFilename)
+            // , szInCharset, szOutCharset)
+            ;
+    }
+
     if (nStringCount > 0) {
-        poDS->sLongTitle = CPLRecode(CPLGetBasename(poOpenInfo->pszFilename),
+        poDS->sLongTitle = CPLRecode(paszStrings[0],
                                      szInCharset, szOutCharset);
+
+
         poDS->SetMetadataItem("TIFFTAG_IMAGEDESCRIPTION",
                               poDS->sLongTitle.c_str(), "" );
     }
@@ -1472,10 +1489,9 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     /********************************************************************/
     /*             Report some strings found in the file                */
     /********************************************************************/
-    CPLDebug("Viewranger", "Long Title: %s",
-             paszStrings[0] //sLongTitle.c_str()
-             );
-    CPLDebug("Viewranger", "Copyright: %s",poDS->sCopyright.c_str());
+    CPLDebug("Viewranger", "Filename: %s",   poDS->sFileName.c_str() );
+    CPLDebug("Viewranger", "Long Title: %s", poDS->sLongTitle.c_str() );
+    CPLDebug("Viewranger", "Copyright: %s",  poDS->sCopyright.c_str());
     CPLDebug("Viewranger", "%g metre pixels",poDS->dfPixelMetres);
 
     if (nullptr!=paszStrings) { //-V547
@@ -2288,7 +2304,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             = CPLString().
             Printf("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03d.%03d.%02u.x%012x",
                    // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                   static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(),
+                   static_cast<VRCDataset *>(poDS)->sFileName.c_str(),
+                   // static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(),
                    nThisOverview, nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy,
                    nBand, nVRCHeader);
         dumpPNG(
@@ -2330,14 +2347,17 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
     // May wish to change this so that the result is RGBA (currently RGB)
     png_read_png( png_ptr, info_ptr,
-#if PNG_LIBPNG_VER > 10504
+#if PNG_LIBPNG_VER >= 10504
                   PNG_TRANSFORM_SCALE_16 |
 #else
                   PNG_TRANSFORM_STRIP_16 |
 #endif
+#if PNG_LIBPNG_VER >= 10245
+                  PNG_TRANSFORM_GRAY_TO_RGB |
+#endif
+
                   PNG_TRANSFORM_STRIP_ALPHA |
                   PNG_TRANSFORM_PACKING |
-                  PNG_TRANSFORM_GRAY_TO_RGB |
                   PNG_TRANSFORM_EXPAND,
                   nullptr);
 
@@ -2424,7 +2444,8 @@ int VRCRasterBand::GetOverviewCount()
     if (nullptr==poFullBand) {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "%s %p->GetOverviewCount() band %d but dataset %p has no such band",
-                 poVRCDS->sLongTitle.c_str(),
+                 poVRCDS->sFileName.c_str(),
+                 // poVRCDS->sLongTitle.c_str(),
                  this, nBand, poVRCDS
                  );
         return 0;
@@ -2432,21 +2453,24 @@ int VRCRasterBand::GetOverviewCount()
     if (this==poFullBand) {
         CPLDebug("Viewranger OVRV",
                  "%s band %p is a parent band with %d overviews at %p",
-                 poVRCDS->sLongTitle.c_str(),
+                 poVRCDS->sFileName.c_str(),
+                 // poVRCDS->sLongTitle.c_str(),
                  this, poFullBand->nOverviewCount,
                  poFullBand->papoOverviewBands);
         if (nOverviewCount != poFullBand->nOverviewCount) {
             // This cannot happen ?
             CPLError(CE_Failure, CPLE_AppDefined,
                       "%s %p==%p but overview count %d != %d",
-                 poVRCDS->sLongTitle.c_str(),
+                 poVRCDS->sFileName.c_str(),
+                 // poVRCDS->sLongTitle.c_str(),
                       this, poFullBand,
                       nOverviewCount, poFullBand->nOverviewCount);
         }
     } else {
         CPLDebug("Viewranger OVRV",
                  "%s band %p has %d overviews at %p; its parent %p has %d overviews at %p",
-                 poVRCDS->sLongTitle.c_str(),
+                 poVRCDS->sFileName.c_str(),
+                 // poVRCDS->sLongTitle.c_str(),
                  this, nOverviewCount, papoOverviewBands,
                  poFullBand, poFullBand->nOverviewCount, poFullBand->papoOverviewBands
                  );
@@ -2975,7 +2999,8 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                             CPLString osBaseLabel = CPLString().Printf
                                 ("/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03d.%03d.%02ua.x%012x.rvtm_pngsize",
                                  // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-                                 poVRCDS->sLongTitle.c_str(),
+                                 poVRCDS->sFileName.c_str(),
+                                 // poVRCDS->sLongTitle.c_str(),
                                  nThisOverview, block_xx, block_yy,
                                  loopX, loopY,
                                  nBand,
