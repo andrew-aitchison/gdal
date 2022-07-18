@@ -93,9 +93,9 @@ class VRCDataset : public GDALDataset
 {
     friend class VRCRasterBand;
     
-    VSILFILE            *fp = nullptr;
-    GDALColorTable      *poColorTable = nullptr;
-    GByte       abyHeader[0x5a0];
+    VSILFILE       *fp = nullptr;
+    GDALColorTable *poColorTable = nullptr;
+    GByte          abyHeader[0x5a0] {};
     
     unsigned int *anColumnIndex = nullptr;
     unsigned int *anTileIndex = nullptr;
