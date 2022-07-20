@@ -30,10 +30,10 @@ unsigned int VRGetUInt(const void* base, unsigned int byteOffset )
 {
     const unsigned char* buf =
         static_cast<const unsigned char*>(base)+byteOffset;
-    int vv = buf[0];
-    vv |= (buf[1] << 8U);
-    vv |= (buf[2] << 16U);
-    vv |= (buf[3] << 24U);
+    unsigned int vv = static_cast<unsigned int>(buf[0]);
+    vv |= static_cast<unsigned int>(buf[1]) << 8U;
+    vv |= static_cast<unsigned int>(buf[2]) << 16U;
+    vv |= static_cast<unsigned int>(buf[3]) << 24U;
 
     return(static_cast<unsigned int>(vv));
 }
