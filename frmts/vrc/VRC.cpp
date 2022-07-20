@@ -1127,12 +1127,16 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
             int ret=CPLsnprintf(pszTag, VRCpszTAGlen, "String%u", ii);
             pszTag[VRCpszTAGlen] = '\000';
             if(VRCpszTAGlen>=ret && ret>0) {
-                poDS->SetMetadataItem
-                    ( pszTag,
-                      // FixME memory leak ?
-                      CPLRecode(paszStrings[ii],
-                                szInCharset, szOutCharset)
-                      );
+                // CPLRecode() may call CPLError
+                // Do we wish to override the error handling ?
+                // CPLErrorReset();
+                // CPLPushErrorHandler(CPLQuietErrorHandler);
+
+                char* pszTmpName = CPLRecode(paszStrings[ii],
+                                     szInCharset, szOutCharset);
+                poDS->SetMetadataItem( pszTag, pszTmpName );
+                CPLFree(pszTmpName);
+                // CPLPopErrorHandler();
             } else {
                 CPLDebug("Viewranger",
                          "Could not set String%d Metadata - CPLsnprintf(..., VRCpszTAGlen %s) returned %d",
@@ -1142,26 +1146,32 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     }
 
     if (poOpenInfo->pszFilename) {
-        poDS->sFileName = // CPLRecode(
-            CPLGetBasename(poOpenInfo->pszFilename)
-            // , szInCharset, szOutCharset)
-            ;
+        poDS->sFileName = CPLGetBasename(poOpenInfo->pszFilename);
     }
 
     if (nStringCount > 0) {
+        // CPLRecode() may call CPLError
+        // Do we wish to override the error handling ?
+        // CPLErrorReset();
+        // CPLPushErrorHandler(CPLQuietErrorHandler);
+
         poDS->sLongTitle = CPLRecode(paszStrings[0],
                                      szInCharset, szOutCharset);
-
-
         poDS->SetMetadataItem("TIFFTAG_IMAGEDESCRIPTION",
                               poDS->sLongTitle.c_str(), "" );
+        // CPLPopErrorHandler();
     }
     if (nStringCount > 1) {
-        // poDS->sCopyright = CPLString(paszStrings[1]);
+        // CPLRecode() may call CPLError
+        // Do we wish to override the error handling ?
+        // CPLErrorReset();
+        // CPLPushErrorHandler(CPLQuietErrorHandler);
+        
         poDS->sCopyright = CPLRecode(paszStrings[1],
                                      szInCharset, szOutCharset);
         poDS->SetMetadataItem("TIFFTAG_COPYRIGHT",
                               poDS->sCopyright.c_str(), "" );
+        // CPLPopErrorHandler();
     }
     if (nStringCount > 5 && *paszStrings[5]) {
         poDS->SetMetadataItem("VRC ViewRanger Device ID",
@@ -3135,10 +3145,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                     
                 }
                 break;
-            case vrc_magic36:
-                {
-                }
-                break;
+
             default:
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "We should not be here with magic=x%08x",
