@@ -26,11 +26,10 @@ signed int VRGetInt(const void* base, unsigned int byteOffset )
 
     return(vv);
 }
-unsigned int VRGetUInt(const void* base, unsigned int byteOffset )
+unsigned int VRGetUInt(const void* base, const unsigned int byteOffset )
 {
-    const unsigned char* buf =
-        static_cast<const unsigned char*>(base)+byteOffset;
-    unsigned int vv = static_cast<unsigned int>(buf[0]);
+    const auto *const buf = static_cast<const unsigned char*>(base)+byteOffset;
+    auto vv = static_cast<unsigned int>(buf[0]);
     vv |= static_cast<unsigned int>(buf[1]) << 8U;
     vv |= static_cast<unsigned int>(buf[2]) << 16U;
     vv |= static_cast<unsigned int>(buf[3]) << 24U;

@@ -83,6 +83,11 @@ static signed int PNGGetInt(const void* base, unsigned int byteOffset )
     return(static_cast<signed int>(PNGGetUInt(base, byteOffset)));
 }
 
+static bool isNullTileIndex(unsigned int nIndex) {
+    // This looks promising on DE_50 tiles
+    // see how good it is in general
+    return ((nIndex %100) == 0 && nIndex < 10000);
+}
 
 static
 unsigned int PNGReadUInt(VSILFILE *fp)
@@ -863,7 +868,7 @@ unsigned int* VRCDataset::VRCGetTileIndex( unsigned int nTileIndexStart )
 
         // This looks promising on DE_50 tiles
         // see how good it is in general
-        if ( (nIndex %100) == 0 && nIndex < 10000) {
+        if ( isNullTileIndex(nIndex) ) {
             CPLDebug("Viewranger",
                      "anNewTileIndex[%d]=x%08x=%d - ignore small multiples of 100",
                      q, nIndex, nIndex);
@@ -881,12 +886,16 @@ unsigned int* VRCDataset::VRCGetTileIndex( unsigned int nTileIndexStart )
 } // VRCDataset::VRCGetTileIndex()
 
 // MapId==8 files may have more than one tile.
-// If so there is not tile index (that I can find),
+// When this is so there is no tile index (that I can find),
 // so we have to wander through the tile overview indices to build it.
 //
 // This may be a bit hacky.
 //
-unsigned int* VRCDataset::VRCBuildTileIndex( unsigned int nTileIndexStart )
+// ToDo: These files have *two* tile indexes;
+// the names used in this code need to be clearer,
+// both inside and outside this function.
+unsigned int* VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
+                                            unsigned int nTileIndexStart )
 {
     if (nMapID!=8) {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -906,22 +915,42 @@ unsigned int* VRCDataset::VRCBuildTileIndex( unsigned int nTileIndexStart )
         return nullptr;
     }
 
+    auto *anFirstTileIndex = static_cast<unsigned int*>
+        (VSIMalloc3(sizeof (unsigned int),
+                    static_cast<size_t>(tileXcount),
+                    static_cast<size_t>(tileYcount)) );
+    if (anFirstTileIndex == nullptr) {
+        CPLError(CE_Failure, CPLE_OutOfMemory,
+                 "Cannot allocate memory for first tile index");
+        return nullptr;
+    }
     auto *anNewTileIndex = static_cast<unsigned int *>
         (VSIMalloc3(sizeof (unsigned int),
                     static_cast<size_t>(tileXcount),
                     static_cast<size_t>(tileYcount)) );
     if (anNewTileIndex == nullptr) {
+        VSIFree(anFirstTileIndex);
         CPLError(CE_Failure, CPLE_OutOfMemory,
-                 "Cannot allocate memory for tile index");
+                 "Cannot allocate memory for second tile index");
         return nullptr;
     }
-    int nTileFound=0;
-    for (nTileFound=0; nTileFound < tileXcount * tileYcount; nTileFound++) {
-        anNewTileIndex[nTileFound]=0;
+
+    for (unsigned int ii=0U;
+         ii < static_cast<unsigned int>(tileXcount * tileYcount);
+         ii++) {
+        anFirstTileIndex[ii] =
+            VRReadUInt(fp, nTileIndexAddr+ii*sizeof(unsigned int));
+        anNewTileIndex[ii]=0;
     }
-    nTileFound=0;
+    int nTileFound=0;
     unsigned int nLastTileFound = anNewTileIndex[nTileFound++] = nTileIndexStart;
+    
     while (nTileFound < tileXcount * tileYcount) {
+        if (isNullTileIndex(anFirstTileIndex[nTileFound])) {
+            anNewTileIndex[nTileFound++] = 0;
+            continue;
+        }
+
         // VR tiles start at the bottom left and count up then right;
         // GDAL tiles start at the top left and count across then down.
         int nVRow = nTileFound % tileYcount;
@@ -972,7 +1001,7 @@ unsigned int* VRCDataset::VRCBuildTileIndex( unsigned int nTileIndexStart )
                                2+2 // tile count and size
                                +x*y // ignore x by y matrix
                                     // and read the "pointer to end of last tile"
-                               )*sizeof(int) );
+                               )*sizeof(unsigned int) );
                 nLastTileFound=anNewTileIndex[nGdalTile];
                 CPLDebug("Viewranger",
                          "\tanNewTileIndex[%d] = 0x%08x=%d",
@@ -991,10 +1020,22 @@ unsigned int* VRCDataset::VRCBuildTileIndex( unsigned int nTileIndexStart )
     for (int y=0; y<tileYcount; y++) {
         for (int x=0; x<tileXcount; x++) {
             CPLDebug("Viewranger",
-                     "anNewTileIndex[%d,%d] = 0x%08x",
-                     x,y, anNewTileIndex[x+y*tileXcount] );
+                     "anFirstTileIndex[%d,%d] = 0x%08x",
+                     x,y,
+                     anFirstTileIndex[x+y*tileXcount] );
         }
     }
+    for (int y=0; y<tileYcount; y++) {
+        for (int x=0; x<tileXcount; x++) {
+            CPLDebug("Viewranger",
+                     "anNewTileIndex[%d,%d] = 0x%08x",
+                     x,y,
+                     anNewTileIndex[x+y*tileXcount] );
+        }
+    }
+
+    VSIFree(anFirstTileIndex);
+
     return anNewTileIndex;
 } //VRCDataset::VRCBuildTileIndex()
 
@@ -1459,12 +1500,28 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
                      poDS->nRight, anCorners[2]
                      );
         }
-        unsigned int nThirdSevenPtr=nCornerPtr+16; // Skip the corners
+
+        unsigned int nTileIndexStart= nCornerPtr+16; // Skip the corners
+        unsigned int nTileIndexSize = VRReadUInt(poDS->fp);
+
+        CPLDebug("Viewranger",
+                 "nTileIndexAddr %d=x%08x\n",
+                 nTileIndexAddr, nTileIndexAddr);
+        if (nTileIndexSize == 7) {
+            // CPLDebug does not support m$ in format strings
+            CPLDebug("Viewranger",
+                     "nTileIndexStart %d=x%08x points to seven as expected",
+                     nTileIndexStart, nTileIndexStart);
+        } else {
+            CPLDebug("Viewranger",
+                     "nTileIndexStart %d=x%08x points to %08x is not seven",
+                     nTileIndexStart, nTileIndexStart, nTileIndexSize);
+        }
 
         if (poDS->nMapID == 8) {
             // Read the index of tile addresses
             if ( poDS->anTileIndex == nullptr ) {
-                poDS->anTileIndex = poDS->VRCBuildTileIndex( nThirdSevenPtr );
+                poDS->anTileIndex = poDS->VRCBuildTileIndex( nTileIndexAddr, nTileIndexStart );
                 if ( poDS->anTileIndex == nullptr ) {
                     return nullptr;
                 }

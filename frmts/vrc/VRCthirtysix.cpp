@@ -359,15 +359,15 @@ void VRCRasterBand::read_VRC_Tile_36( VSILFILE *fp,
              nRawXcount, nRawYcount, nRawXsize, nRawYsize);
 
     // Read in this tile's index to ?raw? sub-tiles.
-    std::vector<unsigned int> anSubTileIndex;
-    anSubTileIndex.reserve
+    std::vector<unsigned int> vnSubtileIndex;
+    vnSubtileIndex.reserve
         (static_cast<size_t>(nRawXcount)*static_cast<size_t>(nRawYcount) +1);
     for (size_t loop=0;
          loop <= static_cast<size_t>(nRawXcount)*static_cast<size_t>(nRawYcount);
          loop++) {
-        anSubTileIndex.push_back(VRReadUInt(fp));
-        if (anSubTileIndex[loop] >= poGDS->oStatBufL.st_size) {
-            anSubTileIndex.data()[loop] = 0;
+        vnSubtileIndex.push_back(VRReadUInt(fp));
+        if (vnSubtileIndex[loop] >= poGDS->oStatBufL.st_size) {
+            vnSubtileIndex.data()[loop] = 0;
         }
     }
     
@@ -381,10 +381,8 @@ void VRCRasterBand::read_VRC_Tile_36( VSILFILE *fp,
             auto loop = static_cast<size_t>(nRawYcount)-1-loopY
                 + static_cast<size_t>(loopX)*static_cast<size_t>(nRawYcount);
 
-            //((GUInt32 *) pImage)[i] = poGDS->anSubTileIndex[loop];
-
-            unsigned long nStart = anSubTileIndex[loop];
-            unsigned long nFinish= anSubTileIndex[loop+1];
+            unsigned long nStart = vnSubtileIndex[loop];
+            unsigned long nFinish= vnSubtileIndex[loop+1];
             unsigned long nFileSize = static_cast<unsigned int>
                 (poGDS->oStatBufL.st_size);
             CPLString osBaseLabel
