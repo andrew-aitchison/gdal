@@ -118,7 +118,8 @@ class VRCDataset : public GDALDataset
     int tileXcount=0, tileYcount=0;
 
     unsigned int* VRCGetTileIndex( unsigned int nTileIndexStart );
-    unsigned int* VRCBuildTileIndex( unsigned int nTileIndexStart );
+    unsigned int* VRCBuildTileIndex( unsigned int nTileIndexAddr,
+                                     unsigned int nTileIndexStart );
 
     VSIStatBufL oStatBufL;
 
