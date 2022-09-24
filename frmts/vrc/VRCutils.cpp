@@ -123,15 +123,22 @@ unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset )
 
 extern OGRSpatialReference* CRSfromCountry(int nCountry)
 {
+    OGRErr errImport=OGRERR_NONE;
+
     // OGRSpatialReference* poSRS=nullptr;
     auto* poSRS=new OGRSpatialReference();
-
-    OGRErr errImport=OGRERR_NONE;
+    if (nullptr==poSRS) {
+        CPLDebug("Viewranger",
+                 "CRSfromCountry(%d) could not make an OGRSpatialReference object",
+                 nCountry);
+        delete poSRS;
+        return nullptr;
+    }
 
     switch (nCountry) {
         // case 0: break; // Online maps
     case  1: VRC_EPSG(27700);   break; // UK Ordnace Survey
-    case  2: VRC_EPSG(29901);   break; // Ireland
+    case  2: VRC_EPSG(29901);   break; // Ireland. Could be 29901, 2 or 3
     case  5: VRC_EPSG(2393); VRC_SWAP_AXES;   break; // Finland
     case  8: VRC_EPSG(31370);
         // Other possibilities for Belgium include

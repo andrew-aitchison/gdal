@@ -984,7 +984,7 @@ unsigned int* VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
             break;
         }
         unsigned int anOverviewIndex[nVRCmaxOverviews]={};
-        for (unsigned int & i : anOverviewIndex) {
+        for (const unsigned int & i : anOverviewIndex) {
             anOverviewIndex[i] = VRReadUInt(fp);
         }
         int nLastOI = nOverviewCount;
@@ -1050,14 +1050,8 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
              "VRCDataset::Open( %p )",
              poOpenInfo);
     
-    if (!Identify(poOpenInfo))
+    if (poOpenInfo==nullptr || !Identify(poOpenInfo))
         return nullptr;
-
-    /* Check that the file pointer from GDALOpenInfo* is available */
-    if( poOpenInfo->fpL == nullptr )
-    {
-        return nullptr;
-    }
 
 /* -------------------------------------------------------------------- */
 /*      Confirm the requested access is supported.                      */
@@ -1071,15 +1065,21 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     }
 
 
+    /* Check that the file pointer from GDALOpenInfo* is available */
+    if( poOpenInfo->fpL == nullptr )
+    {
+        return nullptr;
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Create a corresponding GDALDataset.                             */
 /* -------------------------------------------------------------------- */
     // Evan Rouault suggests std::unique_ptr here:
     // https://github.com/OSGeo/gdal/pull/4092
-    // auto *poDS = std::unique_ptr<VRCDataset>(new VRCDataset());
+    // std::unique_ptr<VRCDataset> poDS = std::make_unique<VRCDataset>(); // make_unique requires C++14
+    // std::unique_ptr<VRCDataset> poDS = std::unique_ptr<VRCDataset>(new VRCDataset()); // -Wreturn-stack-address
+    // auto poDS = std::unique_ptr<VRCDataset>();
     auto* poDS = new VRCDataset();
-    // std::unique_ptr<VRCDataset> poDS(new VRCDataset());
-
     if( poDS == nullptr ) { //-V668
         return nullptr;
     }
@@ -1151,7 +1151,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     if (paszStrings == nullptr) {
         CPLError(CE_Failure, CPLE_OutOfMemory,
                  "Cannot allocate memory for array strings");
-        delete poDS;
+        // delete poDS;
         return nullptr;
     }
     for (unsigned int ii=0; ii<nStringCount; ++ii) {
@@ -1227,7 +1227,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     if (poDS->nScale==0) {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Cannot locate a VRC map with zero scale");
-        delete poDS;
+        // delete poDS;
         return nullptr;
     }
 
@@ -1244,7 +1244,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Map with %g metre pixels is too large scale (detailed) for the current VRC driver",
                  poDS->dfPixelMetres);
-        delete poDS;
+        // delete poDS;
         return nullptr;        
     }
     
@@ -2463,6 +2463,12 @@ void CPL_DLL GDALRegister_VRC()
         return;
 
     auto*poDriver = new GDALDriver();
+    if (poDriver==nullptr) {
+        CPLError(CE_Failure, CPLE_ObjectNull,
+                 "Could not build a driver for VRC"
+                 );
+        return;
+    }
 
     poDriver->SetDescription( "ViewrangerVRC" );
 
