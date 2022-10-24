@@ -765,6 +765,9 @@ CPLErr VRCDataset::GetGeoTransform( double * padfTransform )
 int VRCDataset::Identify( GDALOpenInfo * poOpenInfo )
 
 {
+    if (poOpenInfo == nullptr ) {
+        return GDAL_IDENTIFY_FALSE;
+    }
     const char * pszFileName = CPLGetFilename(poOpenInfo->pszFilename);
     if (pszFileName == nullptr ) { //-V547
         return GDAL_IDENTIFY_FALSE;
@@ -1088,6 +1091,10 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
 
+    if (poOpenInfo->pszFilename) {
+        poDS->sFileName = CPLGetBasename(poOpenInfo->pszFilename);
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Read the header.                                                */
 /* -------------------------------------------------------------------- */
@@ -1146,78 +1153,93 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     CPLDebug("Viewranger", "VRC Map ID %d with %d strings",
              poDS->nMapID, nStringCount);
 
-    char ** paszStrings =
-        static_cast<char **>(VSIMalloc2(sizeof (char *), nStringCount));
-    if (paszStrings == nullptr) {
-        CPLError(CE_Failure, CPLE_OutOfMemory,
-                 "Cannot allocate memory for array strings");
-        // delete poDS;
-        return nullptr;
-    }
-    for (unsigned int ii=0; ii<nStringCount; ++ii) {
-        paszStrings[ii] = VRCGetString(poDS->fp, nNextString);
-        // Need to check that this is within abyHeader ... or within the file ? werdna Sept 2021
-        nNextString += 4 + VRGetUInt( poDS->abyHeader, nNextString );
-        CPLDebug("Viewranger", "string %u %s", ii,
-                 paszStrings[ii] );
+    if (nStringCount>0) {
+        char ** paszStrings = nullptr;
+        paszStrings = static_cast<char **>(VSIMalloc2(sizeof (char *), nStringCount));
+        if (paszStrings == nullptr) {
+            CPLError(CE_Failure, CPLE_OutOfMemory,
+                     "Cannot allocate memory for array strings");
+            delete poDS;
+            return nullptr;
+        }
 
-        if (paszStrings[ii]!=nullptr && *paszStrings[ii]) {
-            // Save the string as a MetadataItem.
-            const int VRCpszTAGlen=18;
-            char pszTag[VRCpszTAGlen+1]="";
-            int ret=CPLsnprintf(pszTag, VRCpszTAGlen, "String%u", ii);
-            pszTag[VRCpszTAGlen] = '\000';
-            if(VRCpszTAGlen>=ret && ret>0) {
-                // CPLRecode() may call CPLError
-                // Do we wish to override the error handling ?
-                // CPLErrorReset();
-                // CPLPushErrorHandler(CPLQuietErrorHandler);
+        for (unsigned int ii=0; ii<nStringCount; ++ii) {
+            paszStrings[ii] = VRCGetString(poDS->fp, nNextString);
+            // Need to check that this is within abyHeader ... or within the file ? werdna Sept 2021
+            nNextString += 4 + VRGetUInt( poDS->abyHeader, nNextString );
+            CPLDebug("Viewranger", "string %u %s", ii,
+                     paszStrings[ii] );
 
-                char* pszTmpName = CPLRecode(paszStrings[ii],
-                                     szInCharset, szOutCharset);
-                poDS->SetMetadataItem( pszTag, pszTmpName );
-                CPLFree(pszTmpName);
-                // CPLPopErrorHandler();
-            } else {
-                CPLDebug("Viewranger",
-                         "Could not set String%d Metadata - CPLsnprintf(..., VRCpszTAGlen %s) returned %d",
-                         ii, paszStrings[ii], ret);
+            if (paszStrings[ii]!=nullptr && *paszStrings[ii]) {
+                // Save the string as a MetadataItem.
+                const int VRCpszTAGlen=18;
+                char pszTag[VRCpszTAGlen+1]="";
+                int ret=CPLsnprintf(pszTag, VRCpszTAGlen, "String%u", ii);
+                pszTag[VRCpszTAGlen] = '\000';
+                if(VRCpszTAGlen>=ret && ret>0) {
+                    // CPLRecode() may call CPLError
+                    // Do we wish to override the error handling ?
+                    // CPLErrorReset();
+                    // CPLPushErrorHandler(CPLQuietErrorHandler);
+
+                    char* pszTmpName = CPLRecode(paszStrings[ii],
+                                                 szInCharset, szOutCharset);
+                    poDS->SetMetadataItem( pszTag, pszTmpName );
+                    CPLFree(pszTmpName);
+                    // CPLPopErrorHandler();
+                } else {
+                    CPLDebug("Viewranger",
+                             "Could not set String%d Metadata - CPLsnprintf(..., VRCpszTAGlen %s) returned %d",
+                             ii, paszStrings[ii], ret);
+                }
+            }
+
+            // CPLRecode() may call CPLError
+            // Do we wish to override the error handling ?
+            // CPLErrorReset();
+            // CPLPushErrorHandler(CPLQuietErrorHandler);
+
+            poDS->sLongTitle = CPLRecode(paszStrings[0],
+                                         szInCharset, szOutCharset);
+            poDS->SetMetadataItem("TIFFTAG_IMAGEDESCRIPTION",
+                                  poDS->sLongTitle.c_str(), "" );
+            // CPLPopErrorHandler();
+        } // for ii
+
+        if (nStringCount > 1) {
+            // CPLRecode() may call CPLError
+            // Do we wish to override the error handling ?
+            // CPLErrorReset();
+            // CPLPushErrorHandler(CPLQuietErrorHandler);
+            
+            poDS->sCopyright = CPLRecode(paszStrings[1],
+                                         szInCharset, szOutCharset);
+            poDS->SetMetadataItem("TIFFTAG_COPYRIGHT",
+                                  poDS->sCopyright.c_str(), "" );
+            // CPLPopErrorHandler();
+            
+            // This is Digital Right Management (DRM), but not encyption.
+            // Explicitly put the file's DeviceID into the metadata so that
+            // it can be preserved if the data is saved in another format.
+            // We are *not* filing off the serial numbers.
+            if (nStringCount > 5 && *paszStrings[5]) {
+                poDS->SetMetadataItem("VRC ViewRanger Device ID",
+                                      CPLString(paszStrings[5]).c_str(), "" );
             }
         }
-    }
 
-    if (poOpenInfo->pszFilename) {
-        poDS->sFileName = CPLGetBasename(poOpenInfo->pszFilename);
-    }
+        // Free the array before it goes out of scope.
+        for (unsigned int ii=0; ii<nStringCount; ++ii) {
+            if (paszStrings[ii]) {
+                VSIFree(paszStrings[ii]);
+                paszStrings[ii] = nullptr;
+            }
+        }
+        VSIFree(paszStrings);
+        paszStrings= nullptr ;
 
-    if (nStringCount > 0) {
-        // CPLRecode() may call CPLError
-        // Do we wish to override the error handling ?
-        // CPLErrorReset();
-        // CPLPushErrorHandler(CPLQuietErrorHandler);
+    } // if (nStringCount > 0)
 
-        poDS->sLongTitle = CPLRecode(paszStrings[0],
-                                     szInCharset, szOutCharset);
-        poDS->SetMetadataItem("TIFFTAG_IMAGEDESCRIPTION",
-                              poDS->sLongTitle.c_str(), "" );
-        // CPLPopErrorHandler();
-    }
-    if (nStringCount > 1) {
-        // CPLRecode() may call CPLError
-        // Do we wish to override the error handling ?
-        // CPLErrorReset();
-        // CPLPushErrorHandler(CPLQuietErrorHandler);
-        
-        poDS->sCopyright = CPLRecode(paszStrings[1],
-                                     szInCharset, szOutCharset);
-        poDS->SetMetadataItem("TIFFTAG_COPYRIGHT",
-                              poDS->sCopyright.c_str(), "" );
-        // CPLPopErrorHandler();
-    }
-    if (nStringCount > 5 && *paszStrings[5]) {
-        poDS->SetMetadataItem("VRC ViewRanger Device ID",
-                              CPLString(paszStrings[5]).c_str(), "" );
-    }
 
     poDS->nLeft   = VRGetInt( poDS->abyHeader, nNextString );
     poDS->nTop    = VRGetInt( poDS->abyHeader, nNextString +4 );
@@ -1227,7 +1249,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     if (poDS->nScale==0) {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Cannot locate a VRC map with zero scale");
-        // delete poDS;
+        delete poDS;
         return nullptr;
     }
 
@@ -1244,7 +1266,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Map with %g metre pixels is too large scale (detailed) for the current VRC driver",
                  poDS->dfPixelMetres);
-        // delete poDS;
+        delete poDS;
         return nullptr;        
     }
     
@@ -1561,16 +1583,6 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     CPLDebug("Viewranger", "Copyright: %s",  poDS->sCopyright.c_str());
     CPLDebug("Viewranger", "%g metre pixels",poDS->dfPixelMetres);
 
-    if (nullptr!=paszStrings) { //-V547
-        for (unsigned int ii=0; ii<nStringCount; ++ii) {
-            if (paszStrings[ii]) {
-                VSIFree(paszStrings[ii]);
-                paszStrings[ii] = nullptr;
-            }
-        }
-        VSIFree(paszStrings);
-        paszStrings= nullptr ;
-    }
 
 /* -------------------------------------------------------------------- */
 /*      Create band information objects.                                */
@@ -2463,7 +2475,7 @@ void CPL_DLL GDALRegister_VRC()
         return;
 
     auto*poDriver = new GDALDriver();
-    if (poDriver==nullptr) {
+    if (poDriver==nullptr) { // -V668
         CPLError(CE_Failure, CPLE_ObjectNull,
                  "Could not build a driver for VRC"
                  );
