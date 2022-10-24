@@ -119,22 +119,14 @@ unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset )
 // Some CRS use the "old" axis convention
 #define VRC_SWAP_AXES        poSRS->SetAxisMappingStrategy( OAMS_TRADITIONAL_GIS_ORDER )
 
-#define VRC_EPSG(A) errImport=poSRS->importFromEPSGA(A)
+#define VRC_EPSG(A) nEPSG=(A); errImport=poSRS->importFromEPSGA(nEPSG)
 
 extern OGRSpatialReference* CRSfromCountry(int nCountry)
 {
     OGRErr errImport=OGRERR_NONE;
+    int nEPSG=0;
 
-    // OGRSpatialReference* poSRS=nullptr;
     auto* poSRS=new OGRSpatialReference();
-    if (nullptr==poSRS) {
-        CPLDebug("Viewranger",
-                 "CRSfromCountry(%d) could not make an OGRSpatialReference object",
-                 nCountry);
-        delete poSRS;
-        return nullptr;
-    }
-
     switch (nCountry) {
         // case 0: break; // Online maps
     case  1: VRC_EPSG(27700);   break; // UK Ordnace Survey
@@ -178,13 +170,15 @@ extern OGRSpatialReference* CRSfromCountry(int nCountry)
 
     if (errImport != OGRERR_NONE) {
         CPLDebug("Viewranger",
-                 "failed to import EPSG for CRSfromCountry(%d) error %d",
-                 nCountry, errImport);
+                 "failed to import EPSG:%d for CRSfromCountry(%d) error %d",
+                 nEPSG, nCountry, errImport);
         delete poSRS;
         poSRS = nullptr;
     }
     return poSRS;
 } // CRSfromCountry()
+#undef VRC_EPSG
+#undef VRC_SWAP_AXES
 
 extern const char* CharsetFromCountry(int nCountry)
 {
