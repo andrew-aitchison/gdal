@@ -99,11 +99,7 @@ public:
     // https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn
     // https://gdal.org/development/rfc/rfc73_proj6_wkt2_srsbarn.html
     const OGRSpatialReference* GetSpatialRef() const override {
-        return GetSpatialRefFromOldGetProjectionRef();
-    }
-    const char *_GetProjectionRef
-    () override {
-        return sDatum.c_str();
+        return poSRS;
     }
 
     CPLErr GetGeoTransform( double * padfTransform ) override;
