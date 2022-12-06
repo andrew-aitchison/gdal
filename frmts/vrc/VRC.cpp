@@ -322,8 +322,8 @@ VRCRasterBand::VRCRasterBand(
 
     // Image Structure Metadata:  INTERLEAVE=PIXEL would be good
     GDALRasterBand::SetMetadataItem( "INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE" );
-    
-    if (poVRCDS->nMagic == vrc_magic_metres) {        
+
+    if (poVRCDS->nMagic == vrc_magic_metres) {
         eDataType = GDT_Byte; // GDT_UInt32;
         // GCI_Undefined; // GCI_GrayIndex; // GCI_PaletteIndex;
         // GCI_RedBand; // GCI_GreenBand;  // GCI_BlueBand; //GCI_AlphaBand;
@@ -434,7 +434,7 @@ VRCRasterBand::VRCRasterBand(
                      nThisOverview, nOverviewCount);
         }
     }
-    
+
     CPLDebug("Viewranger",
              "%s %p->VRCRasterBand(%p, %d, %d, %d, %p) finished",
              poVRCDS->sFileName.c_str(),
@@ -490,7 +490,7 @@ CPLErr VRCRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
 
 {
     auto *poGDS = static_cast<VRCDataset *>(poDS);
-    
+
     CPLDebug("Viewranger", "IReadBlock(%d,%d,%p) %d",
              nBlockXOff, nBlockYOff, pImage, nThisOverview);
     CPLDebug("Viewranger", "Block (%d,%d) %d x %d band %d (%d x %d) overview %d",
@@ -666,7 +666,7 @@ GDALColorTable *VRCRasterBand::GetColorTable()
 VRCDataset::~VRCDataset()
 {
     GDALDataset::FlushCache(TRUE);
-    
+
     if( fp != nullptr )
         VSIFCloseL( fp );
 
@@ -904,7 +904,7 @@ unsigned int* VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         CPLError(CE_Failure, CPLE_AppDefined,
                   "VRCBuildTileIndex called for a map with mapID %d",
                   nMapID);
-    }    
+    }
     if ( VSIFSeekL( fp, static_cast<size_t>(nTileIndexStart), SEEK_SET ) ) {
         CPLError(CE_Failure, CPLE_AppDefined,
                   "cannot seek to VRC tile index start 0x%xu",
@@ -947,7 +947,7 @@ unsigned int* VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
     }
     int nTileFound=0;
     unsigned int nLastTileFound = anNewTileIndex[nTileFound++] = nTileIndexStart;
-    
+
     while (nTileFound < tileXcount * tileYcount) {
         if (isNullTileIndex(anFirstTileIndex[nTileFound])) {
             anNewTileIndex[nTileFound++] = 0;
@@ -971,7 +971,7 @@ unsigned int* VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
             nTileFound++;
             continue; // Hack. rename nLastFound to ..count.. ?
         }
-        
+
         int nOverviewCount = VRReadInt(fp, nLastTileFound);
 
         const int nVRCmaxOverviews=7;
@@ -1052,7 +1052,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     CPLDebug("Viewranger",
              "VRCDataset::Open( %p )",
              poOpenInfo);
-    
+
     if (poOpenInfo==nullptr || !Identify(poOpenInfo))
         return nullptr;
 
@@ -1211,13 +1211,13 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
             // Do we wish to override the error handling ?
             // CPLErrorReset();
             // CPLPushErrorHandler(CPLQuietErrorHandler);
-            
+
             poDS->sCopyright = CPLRecode(paszStrings[1],
                                          szInCharset, szOutCharset);
             poDS->SetMetadataItem("TIFFTAG_COPYRIGHT",
                                   poDS->sCopyright.c_str(), "" );
             // CPLPopErrorHandler();
-            
+
             // This is Digital Right Management (DRM), but not encyption.
             // Explicitly put the file's DeviceID into the metadata so that
             // it can be preserved if the data is saved in another format.
@@ -1261,15 +1261,15 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
                  poDS->dfPixelMetres, poDS->nScale);
     } else {
     }
-    
+
     if (poDS->dfPixelMetres <0.5) {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Map with %g metre pixels is too large scale (detailed) for the current VRC driver",
                  poDS->dfPixelMetres);
         delete poDS;
-        return nullptr;        
+        return nullptr;
     }
-    
+
     {
         double dfRasterXSize =
             ((10000.0)*(poDS->nRight - poDS->nLeft)) / poDS->nScale;
@@ -1283,7 +1283,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
         //             but                 = 11 with 32bit ints.
         //
         // ... but could still overflow when casting from df... to n... FixMe
-        
+
         CPLDebug("Viewranger", "%d=%f x %d=%f pixels",
                  poDS->nRasterXSize, dfRasterXSize,
                  poDS->nRasterYSize, dfRasterYSize);
@@ -1354,9 +1354,9 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Too many tiles: %d x %d",
                      poDS->tileXcount, poDS->tileYcount );
-            return nullptr; 
+            return nullptr;
         }
-        
+
         CPLDebug("Viewranger", "tileSizeMax %d\ttileSizeMin %d",
                  poDS->tileSizeMax, poDS->tileSizeMin);
         CPLDebug("Viewranger", "chksum 0x%08x", chksum);
@@ -1574,7 +1574,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
         poDS->poSRS = CRSfromCountry(poDS->nCountry);
     }
 
-    
+
     /********************************************************************/
     /*             Report some strings found in the file                */
     /********************************************************************/
@@ -1617,7 +1617,7 @@ GDALDataset *VRCDataset::Open( GDALOpenInfo * poOpenInfo )
     }
 
     poDS->SetDescription( poOpenInfo->pszFilename );
-    
+
     return( poDS );
 } // VRCDataset::Open()
 
@@ -1693,7 +1693,7 @@ void dumpPPM(unsigned int width,
                  );
         return;
     }
-    
+
     const size_t nHeaderBufSize = 40;
     char acHeaderBuf[nHeaderBufSize]="";
     size_t nHeaderSize=0;
@@ -1735,7 +1735,7 @@ void dumpPPM(unsigned int width,
                              pszPPMname, r, nWriteErr, errstr);
                     break;
                 }
-    
+
                 pRow += 3*static_cast<size_t>(rowlength);
 
             } else { // must be band interleaved
@@ -2071,7 +2071,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     // pbyPNGbuffer needs freeing in lots of places, before we return nullptr
     auto *pbyPNGbuffer = static_cast< png_byte*>
         (VSIMalloc3(3,
-                    static_cast<size_t>(nPNGwidth), 
+                    static_cast<size_t>(nPNGwidth),
                     static_cast<size_t>(nPNGheight) ));
     if (pbyPNGbuffer == nullptr) {
         CPLError(CE_Failure, CPLE_OutOfMemory,
@@ -2388,7 +2388,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                    nThisOverview, nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy,
                    nBand, nVRCHeader);
         dumpPNG(
-                // static_cast<unsigned int>(nPNGwidth), 
+                // static_cast<unsigned int>(nPNGwidth),
                 // static_cast<unsigned int>(nPNGheight),
                 oVRCpng_data.pData,
                 static_cast<int>(oVRCpng_data.current),
@@ -2491,7 +2491,7 @@ void CPL_DLL GDALRegister_VRC()
     poDriver->SetMetadataItem( GDAL_DMD_HELPTOPIC,
                                "frmt_various.html#VRC" );
     poDriver->SetMetadataItem( GDAL_DMD_EXTENSION, "VRC" );
-    
+
     // poDriver->SetMetadataItem( GDAL_DMD_CREATIONDATATYPES, "Byte Int16" );
     poDriver->SetMetadataItem( GDAL_DMD_CREATIONDATATYPES, "" );
     poDriver->SetMetadataItem( GDAL_DCAP_VIRTUALIO, "YES" );
@@ -2508,14 +2508,14 @@ void CPL_DLL GDALRegister_VRC()
 
     poDriver->pfnOpen = VRCDataset::Open;
     poDriver->pfnIdentify = VRCDataset::Identify;
-    
+
     GetGDALDriverManager()->RegisterDriver( poDriver );
 }   // GDALRegister_VRC()
 
 // -------------------------------------------------------------------------
 
 int VRCRasterBand::GetOverviewCount()
-{    
+{
     auto*poVRCDS = static_cast<VRCDataset*>(poDS);
     if (poVRCDS == nullptr) {
         CPLDebug("VRC",
@@ -2560,13 +2560,13 @@ int VRCRasterBand::GetOverviewCount()
                  poFullBand, poFullBand->nOverviewCount, poFullBand->papoOverviewBands
                  );
     }
-    
+
     if (poFullBand->papoOverviewBands) {
         return poFullBand->nOverviewCount;
-    } else {    
+    } else {
         return 0;
     }
-    
+
 } // VRCRasterBand::GetOverviewCount
 
 /************************************************************************/
@@ -2582,7 +2582,7 @@ GDALRasterBand *VRCRasterBand::GetOverview( int iOverviewIn )
                  this, iOverviewIn);
         return nullptr;
     }
-    
+
     auto* poFullBand =
         static_cast<VRCRasterBand*>(poVRCDS->GetRasterBand(nBand));
     if (poFullBand == nullptr) {
@@ -2598,7 +2598,7 @@ GDALRasterBand *VRCRasterBand::GetOverview( int iOverviewIn )
                  poFullBand, iOverviewIn);
         return poFullBand;
     }
-  
+
     if( nOverviewCount>32) {
         CPLDebug("Viewranger",
                  "nBand %d requested overview %d of %d: more than 32 is silly - something has gone wrong",
@@ -2784,7 +2784,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                   "VRCRasterBand::read_VRC_Tile_Metres eDataType %d unexpected for null tile",
                   eDataType);
     }
-    
+
     if (nTileIndex==0) {
         // No data for this tile
         CPLDebug("Viewranger",
@@ -2852,10 +2852,8 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
         CPLDebug("Viewranger",
                  "VRCRasterBand::read_VRC_Tile_Metres(.. %d %d ..) empty tile",
                  block_xx, block_yy );
-        return; 
+        return;
     }
-
-    // here 22 Aug, 2020
 
     dumpTileHeaderData(fp, nTileIndex,
                        1+static_cast<unsigned int>(nOverviewCount),
@@ -2878,10 +2876,11 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
              "\toverview level %d data at x%08x",
              nThisOverview, anTileOverviewIndex[nThisOverview+1] );
 
-    bool bTileShrink = (anTileOverviewIndex[nThisOverview+1]==0);
+    bool bTileShrink = (0==anTileOverviewIndex[nThisOverview+1]);
     unsigned int nShrinkFactor=1;
+    // unsigned int nShrinkFactor= bTileShrink ? 2 : 1 ;
     if (bTileShrink == false) {
-        nShrinkFactor = 1;
+        nShrinkFactor = 1; // -V1048 reassigning initialized value
         if ( VSIFSeekL( fp, anTileOverviewIndex[nThisOverview+1], SEEK_SET ) ) {
             CPLError(CE_Failure, CPLE_AppDefined,
                       "cannot seek to overview level %d data at x%08x",
@@ -2896,7 +2895,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                  poVRCDS->tileSizeMax, poVRCDS->tileSizeMin,
                  nThisOverview
                  );
-        
+
     } else { // bTileShrink == true;
         // Data for this block is not available
         // so we need to rescale another overview.
@@ -3034,7 +3033,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
             // decrement at *start* of loop
             //so that we can have the last pass with loopY==0
             --loopY;
-            
+
             unsigned int loop = (nYlimit-1-loopY) + loopX*nPNGYcount;
 
             unsigned int nHeader =
@@ -3135,10 +3134,10 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                         if (nTopRow<0) {
                             CPLDebug("Viewranger",
                                      "%d tall PNG tile: top row %d above top of %d tall block",
-                                     nPNGheight, nTopRow, nBlockYSize 
+                                     nPNGheight, nTopRow, nBlockYSize
                                      );
                         }
-                    
+
                         // Blank the top of the top tile if necessary
                         if (loopY==nYlimit-1) {
                             auto *pGImage = static_cast<GByte*>(pImage);
@@ -3148,9 +3147,9 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                                         nVRCNoData;
                                 }
                                 pGImage += nBlockXSize;
-                            } 
+                            }
                         }
-                    
+
                         int nCopyResult=0;
                         if(!bTileShrink){ // anTileOverviewIndex[nThisOverview+1]) {
                             CPLDebug("Viewranger",
@@ -3217,7 +3216,7 @@ VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp,
                              nThisOverview,
                              block_xx, block_yy
                              );
-                    
+
                 }
                 break;
 
@@ -3248,7 +3247,7 @@ int VRCRasterBand::Copy_Tile_into_Block
  )
 {
     // Copy image data from buffer to band
-    
+
     CPLDebug("Viewranger PNG",
              "Copy_Tile_into_Block(%p %d x %d -> [%d %d)x[%d %d) %p) band %d",
              pbyPNGbuffer,
@@ -3266,7 +3265,7 @@ int VRCRasterBand::Copy_Tile_into_Block
     // Need to adjust if we have a short (underheight) tile.
     // werdna, 2020 July 09 done ? No.
     // What about underwide tiles/blocks ?
-        
+
 
     // GByte *pGImage = &(((GByte *)(pImage))[rowStartPixel]);
     GByte *pGImage = (static_cast<GByte*>(pImage))+rowStartPixel;
@@ -3286,13 +3285,13 @@ int VRCRasterBand::Copy_Tile_into_Block
             //continue;
         }
     }
-                        
+
     CPLDebug("Viewranger PNG",
              "band %d overview %d copying to [%d %d) x [%d %d)",
              nBand, nThisOverview,
              nLeftCol, nRightCol, nTopRow, nBottomRow
              );
-    
+
     int nCopyStopRow=std::min(nPNGheight,nBlockYSize-nTopRow);
 
     if (nBottomRow!=nCopyStopRow) {
@@ -3329,7 +3328,7 @@ int VRCRasterBand::Copy_Tile_into_Block
 
         pGImage += nBlockXSize;
     } // for ii < nCopyStopRow
-    
+
     CPLDebug("Viewranger PNG",
              "copied PNG buffer %p %d x %d into pImage %p %d x %d",
              pbyPNGbuffer, nPNGwidth, nPNGheight,
@@ -3367,7 +3366,7 @@ int VRCRasterBand::Shrink_Tile_into_Block
              nBlockXSize,
              nBlockYSize
              );
-    
+
     if (nTopRow <0 || nTopRow>= nBlockYSize) {
             CPLDebug("Viewranger PNG",
                      "Shrink_Tile_into_Block: nTopRow %d not in [0,%d)",
@@ -3403,7 +3402,7 @@ int VRCRasterBand::Shrink_Tile_into_Block
     int nCopyStopRow=std::min(nTopRow+(nPNGheight+1)/2, nBottomRow);
 
     // here 10 Feb 2021
-        
+
     int nOutRowStartPixel =
         nCopyStartRow * nBlockXSize; // std::max((1+nPNGwidth)/2, nBlockXSize)
     // + nCopyStartCol;
@@ -3421,7 +3420,7 @@ int VRCRasterBand::Shrink_Tile_into_Block
              "Shrink_Tile_into_Block: loopX-tile-adj missing jj loops [%d/%d,%d/%d/%d)",
              // need adjustment for loopX'th tile,
              nLeftCol,nCopyStartCol, nCopyStopCol,nRightCol,nBlockXSize);
-        
+
 
     GByte *pGImage = static_cast<GByte *>(pImage)
         // need + adjust for loopX'th tile
@@ -3478,13 +3477,13 @@ int VRCRasterBand::Shrink_Tile_into_Block
         }
         pGImage += nBlockXSize;
     } // for ii < nCopyStopRow
-    
+
     CPLDebug("Viewranger PNG",
              "shrunk PNG buffer %p %d x %d into pImage %p %d x %d within %d x %d",
              pbyPNGbuffer, nPNGwidth, nPNGheight,
              pImage, nBlockXSize, nBlockYSize, nRasterXSize, nRasterYSize
              );
-         
+
 
     return 0;
 } // VRCRasterBand::Shrink_Tile_into_Block
