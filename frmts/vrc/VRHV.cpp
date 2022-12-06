@@ -123,13 +123,13 @@ char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
 {
     if (byteaddr==0) return( CPLStrdup (""));
     
-    int seekres = VSIFSeekL( fp, byteaddr, SEEK_SET );
+    const int seekres = VSIFSeekL( fp, byteaddr, SEEK_SET );
     if ( seekres ) {
         CPLError( CE_Failure, CPLE_AppDefined,
                   "cannot seek to VRH string" );
         return nullptr;
     }
-    int string_length = VRReadInt(fp);
+    const int string_length = VRReadInt(fp);
     if (string_length<=0) {
         return( CPLStrdup (""));
     }
@@ -143,7 +143,7 @@ char *VRHVDataset::VRHGetString( VSILFILE *fp, unsigned long long byteaddr )
         return nullptr;
     }
     
-    size_t bytesread =
+    const size_t bytesread =
       VSIFReadL( pszNewString, 1, ustring_length, fp);
 
     if (bytesread < ustring_length) {
@@ -320,7 +320,7 @@ CPLErr VRHRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
     if ( poGDS->nMagic == vrh_magic ) {
 
         if ( poGDS->anColumnIndex[nBlockXOff] ) {
-            int seekres =
+            const int seekres =
                 VSIFSeekL( poGDS->fp, poGDS->anColumnIndex[nBlockXOff], SEEK_SET );
             if ( seekres ) {
                 CPLError( CE_Failure, CPLE_AppDefined,
@@ -463,7 +463,7 @@ CPLErr VRHVDataset::GetGeoTransform( double * padfTransform )
     double dTop = nTop ;
     double dBottom = nBottom ;
 
-    double tenMillion = 10.0 * 1000 * 1000;
+    const double tenMillion = 10.0 * 1000 * 1000;
      if (nCountry == 17) {
         // This may not be correct
         // USA, Discovery (Spain) and some Belgium (VRH height) maps have coordinate unit of
@@ -531,8 +531,8 @@ int VRHVDataset::Identify( GDALOpenInfo * poOpenInfo )
          return FALSE;
     }
 
-    unsigned int magic = VRGetUInt(poOpenInfo->pabyHeader, 0);
-    unsigned int version = VRGetUInt(poOpenInfo->pabyHeader, 4);
+    const unsigned int magic = VRGetUInt(poOpenInfo->pabyHeader, 0);
+    const unsigned int version = VRGetUInt(poOpenInfo->pabyHeader, 4);
 
     // .VRH files can be very small and may not have a header
     if(magic != vrv_magic && magic != vmc_magic && magic != vrh_magic
@@ -600,13 +600,13 @@ int VRHVDataset::Identify( GDALOpenInfo * poOpenInfo )
         CPLDebug("ViewrangerHV", "Doing extra checks for VRH file %s",
                  poOpenInfo->pszFilename);
 
-        int nLeft = VRGetInt( poOpenInfo->pabyHeader, 0 );
-        int nRight = VRGetInt( poOpenInfo->pabyHeader, 4 );
-        int nBottom = VRGetInt( poOpenInfo->pabyHeader, 8 );
-        int nTop = VRGetInt( poOpenInfo->pabyHeader, 12 );
-        int nWidth = nRight - nLeft;
-        int nHeight = nTop - nBottom;
-        int nPixelMetres = VRGetInt( poOpenInfo->pabyHeader, 16 );
+        const int nLeft = VRGetInt( poOpenInfo->pabyHeader, 0 );
+        const int nRight = VRGetInt( poOpenInfo->pabyHeader, 4 );
+        const int nBottom = VRGetInt( poOpenInfo->pabyHeader, 8 );
+        const int nTop = VRGetInt( poOpenInfo->pabyHeader, 12 );
+        const int nWidth = nRight - nLeft;
+        const int nHeight = nTop - nBottom;
+        const int nPixelMetres = VRGetInt( poOpenInfo->pabyHeader, 16 );
         const int hundmill = 100 * 1000 * 1000;
 
         CPLDebug("ViewrangerHV", "nLeft %d nRight %d nBottom %d nTop %d nWidth %d nHeight %d",
@@ -718,11 +718,11 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
                 // Should check that poDS->nRasterXSize and
                 // poDS->nRasterXSize are integers ...
                 auto dfPixelMetres = static_cast<double>(poDS->nPixelMetres);
-                double dfRasterXSize =
+                const double dfRasterXSize =
                     static_cast<double>(poDS->nRight - poDS->nLeft) /
                     dfPixelMetres;
                 poDS->nRasterXSize = static_cast<int>(dfRasterXSize);
-                double dfRasterYSize =
+                const double dfRasterYSize =
                     static_cast<double>(poDS->nTop - poDS->nBottom) /
                     dfPixelMetres;
                 poDS->nRasterYSize = static_cast<int>(dfRasterYSize);
@@ -741,7 +741,7 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
             /*************************************************************/
             /*             Read index data from VRH file                 */
             /*************************************************************/
-            int seekres =
+            const int seekres =
                 VSIFSeekL( poDS->fp, vrh_header_offset+20, SEEK_SET );
             if ( seekres ) {
                 CPLError( CE_Failure, CPLE_AppDefined,
@@ -781,7 +781,7 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
 
         {
             // based on 10 pixels/millimetre (254 dpi)
-            double scaleFactor = poDS->nPixelMetres; //100000.0/poDS->nScale;
+            const double scaleFactor = poDS->nPixelMetres; //100000.0/poDS->nScale;
             poDS->nTop = poDS->nBottom +
                 static_cast<int>(scaleFactor*poDS->nRasterYSize);
             poDS->nRight = poDS->nLeft + 
@@ -819,9 +819,9 @@ GDALDataset *VRHVDataset::Open( GDALOpenInfo * poOpenInfo )
         poDS->nScale = VRGetUInt( poDS->abyHeader, 0x20 );
         {
             // I am curious about these values
-            unsigned int l5 = VRGetUInt(poDS->abyHeader, 12);
-            unsigned int dc1 = (static_cast<unsigned char*>(poDS->abyHeader))[24];
-            unsigned int p = VRGetUInt(poDS->abyHeader, 25);
+            const unsigned int l5 = VRGetUInt(poDS->abyHeader, 12);
+            const unsigned int dc1 = (static_cast<unsigned char*>(poDS->abyHeader))[24];
+            const unsigned int p = VRGetUInt(poDS->abyHeader, 25);
 
             CPLDebug("ViewrangerHV",
                      "VMC nPixelMetres %d nScale %d l5 x%08x dc1 x%02x p x%08x",
@@ -1108,7 +1108,7 @@ VRHRasterBand::read_VMC_Tile(VSILFILE *fp,
     int nMaxPix=0;
     for (int x=0; x<nBlockXSize; x++) {
         for (int y=nBlockYSize-1 ; y>=0; y--) {
-            int nPix = x + y*nBlockXSize;
+            const int nPix = x + y*nBlockXSize;
             if (nPix>nMaxPix) {
                 nMaxPix=nPix;
             }
@@ -1165,7 +1165,7 @@ VRHRasterBand::read_VRV_Tile(VSILFILE *fp,
                   "cannot seek to VRV data" );
         return ;
     }
-    vsi_l_offset string_length = VRReadUInt(fp);
+    const vsi_l_offset string_length = VRReadUInt(fp);
     seekres = VSIFSeekL( fp, 0x28+string_length, SEEK_SET );
     if ( seekres ) {
         CPLError( CE_Failure, CPLE_AppDefined,
