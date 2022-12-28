@@ -5,82 +5,81 @@
 
 #include "VRC.h"
 
-extern short VRGetShort(const void* base, int byteOffset )
+extern short VRGetShort(const void *base, int byteOffset)
 {
-    const unsigned char * buf =
-        static_cast<const unsigned char*>(base)+byteOffset;
+    const unsigned char *buf =
+        static_cast<const unsigned char *>(base) + byteOffset;
     short vv = buf[0];
     vv |= (buf[1] << 8);
 
-    return(vv);
+    return (vv);
 }
 
-signed int VRGetInt(const void* base, unsigned int byteOffset )
+signed int VRGetInt(const void *base, unsigned int byteOffset)
 {
-    const unsigned char* buf =
-         static_cast<const unsigned char*>(base)+byteOffset;
+    const unsigned char *buf =
+        static_cast<const unsigned char *>(base) + byteOffset;
     signed int vv = buf[0];
     vv |= (buf[1] << 8U);
     vv |= (buf[2] << 16U);
     vv |= (buf[3] << 24U);
-
-    return(vv);
+    return (vv);
 }
-unsigned int VRGetUInt(const void* base, const unsigned int byteOffset )
+unsigned int VRGetUInt(const void *base, const unsigned int byteOffset)
 {
-    const auto *const buf = static_cast<const unsigned char*>(base)+byteOffset;
+    const auto *const buf =
+        static_cast<const unsigned char *>(base) + byteOffset;
     auto vv = static_cast<unsigned int>(buf[0]);
     vv |= static_cast<unsigned int>(buf[1]) << 8U;
     vv |= static_cast<unsigned int>(buf[2]) << 16U;
     vv |= static_cast<unsigned int>(buf[3]) << 24U;
 
-    return(static_cast<unsigned int>(vv));
+    return (static_cast<unsigned int>(vv));
 }
-
 
 ///////////////////////////////////////////////////////////////////
 
-
 int VRReadChar(VSILFILE *fp)
 {
-    unsigned char buf[4]="";
+    unsigned char buf[4] = "";
     // size_t ret =
     VSIFReadL(buf, 1, 1, fp);
     unsigned char vv = buf[0];
-    // if (ret<1) return(EOF);
-    return(vv);
+    // if (ret<1) return (EOF);
+    return (vv);
 }
 
 int VRReadShort(VSILFILE *fp)
 {
-    unsigned char buf[4]="";
+    unsigned char buf[4] = "";
     // size_t ret =
     VSIFReadL(buf, 1, 2, fp);
     short vv = buf[0];
     vv |= (buf[1] << 8);
-    // if (ret<2) return(EOF);
-    return(vv);
+    // if (ret<2) return (EOF);
+    return (vv);
 }
 
 int VRReadInt(VSILFILE *fp)
 {
-    unsigned char buf[4]="";
+    unsigned char buf[4] = "";
     // size_t ret =
     VSIFReadL(buf, 1, 4, fp);
     signed int vv = buf[0];
     vv |= (buf[1] << 8);
     vv |= (buf[2] << 16);
     vv |= (buf[3] << 24);
-    // if (ret<4) return(EOF);
-    return(vv);
+    // if (ret<4) return (EOF);
+    return (vv);
 }
-int VRReadInt(VSILFILE *fp, unsigned int byteOffset )
+int VRReadInt(VSILFILE *fp, unsigned int byteOffset)
 {
-    if ( VSIFSeekL( fp, byteOffset, SEEK_SET ) ) {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                  "VRReadInt cannot seek to VRC byteOffset %d=x%08x",
-                  byteOffset, byteOffset);
-        return CE_Failure; // dangerous ?
+    if (VSIFSeekL(fp, byteOffset, SEEK_SET))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "VRReadInt cannot seek to VRC byteOffset %d=x%08x", byteOffset,
+                 byteOffset);
+        return CE_Failure;  // dangerous ?
     }
     return VRReadInt(fp);
 }
@@ -88,87 +87,130 @@ int VRReadInt(VSILFILE *fp, unsigned int byteOffset )
 unsigned int VRReadUInt(VSILFILE *fp)
 {
     // unsigned int vv;
-    unsigned char buf[4]="";
+    unsigned char buf[4] = "";
     // size_t ret =
     VSIFReadL(buf, 1, 4, fp);
-    // if (ret<4) return(EOF);
-    return(VRGetUInt(buf,0));
+    // if (ret<4) return (EOF);
+    return (VRGetUInt(buf, 0));
 }
-unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset )
+unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
 {
-    if ( VSIFSeekL( fp, byteOffset, SEEK_SET ) ) {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                  "VRReadInt cannot seek to VRC byteOffset %d=x%08x",
-                  byteOffset, byteOffset);
-        return CE_Failure; // dangerous ?
+    if (VSIFSeekL(fp, byteOffset, SEEK_SET))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "VRReadInt cannot seek to VRC byteOffset %d=x%08x", byteOffset,
+                 byteOffset);
+        return CE_Failure;  // dangerous ?
     }
     return VRReadUInt(fp);
 }
-
 
 /*
  *               CRSfromCountry
  *
  * GDAL v1:
- * const char* CRSfromCountry(int nCountry)
+ * const char *CRSfromCountry(int nCountry)
  * GDAL v2 and v3:
  * OGRSpatialReference* CRSfromCountry(int nCountry)
  *
  */
 
 // Some CRS use the "old" axis convention
-#define VRC_SWAP_AXES        poSRS->SetAxisMappingStrategy( OAMS_TRADITIONAL_GIS_ORDER )
+#define VRC_SWAP_AXES poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER)
 
-#define VRC_EPSG(A) nEPSG=(A); errImport=poSRS->importFromEPSGA(nEPSG)
+#define VRC_EPSG(A)                                                            \
+    nEPSG = (A);                                                               \
+    errImport = poSRS->importFromEPSGA(nEPSG)
 
-extern OGRSpatialReference* CRSfromCountry(int nCountry)
+extern OGRSpatialReference *CRSfromCountry(int nCountry)
 {
-    OGRErr errImport=OGRERR_NONE;
-    int nEPSG=0;
+    OGRErr errImport = OGRERR_NONE;
+    int nEPSG = 0;
 
-    auto* poSRS=new OGRSpatialReference();
-    switch (nCountry) {
-        // case 0: break; // Online maps
-    case  1: VRC_EPSG(27700);   break; // UK Ordnace Survey
-    case  2: VRC_EPSG(29901);   break; // Ireland. Could be 29901, 2 or 3
-    case  5: VRC_EPSG(2393); VRC_SWAP_AXES;   break; // Finland
-    case  8: VRC_EPSG(31370);
-        // Other possibilities for Belgium include
-        //   EPSG:21500, EPSG:31300, EPSG:31370, EPSG:6190 and EPSG:3447.
-        // BelgiumOverview.VRC is not EPSG:3812 or EPSG:4171
-        // Some Belgium VRH (height) files are case 17:
-        break;
-    case  9: VRC_EPSG(21781); VRC_SWAP_AXES;  break; // Switzerland
-    case 12: VRC_EPSG(28992);   break; // Nederlands
-    case 13: VRC_EPSG(3907);    break; // tbc, Slovenia
-    case 14: VRC_EPSG(3006); VRC_SWAP_AXES; break; // Sweden SWEREF99
-    case 15: VRC_EPSG(25833);   break; // Norway
-    case 16: VRC_EPSG(32632);   break; // Italy
-    case 17: VRC_EPSG(4267); VRC_SWAP_AXES;
-        // USA, Discovery(Spain/Canaries) and Belgium VRH (height) files
-        break;
-    case 18: VRC_EPSG(2193); VRC_SWAP_AXES; break; // New Zealand
-    case 19: VRC_EPSG(2154);    break; // France
-    case 20: VRC_EPSG(2100);    break; // Greece
-    case 21: VRC_EPSG(3042); VRC_SWAP_AXES;
-        // Spain (Including Discovery Walking Guides)
-        break;
-    case 132: VRC_EPSG(25832);  break; // Austria/Germany/Denmark 
-    case 133: VRC_EPSG(32633);  break; // Czech Republic / Slovakia
-    case 155: VRC_EPSG(28355); // not VRC_EPSG(4283);
-        // Australia
-        // Note that in VRCDataset::GetGeoTransform()
-        // we shift 10million metres north
-        // (which undoes the false_northing).
-        break;
-    default:
-        CPLDebug("Viewranger",
-                 "CRSfromCountry(country %d unknown) assuming WGS 84",
-                 nCountry);
-        VRC_EPSG(4326);   break;
+    auto *poSRS = new OGRSpatialReference();
+    switch (nCountry)
+    {
+        case 0:  // Online maps
+            break;
+        case 1:  // UK Ordnace Survey
+            VRC_EPSG(27700);
+            break;
+        case 2:  // Ireland.
+            VRC_EPSG(29901);
+            //  Could be 29901, 2 or 3
+            break;
+        case 5:  // Finland
+            VRC_EPSG(2393);
+            VRC_SWAP_AXES;
+            break;
+        case 8:  // Belgium, but some Belgium VRH (height) files are case 17:
+            VRC_EPSG(31370);
+            // Other possibilities for Belgium include
+            //   EPSG:21500, EPSG:31300, EPSG:31370, EPSG:6190 and EPSG:3447.
+            // BelgiumOverview.VRC is not EPSG:3812 or EPSG:4171
+            break;
+        case 9:  // Switzerland
+            VRC_EPSG(21781);
+            VRC_SWAP_AXES;
+            break;
+        case 12:  // Nederlands
+            VRC_EPSG(28992);
+            break;
+        case 13:  // Slovenia
+            VRC_EPSG(3907);
+            // tbc
+            break;
+        case 14:  // Sweden SWEREF99
+            VRC_EPSG(3006);
+            VRC_SWAP_AXES;
+            break;
+        case 15:  // Norway
+            VRC_EPSG(25833);
+            break;
+        case 16:  // Italy
+            VRC_EPSG(32632);
+            break;
+        case 17:
+            // USA, Discovery(Spain/Canaries) and Belgium VRH (height) files
+            VRC_EPSG(4267);
+            VRC_SWAP_AXES;
+            break;
+        case 18:  // New Zealand
+            VRC_EPSG(2193);
+            VRC_SWAP_AXES;
+            break;
+        case 19:  // France
+            VRC_EPSG(2154);
+            break;
+        case 20:  // Greece
+            VRC_EPSG(2100);
+            break;
+        case 21:  // Spain (Including Discovery Walking Guides)
+            VRC_EPSG(3042);
+            VRC_SWAP_AXES;
+            break;
+        case 132:  // Austria/Germany/Denmark
+            VRC_EPSG(25832);
+            break;
+        case 133:  // Czech Republic / Slovakia
+            VRC_EPSG(32633);
+            break;
+        case 155:  // Australia
+            // Note that in VRCDataset::GetGeoTransform()
+            // we shift 10million metres north
+            // (which undoes the false_northing).
+            VRC_EPSG(28355);  // not VRC_EPSG(4283);
+            break;
+        default:
+            CPLDebug("Viewranger",
+                     "CRSfromCountry(country %d unknown) assuming WGS 84",
+                     nCountry);
+            VRC_EPSG(4326);
+            break;
     }
 
-    if (errImport != OGRERR_NONE) {
+    if (errImport != OGRERR_NONE)
+    {
         CPLDebug("Viewranger",
                  "failed to import EPSG:%d for CRSfromCountry(%d) error %d",
                  nEPSG, nCountry, errImport);
@@ -176,39 +218,56 @@ extern OGRSpatialReference* CRSfromCountry(int nCountry)
         poSRS = nullptr;
     }
     return poSRS;
-} // CRSfromCountry()
+}  // CRSfromCountry()
 #undef VRC_EPSG
 #undef VRC_SWAP_AXES
 
-extern const char* CharsetFromCountry(int nCountry)
+extern const char *CharsetFromCountry(int nCountry)
 {
     // CPLDebug("Viewranger", "CharsetFromCountry(%d)", nCountry);
-    switch (nCountry) {
-        // case 0: return ""; // Online maps
-    case  1: return "LATIN9"; // UK Ordnance Survey
-    case  2: return "LATIN9"; // Ireland
-    case  5: return "LATIN9"; // Finland
-    case  8: return "LATIN9"; // Belgium. Some Belgium .VRH files are case 17:
-    case  9: return "LATIN9"; // Switzerland
-    case 12: return "LATIN9"; // Nederlands
-    case 13: return "LATIN9"; // Slovenia
-    case 14: return "LATIN9"; // Sweden SWEREF99
-    case 15: return "LATIN9"; // Norway
-    case 16: return "LATIN9"; // Italy
-    case 17: return "LATIN9"; // USA, Discovery(Spain/Canaries)
-        // (Belgium .VRH files are also 17, but .VRH files have no strings).
-    case 18: return "LATIN9"; // New Zealand
-    case 19: return "LATIN9"; // France
-    case 20: return "LATIN9"; // Greece
-        // case 21: return "UTF-8"; // Spain, but not Discovery Walking Guides ?
-    case 132: return "LATIN9"; // Austria/Germany/Denmark 
-    case 133: return "LATIN9"; // Czech Republic / Slovakia, EPSG:25833 tbc may be 32633 or 3045
-    case 155: return "LATIN9"; // Australia
-
-    default:
-        return "UTF-8";
+    switch (nCountry)
+    {
+            // case 0: return ""; // Online maps
+        case 1:  // UK Ordnance Survey
+            return "LATIN9";
+        case 2:  // Ireland
+            return "LATIN9";
+        case 5:  // Finland
+            return "LATIN9";
+        case 8:  // Belgium. Some Belgium .VRH files are case 17:
+            return "LATIN9";
+        case 9:  // Switzerland
+            return "LATIN9";
+        case 12:  // Nederlands
+            return "LATIN9";
+        case 13:  // Slovenia
+            return "LATIN9";
+        case 14:  // Sweden SWEREF99
+            return "LATIN9";
+        case 15:  // Norway
+            return "LATIN9";
+        case 16:  // Italy
+            return "LATIN9";
+        case 17:  // USA, Discovery(Spain/Canaries)
+            // (Belgium .VRH files are also 17, but .VRH files have no strings).
+            return "LATIN9";
+        case 18:  // New Zealand
+            return "LATIN9";
+        case 19:  // France
+            return "LATIN9";
+        case 20:  // Greece
+            return "LATIN9";
+        // case 21:  // Spain, but not Discovery Walking Guides ?
+        //     return "UTF-8";
+        case 132:  // Austria/Germany/Denmark
+            return "LATIN9";
+        case 133:  // Czech Republic / Slovakia
+            return "LATIN9";
+        case 155:  // Australia
+            return "LATIN9";
+        default:
+            return "UTF-8";
     }
-}
-// CharsetFromCountry(int nCountry)
+}  // CharsetFromCountry(int nCountry)
 
 // #endif // ifdef FRMT_vrc
