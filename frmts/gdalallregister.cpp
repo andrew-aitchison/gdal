@@ -775,7 +775,7 @@ void CPL_STDCALL GDALAllRegister()
 #ifdef FRMT_jpegxl
     GDALRegister_JPEGXL();
 #endif
-    
+
 #ifdef FRMT_vrc
     GDALRegister_VRC();
 #endif
