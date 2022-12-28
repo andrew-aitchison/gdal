@@ -1,5 +1,5 @@
 /******************************************************************************
- * 
+ *
  *
  * Author:  Andrew C Aitchison
  *
@@ -34,34 +34,31 @@
 
 #include "gdal_pam.h"
 #include "ogr_spatialref.h"
-//#include "cpl_string.h"
+// #include "cpl_string.h"
 
 int VRReadChar(VSILFILE *fp);
 int VRReadInt(VSILFILE *fp);
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
-extern OGRSpatialReference* CRSfromCountry(int nCountry);
-extern const char* CharsetFromCountry(int nCountry);
+extern OGRSpatialReference *CRSfromCountry(int nCountry);
+extern const char *CharsetFromCountry(int nCountry);
 
-extern void
-dumpTileHeaderData(
-                   VSILFILE *fp,
-                   unsigned int nTileIndex,
-                   unsigned int nOverviewCount,
-                   unsigned int anTileOverviewIndex[],
-                   const int tile_xx, const int tile_yy );
+extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
+                               unsigned int nOverviewCount,
+                               unsigned int anTileOverviewIndex[],
+                               const int tile_xx, const int tile_yy);
 
-extern short VRGetShort(const void* base, int byteOffset );
-extern signed int VRGetInt(const void* base, unsigned int byteOffset );
-extern unsigned int VRGetUInt(const void* base, unsigned int byteOffset );
+extern short VRGetShort(const void *base, int byteOffset);
+extern signed int VRGetInt(const void *base, unsigned int byteOffset);
+extern unsigned int VRGetUInt(const void *base, unsigned int byteOffset);
 
 extern int VRReadChar(VSILFILE *fp);
 extern int VRReadShort(VSILFILE *fp);
 extern int VRReadInt(VSILFILE *fp);
-extern int VRReadInt(VSILFILE *fp, unsigned int byteOffset );
+extern int VRReadInt(VSILFILE *fp, unsigned int byteOffset);
 extern unsigned int VRReadUInt(VSILFILE *fp);
-extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset );
+extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 
-#endif // ndef VRC_UTILS_H_INCLUDED
+#endif  // ndef VRC_UTILS_H_INCLUDED
 
 // #endif // ndef VRC_H_INCLUDED
