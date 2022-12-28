@@ -1,5 +1,5 @@
 /*
- * 
+ *
  *
  * http://www.libpng.org/pub/png/spec/1.2/PNG-CRCAppendix.html
  *
@@ -20,54 +20,58 @@ CPL_C_START
 #include <errno.h>
 #include <string.h>
 
-const unsigned long nBitsPerBytes=8;
+const unsigned long nBitsPerBytes = 8;
 
 /* Table of CRCs of all 8-bit messages. */
 #define ncrc_table_size 256
-static // const
-unsigned long crc_table[ ncrc_table_size ]
-   =
-    {
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+static unsigned long crc_table[ncrc_table_size]
+    // clang-format off
+= {
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
 
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
 
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
 
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
-     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0
-    }
-    ;
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0
+}
+// clang-format on
+;
 
 /* Flag: has the table been computed? Initially false. */
 // static
 int crc_table_computed = 0;
 
 /* Make the table for a fast CRC. */
-static
-void make_crc_table(void)
+static void make_crc_table(void)
 {
     // unsigned int n, k;
 
     unsigned long const crc_magic = 0xedb88320L;
 
-    for (unsigned int n = 0; n < ncrc_table_size; n++) {
-        unsigned long c = (unsigned long) n;
-        for (unsigned int k = 0; k < nBitsPerBytes; k++) {
-            if (c & 1U) {
+    for (unsigned int n = 0; n < ncrc_table_size; n++)
+    {
+        unsigned long c = (unsigned long)n;
+        for (unsigned int k = 0; k < nBitsPerBytes; k++)
+        {
+            if (c & 1U)
+            {
                 c = crc_magic ^ (c >> 1U);
-            } else {
+            }
+            else
+            {
                 c = c >> 1U;
             }
         }
@@ -80,18 +84,20 @@ void make_crc_table(void)
    should be initialized to all 1's, and the transmitted value
    is the 1's complement of the final running CRC (see the
    crc() routine below)). */
-   
+
 static unsigned long update_crc(const unsigned long crc,
                                 const unsigned char *buf,
                                 const unsigned int len)
 {
     unsigned long c = crc;
-    
-    if (!crc_table_computed) {
+
+    if (!crc_table_computed)
+    {
         make_crc_table();
     }
     const unsigned char fullbyte = 0xff;
-    for (unsigned int n = 0; n < len; n++) {
+    for (unsigned int n = 0; n < len; n++)
+    {
         c = crc_table[(c ^ buf[n]) & fullbyte] ^ (c >> nBitsPerBytes);
     }
     return c;
@@ -106,4 +112,3 @@ extern unsigned long pngcrc_for_VRC(const unsigned char *buf,
 }
 
 CPL_C_END
-
