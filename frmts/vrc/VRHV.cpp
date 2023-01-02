@@ -34,7 +34,6 @@
 
 #include "VRCutils.h"
 
-
 CPL_C_START
 void GDALRegister_VRHV(void);
 CPL_C_END
