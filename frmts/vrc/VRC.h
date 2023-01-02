@@ -202,9 +202,8 @@ class VRCRasterBand : public GDALRasterBand
     SetColorInterpretation(GDALColorInterp eColorInterp) override;
     virtual GDALColorTable *GetColorTable() override;
 
-    // virtual double GetNoDataValue( int *pbSuccess = NULL );
     virtual double GetNoDataValue(int *) override;
-    // virtual CPLErr SetNoDataValue(int) override;
+    virtual CPLErr SetNoDataValue(double) override;
 
     virtual int GetOverviewCount() override;
     virtual GDALRasterBand *GetOverview(int) override;
