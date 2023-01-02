@@ -40,7 +40,6 @@
 
 #include <algorithm>  // for std::max and std::min
 
-
 void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 {
     if (buf == nullptr || buflen < 1)
@@ -138,6 +137,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     // Sanity check the function args
     if (static_cast<long>(length) > nSpare)
     {
+
         // Copy the data we have ...
         if (nSpare > 0)
         {  // pVRCpng_data->current < pVRCpng_data->length)
@@ -184,8 +184,8 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
     const unsigned long nFileCRC =
         0xffffffff &
         static_cast<unsigned long>(PNGGetInt(
-                                       oVRCpng_data->pData,
-                                       (static_cast<unsigned int>(oVRCpng_data->current) + nLen)));
+            oVRCpng_data->pData,
+            (static_cast<unsigned int>(oVRCpng_data->current) + nLen)));
     if (nGiven == nFileCRC)
     {
         CPLDebug("Viewranger PNG",
@@ -213,14 +213,14 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
     return ret;
 }
 
-/* -------------------------------------------------------------------------
- * Returns a (null-terminated) string allocated from VSIMalloc.
- * The 32 bit length of the string is stored in file fp at byteaddr.
- * The string itself is stored immediately after its length;
- * it is *not* null-terminated in the file.
- * If index pointer is nul then an empty string is returned
- * (rather than a null pointer).
- */
+// -------------------------------------------------------------------------
+// Returns a (null-terminated) string allocated from VSIMalloc.
+// The 32 bit length of the string is stored in file fp at byteaddr.
+// The string itself is stored immediately after its length;
+// it is *not* null-terminated in the file.
+// If index pointer is nul then an empty string is returned
+// (rather than a null pointer).
+//
 char *VRCDataset::VRCGetString(VSILFILE *fp, unsigned int byteaddr)
 {
     if (byteaddr == 0)
@@ -353,7 +353,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
         CPLError(CE_Warning, CPLE_AppDefined,
                  "Sorry, .VRC files with magic %08x not yet understood\n",
                  vrc_magic36);
-    }   // else if (poVRCDS->nMagic == vrc_magic36)
+    }  // else if (poVRCDS->nMagic == vrc_magic36)
 
     VRCRasterBand::SetColorInterpretation(eBandInterp);
 
@@ -528,6 +528,11 @@ double VRCRasterBand::GetNoDataValue(int *pbSuccess)
 /************************************************************************/
 /*                           SetNoDataValue()                           */
 /************************************************************************/
+CPLErr VRCRasterBand::SetNoDataValue(double dfNoDataValue)
+{
+    // GDALDataset *poGDS = cpl::down_cast<GDALRasterBand *>(poDS);
+    return GDALRasterBand::SetNoDataValue(dfNoDataValue);
+}
 
 /************************************************************************/
 /*                          IGetDataCoverageStatus()                    */
@@ -1193,7 +1198,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         && poDS->nMapID != 588   // Danmark50k-*.VRC
         && poDS->nMapID != 3038  // 4LAND200AlpSouth
         && poDS->nMapID != 3334  // Zakynthos.VRC
-        )
+    )
     {
         CPLError(CE_Warning, CPLE_NotSupported,
                  "VRC file %s unexpected Map ID %d", poOpenInfo->pszFilename,
@@ -1517,7 +1522,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         // Verify 07 00 00 00 01 00 01 00 01 00 01
         const unsigned int nSecondSevenPtr =
             nTileIndexAddr + 4 * static_cast<unsigned int>(poDS->tileXcount) *
-            static_cast<unsigned int>(poDS->tileYcount);
+                                 static_cast<unsigned int>(poDS->tileYcount);
 
         if (VSIFSeekL(poDS->fp, nSecondSevenPtr, SEEK_SET))
         {
@@ -1584,8 +1589,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             CPLDebug("Viewranger", "height either %d %g or %g pixels",
                      poDS->nRasterYSize, dfHeightPix,
                      (anCorners[3] - anCorners[1]) /
-                     poDS->dfPixelMetres  // dfheight2
-                );
+                         poDS->dfPixelMetres  // dfheight2
+            );
         }
 
         if (nFullHeightPix < dfHeightPix)
@@ -1683,7 +1688,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLDebug("Viewranger", "nMagic x%08x unknown", poDS->nMagic);
         }
-    } // poDS->dfPixelMetres
+    }  // poDS->dfPixelMetres
 
     /********************************************************************/
     /*                              Set CRS                             */
@@ -1701,13 +1706,14 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLDebug("Viewranger", "Copyright: %s", poDS->sCopyright.c_str());
     CPLDebug("Viewranger", "%g metre pixels", poDS->dfPixelMetres);
 
-        /* --------------------------------------------------------------------
-         */
-        /*      Create band information objects. */
-        /* --------------------------------------------------------------------
-         */
-        // Until we support overviews, large files are very slow.
-        // This environment variable allows users to skip them.
+    // --------------------------------------------------------------------
+    //
+    //      Create band information objects.
+    //
+    // --------------------------------------------------------------------
+
+    // Until we support overviews, large files are very slow.
+    // This environment variable allows users to skip them.
     int fSlowFile = FALSE;
     char *szVRCmaxSize = getenv("VRC_MAX_SIZE");
     if (szVRCmaxSize != nullptr)
@@ -1810,16 +1816,16 @@ void dumpPPM(unsigned int width, unsigned int height, unsigned char *const data,
     size_t nHeaderSize = 0;
     switch (eInterleave)
     {
-    case pixel:
-        nHeaderSize = static_cast<size_t>(
-            CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P6\n%u %u\n255\n",
-                        width, height));
-        break;
-    case band:
-        nHeaderSize = static_cast<size_t>(
-            CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P5\n%u %u\n255\n",
-                        width, height));
-        break;
+        case pixel:
+            nHeaderSize = static_cast<size_t>(
+                CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P6\n%u %u\n255\n",
+                            width, height));
+            break;
+        case band:
+            nHeaderSize = static_cast<size_t>(
+                CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P5\n%u %u\n255\n",
+                            width, height));
+            break;
     }
     // CPLsnprintf may return negative values;
     // the cast to size_t converts these to large positive
@@ -1973,14 +1979,14 @@ static void dumpPNG(
 }  // dumpPNG()
 
 png_byte *
-VRCRasterBand::read_PNG(VSILFILE * fp,
-    // void *pImage,
-    unsigned int *pPNGwidth, unsigned int *pPNGheight,
-    unsigned int nVRCHeader, vsi_l_offset nPalette,
-    unsigned int nVRCDataLen,
-    // int nPNGXcount, int nPNGYcount,
-    int nGDtile_xx, int nGDtile_yy, unsigned int nVRtile_xx,
-    unsigned int nVRtile_yy)
+VRCRasterBand::read_PNG(VSILFILE *fp,
+                        // void *pImage,
+                        unsigned int *pPNGwidth, unsigned int *pPNGheight,
+                        unsigned int nVRCHeader, vsi_l_offset nPalette,
+                        unsigned int nVRCDataLen,
+                        // int nPNGXcount, int nPNGYcount,
+                        int nGDtile_xx, int nGDtile_yy, unsigned int nVRtile_xx,
+                        unsigned int nVRtile_yy)
 {
     const unsigned int nVRCData = nVRCHeader + 0x12;
 
@@ -2023,8 +2029,8 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
     if (png_ptr == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-            "VRCRasterBand::read_PNG png_create_read_struct error %p\n",
-            user_error_ptr);
+                 "VRCRasterBand::read_PNG png_create_read_struct error %p\n",
+                 user_error_ptr);
         return nullptr;
     }
     png_infop info_ptr = png_create_info_struct(png_ptr);
@@ -2033,8 +2039,8 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
         png_destroy_read_struct(&png_ptr, static_cast<png_infopp>(nullptr),
                                 static_cast<png_infopp>(nullptr));
         CPLError(CE_Failure, CPLE_AppDefined,
-            "VRCRasterBand::read_PNG png_create_info_struct error %p\n",
-            user_error_ptr);
+                 "VRCRasterBand::read_PNG png_create_info_struct error %p\n",
+                 user_error_ptr);
         return nullptr;
     }
 
@@ -2050,15 +2056,15 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
         return nullptr;
     }
 
-    /*********************************************************************
-     *
-     * This is where we create the PNG file from the VRC data.
-     *
-     * I wish I could find a *simple* way to avoid reading it in to memory
-     * only to pass it to the iterator VRC_png_read_data_fn.
-     *
-     *********************************************************************/
-
+    // ********************************************************************
+    //
+    // This is where we create the PNG file from the VRC data.
+    //
+    // I wish I could find a *simple* way to avoid reading it in to memory
+    // only to pass it to the iterator VRC_png_read_data_fn.
+    //
+    // ********************************************************************
+    // clang-format off
     const unsigned char PNG_sig[] =
         {0x89, 'P',  'N',  'G',  0x0d, 0x0a, 0x1a, 0x0a};
     const unsigned char IHDR_head[] =
@@ -2066,19 +2072,15 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
     const unsigned char IEND_chunk[] =
         {0x00, 0x00, 0x00, 0x00,  'I',  'E',  'N',  'D',
          0xae, 0x42, 0x60, 0x82};
+    // clang-format on
 
-    // This is missing:
-    // the IHDR data (+CRC),
-    // the PLTE chunk, and
-    // the IDAT data chunk(s).
     VRCpng_data oVRCpng_data = {nullptr, 0, 0};
-    // C++11 does not let us cast unsigned-ness inside {}
-    oVRCpng_data.length = static_cast<long>(
-        sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
-        (3 * 256 + 3 * 4)  // enough for 256x3 entry palette plus length,
-        // "PLTE" and checksum.
-        + nVRCDataLen      // IDAT chunks
-        + sizeof(IEND_chunk));
+    oVRCpng_data.length =
+        static_cast<long>(sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
+                          3 * 256 +      // enough for 256x3 entry palette
+                          3 * 4 +        //  length, "PLTE" and checksum
+                          nVRCDataLen +  // IDAT chunks
+                          sizeof(IEND_chunk));
 
     oVRCpng_data.pData = static_cast<png_byte *>(
         png_malloc(png_ptr, static_cast<png_size_t>(oVRCpng_data.length)));
@@ -2137,7 +2139,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
 
     if (nPNGwidth == 0 || nPNGheight == 0)
     {
-        CPLDebug("Viewranger PNG","empty PNG tile %d x %d (VRC tile %d,%d)",
+        CPLDebug("Viewranger PNG", "empty PNG tile %d x %d (VRC tile %d,%d)",
                  nPNGwidth, nRasterXSize, nVRtile_xx, nVRtile_yy);
         return nullptr;
     }
@@ -2148,8 +2150,8 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
     if (nPNGheight * nPNGYcount == nBlockYSize)
     {  // nRasterYSize ? - nBlockYSize probably OK
         CPLDebug("Viewranger PNG",
-            "PNG height: %d * PNG count %d == block height %d - G=%d V=%d",
-            nPNGheight, nPNGYcount, nBlockYSize, nGDtile_yy, nVRtile_yy);
+                 "PNG height: %d * PNG count %d == block height %d - G=%d V=%d",
+                 nPNGheight, nPNGYcount, nBlockYSize, nGDtile_yy, nVRtile_yy);
     }
     else
     {
@@ -2195,7 +2197,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
     // nullptr
     auto *pbyPNGbuffer = static_cast<png_byte *>(VSIMalloc3(
         3, static_cast<size_t>(nPNGwidth), static_cast<size_t>(nPNGheight)));
-                                      
+
     if (pbyPNGbuffer == nullptr)
     {
         CPLError(CE_Failure, CPLE_OutOfMemory,
@@ -2232,83 +2234,83 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
 
     switch (nPNGdepth)
     {
-    case 1:
-    case 2:
-    case 4:
-    case 8:
-        break;
-        // case 16:
-    default:
-        CPLDebug("Viewranger PNG", "PNG file: Depth %d depth unsupported",
-                 nPNGdepth);
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+            break;
+            // case 16:
+        default:
+            CPLDebug("Viewranger PNG", "PNG file: Depth %d depth unsupported",
+                     nPNGdepth);
+            VSIFree(pbyPNGbuffer);
+            return nullptr;
     }
     switch (nPNGcolour)
     {
-    case 0:  // Gray
-        break;
-    case 2:  // RGB
-        if (nPNGdepth == 8)
-        {
+        case 0:  // Gray
             break;
-        }
-        if (nPNGdepth == 16)
-        {  //-V547
-            CPLError(CE_Warning, CPLE_AppDefined,
-                     "16/48bit RGB unexpected");
-            break;
-        }
-        CPL_FALLTHROUGH
-    case 3:                 // Palette
-        if (nPNGdepth < 16  //-V560
-            && nPNGcolour == 3)
-        {
-            break;
-        }
-        CPLDebug("Viewranger PNG",
-                 "PNG file: colour %d depth %d combination unsupported",
-                 nPNGcolour, nPNGdepth);
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
-        // case 4:  // Gray + Alpha
-        // case 6:  // RGBA
-    default:
-        CPLDebug("Viewranger PNG", "PNG file: colour %d unsupported",
-                 nPNGcolour);
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
+        case 2:  // RGB
+            if (nPNGdepth == 8)
+            {
+                break;
+            }
+            if (nPNGdepth == 16)
+            {  //-V547
+                CPLError(CE_Warning, CPLE_AppDefined,
+                         "16/48bit RGB unexpected");
+                break;
+            }
+            CPL_FALLTHROUGH
+        case 3:                 // Palette
+            if (nPNGdepth < 16  //-V560
+                && nPNGcolour == 3)
+            {
+                break;
+            }
+            CPLDebug("Viewranger PNG",
+                     "PNG file: colour %d depth %d combination unsupported",
+                     nPNGcolour, nPNGdepth);
+            VSIFree(pbyPNGbuffer);
+            return nullptr;
+            // case 4:  // Gray + Alpha
+            // case 6:  // RGBA
+        default:
+            CPLDebug("Viewranger PNG", "PNG file: colour %d unsupported",
+                     nPNGcolour);
+            VSIFree(pbyPNGbuffer);
+            return nullptr;
     }
     switch (nPNGcompress)
     {
-    case 0:
-        break;
-    default:
-        CPLDebug("Viewranger PNG", "PNG file: compress %d unsupported",
-                 nPNGcompress);
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
+        case 0:
+            break;
+        default:
+            CPLDebug("Viewranger PNG", "PNG file: compress %d unsupported",
+                     nPNGcompress);
+            VSIFree(pbyPNGbuffer);
+            return nullptr;
     }
     switch (nPNGfilter)
     {
-    case 0:
-        break;
-    default:
-        CPLDebug("Viewranger PNG", "PNG file: filter %d unsupported",
-                 nPNGfilter);
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
+        case 0:
+            break;
+        default:
+            CPLDebug("Viewranger PNG", "PNG file: filter %d unsupported",
+                     nPNGfilter);
+            VSIFree(pbyPNGbuffer);
+            return nullptr;
     }
     switch (nPNGinterlace)
     {
-    case 0:  // None
-    case 1:  // Adam7
-        break;
-    default:
-        CPLDebug("Viewranger PNG", "PNG file: interlace %d unsupported",
-                 nPNGinterlace);
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
+        case 0:  // None
+        case 1:  // Adam7
+            break;
+        default:
+            CPLDebug("Viewranger PNG", "PNG file: interlace %d unsupported",
+                     nPNGinterlace);
+            VSIFree(pbyPNGbuffer);
+            return nullptr;
     }
 
     const int check = PNGCRCcheck(&oVRCpng_data, nPNGcrc);
@@ -2409,7 +2411,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
         if (nPNGcolour == 3)
         {
             CPLDebug("Viewranger PNG",
-                "Colour type 3 PNG: needs a PLTE. Assuming Greyscale.");
+                     "Colour type 3 PNG: needs a PLTE. Assuming Greyscale.");
             // Next four bytes are 3*256 in PNGendian
             oVRCpng_data.pData[oVRCpng_data.current++] = 0;
             oVRCpng_data.pData[oVRCpng_data.current++] = 0;
@@ -2451,7 +2453,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
 
     if (static_cast<size_t>(oVRCpng_data.length) <
         static_cast<size_t>(oVRCpng_data.current) +
-        static_cast<size_t>(nVRCDataLen) + sizeof(IEND_chunk))
+            static_cast<size_t>(nVRCDataLen) + sizeof(IEND_chunk))
     {
         // Either we seg-faulted before we got here (if current > length)
         // or we will do.
@@ -2459,8 +2461,8 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
         // FixME: We should either realloc, or use some other memory
         // allocation system ...
         const long long nNeeded = oVRCpng_data.current +
-            static_cast<long long>(nVRCDataLen) +
-            static_cast<long long>(sizeof(IEND_chunk));
+                                  static_cast<long long>(nVRCDataLen) +
+                                  static_cast<long long>(sizeof(IEND_chunk));
         const long long nMore = nNeeded - oVRCpng_data.length;
         CPLError(CE_Failure, CPLE_OutOfMemory,
                  "allocated %ld bytes for PNG but need %ld more",
@@ -2471,7 +2473,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
     }
 
     auto nBytesRead = static_cast<unsigned>(VSIFReadL(
-                                                &oVRCpng_data.pData[oVRCpng_data.current], 1, nVRCDataLen, fp));
+        &oVRCpng_data.pData[oVRCpng_data.current], 1, nVRCDataLen, fp));
     if (nVRCDataLen != nBytesRead)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -2496,7 +2498,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
         {
             if (nPNGPlteLen != 780 ||
                 (nPNGcolour != 0 && nPNGcolour != 4  //-V560
-                    ))
+                 ))
             {
                 CPLDebug("Viewranger PNG",
                          "allocated %ld bytes for PNG but only copied %ld "
@@ -2538,7 +2540,7 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
     // are not present in the VRC data; we tell libpng to skip them.
     png_set_sig_bytes(png_ptr, static_cast<int>(oVRCpng_data.current));
 
-    /*******************************************************************/
+    //******************************************************************/
 
     // if (color_type == PNG_COLOR_TYPE_PALETTE)
     //     png_set_palette_to_rgb(png_ptr);
@@ -2561,11 +2563,11 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
                  PNG_TRANSFORM_STRIP_16 |
 #endif
 #if PNG_LIBPNG_VER >= 10245
-                 PNG_TRANSFORM_GRAY_TO_RGB |
+                     PNG_TRANSFORM_GRAY_TO_RGB |
 #endif
 
-                 PNG_TRANSFORM_STRIP_ALPHA | PNG_TRANSFORM_PACKING |
-                 PNG_TRANSFORM_EXPAND,
+                     PNG_TRANSFORM_STRIP_ALPHA | PNG_TRANSFORM_PACKING |
+                     PNG_TRANSFORM_EXPAND,
                  nullptr);
 
     CPLDebug("Viewranger PNG", "read oVRCpng_data %p (%p %ld %ld) to %p",
@@ -2584,9 +2586,9 @@ VRCRasterBand::read_PNG(VSILFILE * fp,
 
 }  // VRCRasterBand::read_PNG
 
-/************************************************************************/
-/*                          GDALRegister_VRC()                          */
-/************************************************************************/
+//***********************************************************************/
+//                          GDALRegister_VRC()                          */
+//***********************************************************************/
 
 void CPL_DLL GDALRegister_VRC()
 {
@@ -2696,11 +2698,11 @@ int VRCRasterBand::GetOverviewCount()
         return 0;
     }
 
-}   // VRCRasterBand::GetOverviewCount
+}  // VRCRasterBand::GetOverviewCount
 
-/************************************************************************/
-/*                            GetOverview()                             */
-/************************************************************************/
+//***********************************************************************/
+//                            GetOverview()                             */
+//***********************************************************************/
 
 GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
 {
@@ -2795,7 +2797,7 @@ GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
     }
 }  // VRCRasterBand::GetOverview
 
-extern void dumpTileHeaderData(VSILFILE * fp, unsigned int nTileIndex,
+extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
                                unsigned int nOverviewCount,
                                const unsigned int anTileOverviewIndex[],
                                const int tile_xx, const int tile_yy)
@@ -2852,13 +2854,13 @@ extern void dumpTileHeaderData(VSILFILE * fp, unsigned int nTileIndex,
     }
 }  // dumpTileHeaderData()
 
-/* -------------------------------------------------------------------------
- * -------------------------------------------------------------------------
- *                VRCRasterBand::read_VRC_Tile_Metres()
- * -------------------------------------------------------------------------
- * -------------------------------------------------------------------------
- */
-void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE * fp, int block_xx,
+// -------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+//                VRCRasterBand::read_VRC_Tile_Metres()
+// -------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+
+void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                                          int block_yy, void *pImage)
 {
     auto *const poVRCDS = static_cast<VRCDataset *>(poDS);
@@ -2924,8 +2926,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE * fp, int block_xx,
                 }
                 else
                 {
-                    static_cast<GByte *>(pImage)[pixelnum] =
-                    nVRCNoData;
+                    static_cast<GByte *>(pImage)[pixelnum] = nVRCNoData;
                 }
                 // ((GByte *) pImage)[pixelnum] = nVRCNoData;
             }
@@ -2943,8 +2944,8 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE * fp, int block_xx,
     {
         // No data for this tile
         CPLDebug("Viewranger",
-            "VRCRasterBand::read_VRC_Tile_Metres(.. %d %d ..) null tile",
-            block_xx, block_yy);
+                 "VRCRasterBand::read_VRC_Tile_Metres(.. %d %d ..) null tile",
+                 block_xx, block_yy);
 
         return;
     }  // nTileIndex==0 No data for this tile
@@ -3198,8 +3199,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE * fp, int block_xx,
         // unsigned>=0 always true, so a standard for loop
         // for (unsigned int loopY=nYlimit; loopY >= 0; loopY--)
         // wont work:
-        for (unsigned int loopY = nYlimit; loopY >= 1;
-             /* see comments */)
+        for (unsigned int loopY = nYlimit; loopY >= 1; /* see comments */)
         {
             // decrement at *start* of loop
             // so that we can have the last pass with loopY==0
@@ -3213,7 +3213,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE * fp, int block_xx,
             const unsigned int nextPngIndex =
                 anPngIndex[static_cast<unsigned>(loop + 1)];
             const signed int nDataLen = static_cast<signed>(nextPngIndex) -
-                static_cast<signed>(nHeader + 0x12);
+                                        static_cast<signed>(nHeader + 0x12);
             if (nHeader == 0)
             {
                 CPLDebug("Viewranger", "block (%d,%d) tile (%d,%d) empty",
@@ -3232,185 +3232,185 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE * fp, int block_xx,
 
             switch (poVRCDS->nMagic)
             {
-            case vrc_magic_metres:
-            {
-                unsigned int nPNGwidth = 0;
-                unsigned int nPNGheight = 0;
-
-                png_byte *pbyPNGbuffer = read_PNG(
-                    fp, &nPNGwidth, &nPNGheight, nHeader, nPNGplteIndex,
-                    static_cast<unsigned int>(nDataLen), block_xx, block_yy,
-                    loopX, loopY);
-                if (pbyPNGbuffer)
+                case vrc_magic_metres:
                 {
-                    CPLDebug("Viewranger",
-                             "read_PNG() returned %p: %d x %d tile",
-                             pbyPNGbuffer, nPNGwidth, nPNGheight);
-                    if (char *szDumpTile = getenv("VRC_DUMP_TILE"))
-                    {
-                        auto nEnvTile = static_cast<unsigned int>(
-                            strtol(szDumpTile, nullptr, 10));
-                        // Dump pbyPNGbuffer as .ppm, one for each
-                        // band, they should be full-colour and the
-                        // same.
-                        const CPLString osBaseLabel = CPLString().Printf(
-                            "/tmp/werdna/vrc2tif/"
-                            "%s.%01d.%03d.%03d.%03d.%03d.%02ua."
-                            "x%012x.rvtm_pngsize",
-                            // CPLGetBasename(poOpenInfo->pszFilename)
-                            // doesn't quite work
-                            poVRCDS->sFileName.c_str(),
-                            // poVRCDS->sLongTitle.c_str(),
-                            nThisOverview, block_xx, block_yy, loopX, loopY,
-                            nBand, nHeader);
-                        dumpPPM(static_cast<unsigned int>(nPNGwidth),
-                                static_cast<unsigned int>(nPNGheight),
-                                pbyPNGbuffer,
-                                static_cast<unsigned int>(nPNGwidth),
-                                osBaseLabel, pixel, nEnvTile);
-                    }
+                    unsigned int nPNGwidth = 0;
+                    unsigned int nPNGheight = 0;
 
-                    if (nPrevPNGwidth == 0)
-                    {
-                        nPrevPNGwidth = nPNGwidth;
-                    }
-                    else if (nPNGwidth != nPrevPNGwidth)
+                    png_byte *pbyPNGbuffer = read_PNG(
+                        fp, &nPNGwidth, &nPNGheight, nHeader, nPNGplteIndex,
+                        static_cast<unsigned int>(nDataLen), block_xx, block_yy,
+                        loopX, loopY);
+                    if (pbyPNGbuffer)
                     {
                         CPLDebug("Viewranger",
-                                 "PNG width %d different from "
-                                 "previous tile %d in same column",
-                                 nPNGwidth, nPrevPNGwidth);
-                    }
+                                 "read_PNG() returned %p: %d x %d tile",
+                                 pbyPNGbuffer, nPNGwidth, nPNGheight);
+                        if (char *szDumpTile = getenv("VRC_DUMP_TILE"))
+                        {
+                            auto nEnvTile = static_cast<unsigned int>(
+                                strtol(szDumpTile, nullptr, 10));
+                            // Dump pbyPNGbuffer as .ppm, one for each
+                            // band, they should be full-colour and the
+                            // same.
+                            const CPLString osBaseLabel = CPLString().Printf(
+                                "/tmp/werdna/vrc2tif/"
+                                "%s.%01d.%03d.%03d.%03d.%03d.%02ua."
+                                "x%012x.rvtm_pngsize",
+                                // CPLGetBasename(poOpenInfo->pszFilename)
+                                // doesn't quite work
+                                poVRCDS->sFileName.c_str(),
+                                // poVRCDS->sLongTitle.c_str(),
+                                nThisOverview, block_xx, block_yy, loopX, loopY,
+                                nBand, nHeader);
+                            dumpPPM(static_cast<unsigned int>(nPNGwidth),
+                                    static_cast<unsigned int>(nPNGheight),
+                                    pbyPNGbuffer,
+                                    static_cast<unsigned int>(nPNGwidth),
+                                    osBaseLabel, pixel, nEnvTile);
+                        }
 
-                    if (nPrevPNGheight == 0)
-                    {
-                        nPrevPNGheight = nPNGheight;
-                    }
-                    else if (nPrevPNGheight != nPNGheight)
-                    {
-                        CPLDebug("Viewranger",
-                                 "PNG height %d different from "
-                                 "previous tile %d in same row",
-                                 nPNGheight, nPrevPNGheight);
-                    }
+                        if (nPrevPNGwidth == 0)
+                        {
+                            nPrevPNGwidth = nPNGwidth;
+                        }
+                        else if (nPNGwidth != nPrevPNGwidth)
+                        {
+                            CPLDebug("Viewranger",
+                                     "PNG width %d different from "
+                                     "previous tile %d in same column",
+                                     nPNGwidth, nPrevPNGwidth);
+                        }
 
-                    nRightCol = nLeftCol;
-                    int nTopRow = nBottomRow;
-                    nRightCol += nPNGwidth / nShrinkFactor;
-                    nTopRow -= nPNGheight / nShrinkFactor;
+                        if (nPrevPNGheight == 0)
+                        {
+                            nPrevPNGheight = nPNGheight;
+                        }
+                        else if (nPrevPNGheight != nPNGheight)
+                        {
+                            CPLDebug("Viewranger",
+                                     "PNG height %d different from "
+                                     "previous tile %d in same row",
+                                     nPNGheight, nPrevPNGheight);
+                        }
 
-                    if (nPNGheight >= nFullBlockYSize)
-                    {
-                        // single tile block
+                        nRightCol = nLeftCol;
+                        int nTopRow = nBottomRow;
+                        nRightCol += nPNGwidth / nShrinkFactor;
+                        nTopRow -= nPNGheight / nShrinkFactor;
+
+                        if (nPNGheight >= nFullBlockYSize)
+                        {
+                            // single tile block
+                            if (nTopRow < 0)
+                            {
+                                CPLDebug("Viewranger",
+                                         "Single PNG high band toprow "
+                                         "%d set to 0",
+                                         nTopRow);
+                                nTopRow = 0;
+                            }
+                        }
                         if (nTopRow < 0)
                         {
                             CPLDebug("Viewranger",
-                                     "Single PNG high band toprow "
-                                     "%d set to 0",
-                                     nTopRow);
-                            nTopRow = 0;
+                                     "%d tall PNG tile: top row %d "
+                                     "above top of %d tall block",
+                                     nPNGheight, nTopRow, nBlockYSize);
                         }
-                    }
-                    if (nTopRow < 0)
-                    {
-                        CPLDebug("Viewranger",
-                                 "%d tall PNG tile: top row %d "
-                                 "above top of %d tall block",
-                                 nPNGheight, nTopRow, nBlockYSize);
-                    }
 
-                    // Blank the top of the top tile if necessary
-                    if (loopY == nYlimit - 1)
-                    {
-                        auto *pGImage = static_cast<GByte *>(pImage);
-                        for (int ii = nBlockYSize; ii < nTopRow; ii++)
+                        // Blank the top of the top tile if necessary
+                        if (loopY == nYlimit - 1)
                         {
-                            for (int jj = nLeftCol; jj < nRightCol; jj++)
+                            auto *pGImage = static_cast<GByte *>(pImage);
+                            for (int ii = nBlockYSize; ii < nTopRow; ii++)
                             {
-                                pGImage[jj] =  // (ii+jj)%255;
-                                    nVRCNoData;
+                                for (int jj = nLeftCol; jj < nRightCol; jj++)
+                                {
+                                    pGImage[jj] =  // (ii+jj)%255;
+                                        nVRCNoData;
+                                }
+                                pGImage += nBlockXSize;
                             }
-                            pGImage += nBlockXSize;
+                        }
+
+                        int nCopyResult = 0;
+                        if (!bTileShrink)
+                        {
+                            CPLDebug("Viewranger",
+                                     "Band %d: Copy_Tile_ (%d %d) "
+                                     "into_Block (%d %d) [%d "
+                                     "%d)x[%d %d)",
+                                     nBand, loopX, loopY, block_xx, block_yy,
+                                     nLeftCol, nRightCol, nTopRow, nBottomRow);
+                            nCopyResult = Copy_Tile_into_Block(
+                                static_cast<GByte *>(pbyPNGbuffer),
+                                static_cast<int>(nPNGwidth),
+                                static_cast<int>(nPNGheight), nLeftCol,
+                                nRightCol, nTopRow, nBottomRow, pImage
+                                // , nBlockXSize, nBlockYSize
+                            );
+                        }
+                        else  //  if (!bTileShrink)
+                        {
+                            CPLDebug("Viewranger",
+                                     "Band %d: Shrink_Tile_ (%d "
+                                     "%d) into_Block (%d %d) [%d "
+                                     "%d)x[%d %d)",
+                                     nBand, loopX, loopY, block_xx, block_yy,
+                                     nLeftCol, nRightCol, nTopRow, nBottomRow);
+
+                            nCopyResult = Shrink_Tile_into_Block(
+                                static_cast<GByte *>(pbyPNGbuffer),
+                                static_cast<int>(nPNGwidth),
+                                static_cast<int>(nPNGheight), nLeftCol,
+                                nRightCol, nTopRow, nBottomRow, pImage
+                                // , nBlockXSize, nBlockYSize
+                            );
+                            CPLDebug("Viewranger",
+                                     "\tShrink_Tile (%d %d) _into_Block "
+                                     "(%d %d) returned %d",
+                                     loopX, loopY, block_xx, block_yy,
+                                     nCopyResult);
+                        }
+
+                        nBottomRow = nTopRow;
+                        VSIFree(pbyPNGbuffer);
+                        pbyPNGbuffer = nullptr;
+                        if (nCopyResult)
+                        {
+                            CPLDebug("Viewranger",
+                                     "failed to copy/shrink tile to block");
                         }
                     }
-
-                    int nCopyResult = 0;
-                    if (!bTileShrink)
+                    else  // if (pbyPNGbuffer)
                     {
+                        // read_PNG returned nullptr
                         CPLDebug("Viewranger",
-                                 "Band %d: Copy_Tile_ (%d %d) "
-                                 "into_Block (%d %d) [%d "
-                                 "%d)x[%d %d)",
-                                 nBand, loopX, loopY, block_xx, block_yy,
-                                 nLeftCol, nRightCol, nTopRow, nBottomRow);
-                        nCopyResult = Copy_Tile_into_Block(
-                            static_cast<GByte *>(pbyPNGbuffer),
-                            static_cast<int>(nPNGwidth),
-                            static_cast<int>(nPNGheight), nLeftCol,
-                            nRightCol, nTopRow, nBottomRow, pImage
-                            // , nBlockXSize, nBlockYSize
-                            );
-                    }
-                    else
-                    {
-                        CPLDebug("Viewranger",
-                                 "Band %d: Shrink_Tile_ (%d "
-                                 "%d) into_Block (%d %d) [%d "
-                                 "%d)x[%d %d)",
-                                 nBand, loopX, loopY, block_xx, block_yy,
-                                 nLeftCol, nRightCol, nTopRow, nBottomRow);
-
-                        nCopyResult = Shrink_Tile_into_Block(
-                            static_cast<GByte *>(pbyPNGbuffer),
-                            static_cast<int>(nPNGwidth),
-                            static_cast<int>(nPNGheight), nLeftCol,
-                            nRightCol, nTopRow, nBottomRow, pImage
-                            // , nBlockXSize, nBlockYSize
-                            );
-                        CPLDebug("Viewranger",
-                                 "\tShrink_Tile (%d %d) _into_Block "
-                                 "(%d %d) returned %d",
-                                 loopX, loopY, block_xx, block_yy,
-                                 nCopyResult);
-                    }
-
-                    nBottomRow = nTopRow;
-                    VSIFree(pbyPNGbuffer);
-                    pbyPNGbuffer = nullptr;
-                    if (nCopyResult)
-                    {
-                        CPLDebug("Viewranger",
-                                 "failed to copy/shrink tile to block");
-                    }
-                }
-                else
-                {
-                    // read_PNG returned nullptr
+                                 "empty %d x %d tile ... prev was %d x %d",
+                                 nPNGwidth, nPNGheight, nPrevPNGwidth,
+                                 nPrevPNGheight);
+                    }  // if (pbyPNGbuffer)
                     CPLDebug("Viewranger",
-                             "empty %d x %d tile ... prev was %d x %d",
-                             nPNGwidth, nPNGheight, nPrevPNGwidth,
-                             nPrevPNGheight);
-                }  // if (pbyPNGbuffer)
-                CPLDebug("Viewranger",
-                         "... read PNG tile (%d %d) overview "
-                         "%d block (%d %d) completed",
-                         loopX, loopY, nThisOverview, block_xx, block_yy);
-            }
-            break;
+                             "... read PNG tile (%d %d) overview "
+                             "%d block (%d %d) completed",
+                             loopX, loopY, nThisOverview, block_xx, block_yy);
+                }  // case vrc_magic_metres
+                break;
 
-        default:
-            CPLError(CE_Failure, CPLE_AppDefined,
-                "We should not be here with magic=x%08x",
-                poVRCDS->nMagic);
-            return;
-        }  // switch (poVRCDS->nMagic)
-    }      // for (loopY
-    nLeftCol = nRightCol;
-}  // for (loopX
+                default:
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "We should not be here with magic=x%08x",
+                             poVRCDS->nMagic);
+                    return;
+            }  // switch (poVRCDS->nMagic)
+        }      // for (loopY
+        nLeftCol = nRightCol;
+    }  // for (loopX
 
 }  // VRCRasterBand::read_VRC_Tile_Metres
 
-int VRCRasterBand::Copy_Tile_into_Block(GByte * pbyPNGbuffer, int nPNGwidth,
+int VRCRasterBand::Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
                                         int nPNGheight, int nLeftCol,
                                         int nRightCol, int nTopRow,
                                         int nBottomRow, void *pImage)
@@ -3503,10 +3503,10 @@ int VRCRasterBand::Copy_Tile_into_Block(GByte * pbyPNGbuffer, int nPNGwidth,
 
 }  // VRCRasterBand::Copy_Tile_into_Block
 
-int VRCRasterBand::Shrink_Tile_into_Block(GByte * pbyPNGbuffer, int nPNGwidth,
+int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
                                           int nPNGheight, int nLeftCol,
                                           int nRightCol, int nTopRow,
-                                          int nBottomRow, void *pImage )
+                                          int nBottomRow, void *pImage)
 {
     CPLDebug("Viewranger PNG",
              "Shrink_Tile_into_Block(%p %d x %d -> [%d %d)x[%d %d) "
@@ -3532,8 +3532,8 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte * pbyPNGbuffer, int nPNGwidth,
     if (nLeftCol < 0 || nLeftCol >= nBlockXSize)
     {
         CPLDebug("Viewranger PNG",
-            "Shrink_Tile_into_Block: nLeftCol %d not in [0,%d)", nLeftCol,
-            nBlockXSize);
+                 "Shrink_Tile_into_Block: nLeftCol %d not in [0,%d)", nLeftCol,
+                 nBlockXSize);
         // return -1;
     }
     if (nRightCol < nLeftCol || nRightCol > nBlockXSize)
@@ -3572,11 +3572,10 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte * pbyPNGbuffer, int nPNGwidth,
              "Shrink_Tile_into_Block: loopX-tile-adj missing jj loops "
              "[%d/%d,%d/%d/%d)",
              // need adjustment for loopX'th tile,
-             nLeftCol,nCopyStartCol, nCopyStopCol,nRightCol,nBlockXSize);
-    
-    GByte *pGImage = static_cast<GByte *>(pImage)
-        // need + adjust for loopX'th tile
-        + nOutRowStartPixel;
+             nLeftCol, nCopyStartCol, nCopyStopCol, nRightCol, nBlockXSize);
+
+    GByte *pGImage = static_cast<GByte *>(pImage) +
+                     nOutRowStartPixel;  // need to adjust for loopX'th tile
 
     {
         const int i1 = 3 * nPNGwidth * 2 * (nBottomRow - 1 - nCopyStartRow);
@@ -3628,10 +3627,10 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte * pbyPNGbuffer, int nPNGwidth,
     CPLDebug("Viewranger PNG",
              "shrunk PNG buffer %p %d x %d into pImage %p %d x %d "
              "within %d x %d",
-             pbyPNGbuffer, nPNGwidth, nPNGheight, pImage, nBlockXSize, nBlockYSize,
-             nRasterXSize, nRasterYSize);
+             pbyPNGbuffer, nPNGwidth, nPNGheight, pImage, nBlockXSize,
+             nBlockYSize, nRasterXSize, nRasterYSize);
 
     return 0;
 }  // VRCRasterBand::Shrink_Tile_into_Block
 
-// #endif  // def FRMT_vrc
+//  #endif  // def FRMT_vrc
