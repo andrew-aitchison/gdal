@@ -79,7 +79,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
     CPLDebug("Viewranger", "read_VRC_Tile_36(%p, %d, %d, %p)",
              static_cast<void *>(fp), block_xx, block_yy, pImage);
 
-    int tilenum = poGDS->tileXcount * block_yy + block_xx;
+    const int tilenum = poGDS->tileXcount * block_yy + block_xx;
     // VRC36_PIXEL_IS_PIXEL
     // this will be the default
     CPLDebug("Viewranger", "vrc36_pixel_is_pixel only partially implemented");
@@ -552,10 +552,10 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
     char *szDumpTile = getenv("VRC_DUMP_TILE");
     if (szDumpTile != nullptr && 1 == nBand)
     {
-        long nDumpCount = strtol(szDumpTile, nullptr, 10);
+        const long nDumpCount = strtol(szDumpTile, nullptr, 10);
         // Dump first band of VRC tile as a (monochrome) .pgm.
         // The bands are currently all the same.
-        CPLString osBaseLabel = CPLString().Printf(
+        const CPLString osBaseLabel = CPLString().Printf(
             "/tmp/werdna/vrc2tif/%s.%03d.%03d.%02u",
             // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
             poGDS->sLongTitle.c_str(), block_xx, block_yy, nBand);
@@ -588,7 +588,7 @@ int VRCRasterBand::verifySubTileFile(VSILFILE *fp, unsigned long start,
         return -1;
     }
 
-    int seekres = VSIFSeekL(fp, start, SEEK_SET);
+    const int seekres = VSIFSeekL(fp, start, SEEK_SET);
     if (seekres)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to x%lx", start);
@@ -598,7 +598,7 @@ int VRCRasterBand::verifySubTileFile(VSILFILE *fp, unsigned long start,
     auto nLen = static_cast<unsigned int>(finish - start);
     std::vector<GByte> abyRawSubtileData;
     abyRawSubtileData.reserve(nLen);
-    size_t bytesread =
+    const size_t bytesread =
         VSIFReadL(abyRawSubtileData.data(), sizeof(GByte), nLen, fp);
     if (bytesread < nLen)
     {
@@ -689,7 +689,7 @@ int VRCRasterBand::verifySubTileMem(GByte abyRawStartData[],
         return -1;
     }
 
-    size_t nBytesMatched =
+    const size_t nBytesMatched =
         bytesmatch(abyRawStartData, kacExpectedValues, nHeadLen);
 
     return 0x0100 | static_cast<int>(nBytesMatched);

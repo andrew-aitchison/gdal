@@ -44,7 +44,7 @@ int VRReadChar(VSILFILE *fp)
     unsigned char buf[4] = "";
     // size_t ret =
     VSIFReadL(buf, 1, 1, fp);
-    unsigned char vv = buf[0];
+    const unsigned char vv = buf[0];
     // if (ret<1) return (EOF);
     return (vv);
 }
