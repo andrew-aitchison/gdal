@@ -1158,8 +1158,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     // std::unique_ptr<VRCDataset>(new VRCDataset());  // -Wreturn-stack-address
     // auto poDS = std::unique_ptr<VRCDataset>();
     auto *poDS = new VRCDataset();
-    if (poDS == nullptr)
-    {  //-V668
+    if (poDS == nullptr)  //-V668
+    {
         return nullptr;
     }
 
@@ -2077,8 +2077,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     VRCpng_data oVRCpng_data = {nullptr, 0, 0};
     oVRCpng_data.length =
         static_cast<long>(sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
-                          3 * 256 +      // enough for 256x3 entry palette
-                          3 * 4 +        //  length, "PLTE" and checksum
+                          3L * 256 +     // enough for 256x3 entry palette
+                          3L * 4 +       //  length, "PLTE" and checksum
                           nVRCDataLen +  // IDAT chunks
                           sizeof(IEND_chunk));
 
@@ -2255,8 +2255,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             {
                 break;
             }
-            if (nPNGdepth == 16)
-            {  //-V547
+            if (nPNGdepth == 16)  //-V547
+            {
                 CPLError(CE_Warning, CPLE_AppDefined,
                          "16/48bit RGB unexpected");
                 break;
@@ -2599,8 +2599,8 @@ void CPL_DLL GDALRegister_VRC()
         return;
 
     auto *poDriver = new GDALDriver();
-    if (poDriver == nullptr)
-    {  // -V668
+    if (poDriver == nullptr)  // -V668
+    {
         CPLError(CE_Failure, CPLE_ObjectNull,
                  "Could not build a driver for VRC");
         return;
