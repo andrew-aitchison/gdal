@@ -22,9 +22,15 @@ CPL_C_START
 
 const unsigned long nBitsPerBytes = 8;
 
-/* Table of CRCs of all 8-bit messages. */
-#define ncrc_table_size 256
-static unsigned long crc_table[ncrc_table_size]
+//  Table of CRCs of all 8-bit messages.
+// #define ncrc_table_size 256
+// - gives clang-tidy warning [modernize-macro-to-enum]
+// and constexpr requires C++ :-(
+enum eTABLESIZE
+{
+    NCRC_TABLE_SIZE = 256
+};
+static unsigned long crc_table[NCRC_TABLE_SIZE]
     // clang-format off
 = {
     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
@@ -61,7 +67,7 @@ static void make_crc_table(void)
 
     unsigned long const crc_magic = 0xedb88320L;
 
-    for (unsigned int n = 0; n < ncrc_table_size; n++)
+    for (unsigned int n = 0; n < NCRC_TABLE_SIZE; n++)
     {
         unsigned long c = (unsigned long)n;
         for (unsigned int k = 0; k < nBitsPerBytes; k++)
