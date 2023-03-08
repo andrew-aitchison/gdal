@@ -1196,6 +1196,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         && poDS->nMapID != 293   // SouthTyrol50k/SouthTyro50k.VRC
         && poDS->nMapID != 294   // TrentinoGarda50k.VRC
         && poDS->nMapID != 588   // Danmark50k-*.VRC
+        && poDS->nMapID != 618   // Corfu (Tour & Trail)
         && poDS->nMapID != 3038  // 4LAND200AlpSouth
         && poDS->nMapID != 3334  // Zakynthos.VRC
     )
