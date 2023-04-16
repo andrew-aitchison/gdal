@@ -60,8 +60,21 @@ static const unsigned int nVRCNoData = 1;
 
 class VRCRasterBand;
 
-int VRReadChar(VSILFILE *fp);
-int VRReadInt(VSILFILE *fp);
+extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
+                               unsigned int nOverviewCount,
+                               const unsigned int anTileOverviewIndex[],
+                               const int tile_xx, const int tile_yy);
+
+extern short VRGetShort(const void *base, int byteOffset);
+extern signed int VRGetInt(const void *base, unsigned int byteOffset);
+extern unsigned int VRGetUInt(const void *base, unsigned int byteOffset);
+
+extern int VRReadChar(VSILFILE *fp);
+extern int VRReadShort(VSILFILE *fp);
+extern int VRReadInt(VSILFILE *fp);
+extern int VRReadInt(VSILFILE *fp, unsigned int byteOffset);
+extern unsigned int VRReadUInt(VSILFILE *fp);
+extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
 enum VRCinterleave
@@ -203,7 +216,8 @@ class VRCRasterBand : public GDALRasterBand
     virtual GDALColorTable *GetColorTable() override;
 
     virtual double GetNoDataValue(int *) override;
-    virtual CPLErr SetNoDataValue(double) override;
+    // // virtual CPLErr SetNoDataValue(double) override;
+    CPLErr SetNoDataValue(double) override final;
 
     virtual int GetOverviewCount() override;
     virtual GDALRasterBand *GetOverview(int) override;
@@ -213,21 +227,5 @@ class VRCRasterBand : public GDALRasterBand
                                        int nYSize, int nMaskFlagStop,
                                        double *pdfDataPct) override;
 };  // class VRCRasterBand
-
-extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
-                               unsigned int nOverviewCount,
-                               const unsigned int anTileOverviewIndex[],
-                               const int tile_xx, const int tile_yy);
-
-extern short VRGetShort(const void *base, int byteOffset);
-extern signed int VRGetInt(const void *base, unsigned int byteOffset);
-extern unsigned int VRGetUInt(const void *base, unsigned int byteOffset);
-
-extern int VRReadChar(VSILFILE *fp);
-extern int VRReadShort(VSILFILE *fp);
-extern int VRReadInt(VSILFILE *fp);
-extern int VRReadInt(VSILFILE *fp, unsigned int byteOffset);
-extern unsigned int VRReadUInt(VSILFILE *fp);
-extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 
 #endif  // ndef VRC_H_INCLUDED
