@@ -39,6 +39,7 @@
 #include "png_crc.h"  // for crc pngcrc_for_VRC, used in: PNGCRCcheck
 
 #include <algorithm>  // for std::max and std::min
+#include <array>
 
 void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 {
@@ -63,8 +64,16 @@ typedef struct
     signed long current;
 } VRCpng_data;
 
-static unsigned int PNGGetUInt(const void *base, unsigned int byteOffset)
+// PNG values are opposite-endian from other values in the .VRC file.
+
+// static unsigned int PNGGetUInt(const unsigned char *base, const unsigned int byteOffset)
+static unsigned int PNGGetUInt(const void *base, const unsigned int byteOffset)
 {
+    if (nullptr == base)
+    {
+        return 0;
+    }
+
     // const unsigned char
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     unsigned int vv = buf[3];
@@ -73,10 +82,6 @@ static unsigned int PNGGetUInt(const void *base, unsigned int byteOffset)
     vv |= static_cast<unsigned int>(buf[0]) << 24;
 
     return (vv);
-}
-static signed int PNGGetInt(const void *base, unsigned int byteOffset)
-{
-    return (static_cast<signed int>(PNGGetUInt(base, byteOffset)));
 }
 
 static bool isNullTileIndex(unsigned int nIndex)
@@ -88,10 +93,10 @@ static bool isNullTileIndex(unsigned int nIndex)
 
 static unsigned int PNGReadUInt(VSILFILE *fp)
 {
-    unsigned char buf[4] = {};
+    std::array<unsigned char, 4> buf;
     // int ret =
-    VSIFReadL(buf, 1, 4, fp);
-    return PNGGetUInt(buf, 0);
+    VSIFReadL(&buf, 1, 4, fp);
+    return PNGGetUInt(&buf, 0);
 }
 
 static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
@@ -164,8 +169,7 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
         return -1;
     }
     unsigned char *pBuf = &oVRCpng_data->pData[oVRCpng_data->current - 4];
-    auto nLen = static_cast<unsigned>(
-        PNGGetInt(&oVRCpng_data->pData[oVRCpng_data->current - 8], 0));
+    auto nLen = PNGGetUInt(&oVRCpng_data->pData[oVRCpng_data->current - 8], 0);
 
     if (nLen > static_cast<unsigned long int>(oVRCpng_data->length) ||
         nLen > static_cast<unsigned long int>(1LLU << 31U))
@@ -183,9 +187,8 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
 
     const unsigned long nFileCRC =
         0xffffffff &
-        static_cast<unsigned long>(PNGGetInt(
-            oVRCpng_data->pData,
-            (static_cast<unsigned int>(oVRCpng_data->current) + nLen)));
+        PNGGetUInt(oVRCpng_data->pData,
+                   (static_cast<unsigned int>(oVRCpng_data->current) + nLen));
     if (nGiven == nFileCRC)
     {
         CPLDebug("Viewranger PNG",
@@ -715,7 +718,6 @@ VRCDataset::~VRCDataset()
         VSIFree(anTileIndex);
         anTileIndex = nullptr;
     }
-
     if (poSRS)
     {
         poSRS->Release();
@@ -1211,7 +1213,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         char pszMapID[VRCpszMapIDlen] = "";
         const int ret =
             CPLsnprintf(pszMapID, VRCpszMapIDlen, "0x%08x", poDS->nMapID);
-        pszMapID[VRCpszMapIDlen - 1] = '\000';
         if (ret == VRCpszMapIDlen - 1)
         {
             poDS->SetMetadataItem("VRC ViewRanger MapID", pszMapID, "");
@@ -1238,8 +1239,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (nStringCount > 0)
     {
-        char **paszStrings = nullptr;
-        paszStrings =
+        auto *paszStrings =
             static_cast<char **>(VSIMalloc2(sizeof(char *), nStringCount));
         if (paszStrings == nullptr)
         {
@@ -2066,11 +2066,11 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     //
     // ********************************************************************
     // clang-format off
-    const unsigned char PNG_sig[] =
+    const std::array<const unsigned char, 8> PNG_sig =
         {0x89, 'P',  'N',  'G',  0x0d, 0x0a, 0x1a, 0x0a};
-    const unsigned char IHDR_head[] =
+    const std::array<const unsigned char, 8> IHDR_head =
         {0x00, 0x00, 0x00, 0x0d,  'I',  'H',  'D',  'R'};
-    const unsigned char IEND_chunk[] =
+    const std::array<const unsigned char, 12> IEND_chunk =
         {0x00, 0x00, 0x00, 0x00,  'I',  'E',  'N',  'D',
          0xae, 0x42, 0x60, 0x82};
     // clang-format on
@@ -2092,17 +2092,16 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         return nullptr;
     }
     oVRCpng_data.current = 0;
-    memcpy(static_cast<void *>(oVRCpng_data.pData), PNG_sig, sizeof(PNG_sig));
+    memcpy(static_cast<void *>(oVRCpng_data.pData), &PNG_sig, sizeof(PNG_sig));
     oVRCpng_data.current += sizeof(PNG_sig);
 
     // IHDR starts here
     memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-           IHDR_head, sizeof(IHDR_head));
+           &IHDR_head, sizeof(IHDR_head));
     oVRCpng_data.current += sizeof(IHDR_head);
 
     // IHDR_data here
 
-    char aVRCHeader[17] = {};
     if (VSIFSeekL(fp, nVRCHeader, SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -2122,7 +2121,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                  "%d=x%08x: First PNG header byte is x00 as expected",
                  nVRCHeader, nVRCHeader);
     }
-    const size_t count = VSIFReadL(aVRCHeader, 1, 17, fp);
+    std::array<char, 17> aVRCHeader = {};
+    const size_t count = VSIFReadL(&aVRCHeader, 1, 17, fp);
     if (17 > count)
     {
         CPLError(CE_Failure, CPLE_FileIO,
@@ -2132,10 +2132,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     }
 
     memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-           aVRCHeader, 17);
-    const unsigned int nPNGwidth = PNGGetUInt(aVRCHeader, 0);
+           &aVRCHeader, 17);
+    const unsigned int nPNGwidth = PNGGetUInt(&aVRCHeader, 0);
     *pPNGwidth = nPNGwidth;
-    const unsigned int nPNGheight = PNGGetUInt(aVRCHeader, 4);
+    const unsigned int nPNGheight = PNGGetUInt(&aVRCHeader, 4);
     *pPNGheight = nPNGheight;
 
     if (nPNGwidth == 0 || nPNGheight == 0)
@@ -2225,7 +2225,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     auto nPNGcompress = static_cast<unsigned char>(aVRCHeader[10]);
     auto nPNGfilter = static_cast<unsigned char>(aVRCHeader[11]);
     auto nPNGinterlace = static_cast<unsigned char>(aVRCHeader[12]);
-    const unsigned int nPNGcrc = PNGGetUInt(aVRCHeader, 13);
+    const unsigned int nPNGcrc = PNGGetUInt(&aVRCHeader, 13);
 
     CPLDebug("Viewranger PNG",
              "PNG file: %d x %d depth %d colour %d, compress=%d, "
@@ -2263,6 +2263,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                 break;
             }
             CPL_FALLTHROUGH
+            // [[fallthrough]];
         case 3:                 // Palette
             if (nPNGdepth < 16  //-V560
                 && nPNGcolour == 3)
@@ -2488,7 +2489,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
     // IEND chunk is fixed and pre-canned.
     memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-           IEND_chunk, sizeof(IEND_chunk));
+           &IEND_chunk, sizeof(IEND_chunk));
     oVRCpng_data.current += sizeof(IEND_chunk);
 
     if (oVRCpng_data.length > oVRCpng_data.current)
@@ -2807,6 +2808,7 @@ extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
     {
         return;
     }
+
     const vsi_l_offset byteOffset = VSIFTellL(fp);
     if (nOverviewCount != 7)
     {
