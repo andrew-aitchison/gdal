@@ -5,10 +5,11 @@
 
 #include "VRC.h"
 
+#include <array>
+
 extern short VRGetShort(const void *base, int byteOffset)
 {
-    const unsigned char *buf =
-        static_cast<const unsigned char *>(base) + byteOffset;
+    auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     short vv = buf[0];
     vv |= (buf[1] << 8);
 
@@ -17,8 +18,7 @@ extern short VRGetShort(const void *base, int byteOffset)
 
 signed int VRGetInt(const void *base, unsigned int byteOffset)
 {
-    const unsigned char *buf =
-        static_cast<const unsigned char *>(base) + byteOffset;
+    auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     signed int vv = buf[0];
     vv |= (buf[1] << 8U);
     vv |= (buf[2] << 16U);
@@ -27,8 +27,7 @@ signed int VRGetInt(const void *base, unsigned int byteOffset)
 }
 unsigned int VRGetUInt(const void *base, const unsigned int byteOffset)
 {
-    const auto *const buf =
-        static_cast<const unsigned char *>(base) + byteOffset;
+    auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     auto vv = static_cast<unsigned int>(buf[0]);
     vv |= static_cast<unsigned int>(buf[1]) << 8U;
     vv |= static_cast<unsigned int>(buf[2]) << 16U;
@@ -41,34 +40,38 @@ unsigned int VRGetUInt(const void *base, const unsigned int byteOffset)
 
 int VRReadChar(VSILFILE *fp)
 {
-    unsigned char buf[4] = "";
+    unsigned char buf = 0;
     // size_t ret =
-    VSIFReadL(buf, 1, 1, fp);
-    const unsigned char vv = buf[0];
+    VSIFReadL(&buf, 1, 1, fp);
+    const unsigned char vv = buf;
     // if (ret<1) return (EOF);
     return (vv);
 }
 
 int VRReadShort(VSILFILE *fp)
 {
-    unsigned char buf[4] = "";
+    std::array<unsigned char, 2> buf;
     // size_t ret =
-    VSIFReadL(buf, 1, 2, fp);
-    short vv = buf[0];
+    VSIFReadL(&buf, 1, 2, fp);
+    short vv = 0;
+    vv |= buf[0];
     vv |= (buf[1] << 8);
+
     // if (ret<2) return (EOF);
     return (vv);
 }
 
 int VRReadInt(VSILFILE *fp)
 {
-    unsigned char buf[4] = "";
+    std::array<unsigned char, 4> buf;
     // size_t ret =
-    VSIFReadL(buf, 1, 4, fp);
-    signed int vv = buf[0];
+    VSIFReadL(&buf, 1, 4, fp);
+    signed int vv = 0;
+    vv |= buf[0];
     vv |= (buf[1] << 8);
     vv |= (buf[2] << 16);
     vv |= (buf[3] << 24);
+
     // if (ret<4) return (EOF);
     return (vv);
 }
@@ -87,11 +90,11 @@ int VRReadInt(VSILFILE *fp, unsigned int byteOffset)
 unsigned int VRReadUInt(VSILFILE *fp)
 {
     // unsigned int vv;
-    unsigned char buf[4] = "";
+    std::array<unsigned char, 4> buf;
     // size_t ret =
-    VSIFReadL(buf, 1, 4, fp);
+    VSIFReadL(&buf, 1, 4, fp);
     // if (ret<4) return (EOF);
-    return (VRGetUInt(buf, 0));
+    return (VRGetUInt(&buf, 0));
 }
 unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
 {
