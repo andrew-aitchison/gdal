@@ -1183,7 +1183,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 
     poDS->nCountry = VRGetShort(poDS->abyHeader, 6);
     const char *szInCharset = CharsetFromCountry(poDS->nCountry);
-    const char *szOutCharset = "UTF-8";
 
     CPLDebug("ViewRanger", "Country %d has charset %s", poDS->nCountry,
              szInCharset);
@@ -1237,10 +1236,12 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLDebug("Viewranger", "VRC Map ID %d with %d strings", poDS->nMapID,
              nStringCount);
 
+    const char *szOutCharset = "UTF-8";
+
     if (nStringCount > 0)
     {
-        auto *paszStrings =
-            static_cast<char **>(VSIMalloc2(sizeof(char *), nStringCount));
+        auto **paszStrings =
+            static_cast<char **>(VSIMalloc2(nStringCount, sizeof(char *)));
         if (paszStrings == nullptr)
         {
             CPLError(CE_Failure, CPLE_OutOfMemory,
@@ -1323,7 +1324,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             }
         }
 
-        // Free the array before it goes out of scope.
+        // Free the strings of the array before it goes out of scope.
         for (unsigned int ii = 0; ii < nStringCount; ++ii)
         {
             if (paszStrings[ii])
@@ -1333,7 +1334,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             }
         }
         VSIFree(paszStrings);
-        paszStrings = nullptr;
 
     }  // if (nStringCount > 0)
 
