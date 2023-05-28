@@ -1716,8 +1716,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     // Until we support overviews, large files are very slow.
     // This environment variable allows users to skip them.
     int fSlowFile = FALSE;
-    char *szVRCmaxSize = getenv("VRC_MAX_SIZE");
-    if (szVRCmaxSize != nullptr)
+    const char *szVRCmaxSize = CPLGetConfigOption("VRC_MAX_SIZE", "");
+    if (szVRCmaxSize != nullptr && *szVRCmaxSize != 0)
     {
         const long long nMaxSize = strtoll(szVRCmaxSize, nullptr, 10);
         // Should support KMGTP... suffixes.
@@ -2515,8 +2515,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         }
     }
 
-    char *szDumpPNG = getenv("VRC_DUMP_PNG");
-    if (szDumpPNG != nullptr)
+    const char *szDumpPNG = CPLGetConfigOption("VRC_DUMP_PNG", "");
+    if (szDumpPNG != nullptr && *szDumpPNG != 0)
     {
         auto nEnvPNGDump =
             static_cast<unsigned int>(strtol(szDumpPNG, nullptr, 10));
@@ -3249,7 +3249,9 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                         CPLDebug("Viewranger",
                                  "read_PNG() returned %p: %d x %d tile",
                                  pbyPNGbuffer, nPNGwidth, nPNGheight);
-                        if (char *szDumpTile = getenv("VRC_DUMP_TILE"))
+                        const char *szDumpTile =
+                            CPLGetConfigOption("VRC_DUMP_TILE", "");
+                        if (szDumpTile != nullptr && *szDumpTile != 0)
                         {
                             auto nEnvTile = static_cast<unsigned int>(
                                 strtol(szDumpTile, nullptr, 10));
