@@ -549,8 +549,8 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         }      // for loopY
     }          // for loopX
 
-    char *szDumpTile = getenv("VRC_DUMP_TILE");
-    if (szDumpTile != nullptr && 1 == nBand)
+    const char *szDumpTile = CPLGetConfigOption("VRC_DUMP_TILE", "");
+    if (szDumpTile != nullptr && *szDumpTile != 0 && 1 == nBand)
     {
         const long nDumpCount = strtol(szDumpTile, nullptr, 10);
         // Dump first band of VRC tile as a (monochrome) .pgm.
