@@ -493,7 +493,7 @@ CPLErr VRHVDataset::GetGeoTransform(double *padfTransform)
     }
     else
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "unknown magic %d", nMagic);
+        CPLError(CE_Failure, CPLE_AppDefined, "unknown magic %u", nMagic);
     }
 
     CPLDebug("ViewrangerHV", "padfTransform raster %d x %d", GetRasterXSize(),
@@ -814,9 +814,9 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
                 poDS->nRight =
                     poDS->nLeft +
                     static_cast<int>(scaleFactor * poDS->nRasterXSize);
-                CPLDebug("ViewrangerHV", "Top %d = %d + %lf * %d", poDS->nTop,
+                CPLDebug("ViewrangerHV", "Top %d = %d + %f * %d", poDS->nTop,
                          poDS->nBottom, scaleFactor, poDS->nRasterYSize);
-                CPLDebug("ViewrangerHV", "Right %d = %d + %lf * %d",
+                CPLDebug("ViewrangerHV", "Right %d = %d + %f * %d",
                          poDS->nRight, poDS->nLeft, scaleFactor,
                          poDS->nRasterXSize);
             }
@@ -857,7 +857,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
 
                 CPLDebug(
                     "ViewrangerHV",
-                    "VMC nPixelMetres %d nScale %d l5 x%08x dc1 x%02x p x%08x",
+                    "VMC nPixelMetres %u nScale %u l5 x%08x dc1 x%02x p x%08x",
                     poDS->nPixelMetres, poDS->nScale, l5, dc1, p);
                 // CPLDebug doesn't count as "using" a variable
                 (void)l5;
@@ -887,9 +887,9 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
             poDS->nRight =
                 poDS->nLeft +
                 poDS->nRasterXSize * static_cast<int>(poDS->nPixelMetres);
-            CPLDebug("ViewrangerHV", "VMC Top %d = %d + %d * %d", poDS->nTop,
+            CPLDebug("ViewrangerHV", "VMC Top %d = %d + %u * %d", poDS->nTop,
                      poDS->nBottom, poDS->nPixelMetres, poDS->nRasterYSize);
-            CPLDebug("ViewrangerHV", "VMC Right %d = %d + %d * %d",
+            CPLDebug("ViewrangerHV", "VMC Right %d = %d + %u * %d",
                      poDS->nRight, poDS->nLeft, poDS->nPixelMetres,
                      poDS->nRasterXSize);
             poDS->pszCopyright = CPLStrdup("Unknown. Probably ViewRanger");
@@ -954,10 +954,10 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     /********************************************************************/
     CPLDebug("ViewrangerHV", "Long Title: %s", poDS->pszLongTitle);
     CPLDebug("ViewrangerHV", "Copyright: %s", poDS->pszCopyright);
-    CPLDebug("ViewrangerHV", "%d metre pixels", poDS->nPixelMetres);
+    CPLDebug("ViewrangerHV", "%u metre pixels", poDS->nPixelMetres);
     if ((poDS->nMagic != vrh_magic) && poDS->nScale > 0)
     {
-        CPLDebug("ViewrangerHV", "Scale: 1: %d", poDS->nScale);
+        CPLDebug("ViewrangerHV", "Scale: 1: %u", poDS->nScale);
     }
     CPLDebug("ViewrangerHV", "Datum: %s", poDS->sDatum.c_str());
 
