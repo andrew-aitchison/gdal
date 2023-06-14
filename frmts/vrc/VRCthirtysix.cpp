@@ -556,7 +556,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         // Dump first band of VRC tile as a (monochrome) .pgm.
         // The bands are currently all the same.
         const CPLString osBaseLabel = CPLString().Printf(
-            "/tmp/werdna/vrc2tif/%s.%03d.%03d.%02u",
+            "/tmp/werdna/vrc2tif/%s.%03d.%03d.%02d",
             // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
             poGDS->sLongTitle.c_str(), block_xx, block_yy, nBand);
 
@@ -576,7 +576,7 @@ int VRCRasterBand::verifySubTileFile(VSILFILE *fp, unsigned long start,
 {
     CPLString osBaseLabel;
     osBaseLabel.Printf(
-        "/tmp/werdna/vrc2tif/%s.%03d.%03d.%03d.%03d.%08lu.%02u",
+        "/tmp/werdna/vrc2tif/%s.%03d.%03d.%03u.%03u.%08lu.%02d",
         // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
         static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(), nGDtile_xx,
         nGDtile_yy, nVRtile_xx, nVRtile_yy, start, nBand);
@@ -619,7 +619,7 @@ int VRCRasterBand::verifySubTileMem(GByte abyRawStartData[],
 {
     CPLString osBaseLabel;
     osBaseLabel.Printf(
-        "/tmp/werdna/vrc2tif/%s.%03d.%03d.%03d.%03d.%08lu.%02u",
+        "/tmp/werdna/vrc2tif/%s.%03d.%03d.%03u.%03u.%08lu.%02d",
         // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
         static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(), nGDtile_xx,
         nGDtile_yy, nVRtile_xx, nVRtile_yy, start, nBand);
