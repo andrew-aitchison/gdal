@@ -80,7 +80,7 @@ int VRReadInt(VSILFILE *fp, unsigned int byteOffset)
     if (VSIFSeekL(fp, byteOffset, SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "VRReadInt cannot seek to VRC byteOffset %d=x%08x", byteOffset,
+                 "VRReadInt cannot seek to VRC byteOffset %u=x%08x", byteOffset,
                  byteOffset);
         return CE_Failure;  // dangerous ?
     }
@@ -101,7 +101,7 @@ unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
     if (VSIFSeekL(fp, byteOffset, SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "VRReadInt cannot seek to VRC byteOffset %d=x%08x", byteOffset,
+                 "VRReadInt cannot seek to VRC byteOffset %u=x%08x", byteOffset,
                  byteOffset);
         return CE_Failure;  // dangerous ?
     }
