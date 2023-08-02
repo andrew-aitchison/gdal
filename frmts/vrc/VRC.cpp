@@ -321,7 +321,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
     // Image Structure Metadata:  INTERLEAVE=PIXEL would be good
     GDALRasterBand::SetMetadataItem("INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE");
 
-    if (poVRCDS->nMagic == vrc_magic_metres)
+    if (poVRCDS->nMagic == vrc_magic)
     {
         eDataType = GDT_Byte;  // GDT_UInt32;
         // GCI_Undefined;  // GCI_GrayIndex;  // GCI_PaletteIndex;
@@ -503,7 +503,7 @@ CPLErr VRCRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
              nBlockYOff, nBlockXSize, nBlockYSize, nBand, nRasterXSize,
              nRasterXSize, nThisOverview);
 
-    if (poGDS->nMagic == vrc_magic_metres)
+    if (poGDS->nMagic == vrc_magic)
     {
         read_VRC_Tile_Metres(poGDS->fp, nBlockXOff, nBlockYOff, pImage);
         // return CE_None;  // I cannot yet confirm no errors
@@ -648,7 +648,7 @@ GDALColorInterp VRCRasterBand::GetColorInterpretation()
 
 {
     const auto *poGDS = static_cast<VRCDataset *>(poDS);
-    if (poGDS->nMagic == vrc_magic_metres)
+    if (poGDS->nMagic == vrc_magic)
     {
         CPLDebug("Viewranger",
                  "VRCRasterBand::GetColorInterpretation vrcmetres "
@@ -769,7 +769,7 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
 
     // Xgeo = padfTransform[0] + pixel*padfTransform[1] + line*padfTransform[2];
     // Ygeo = padfTransform[3] + pixel*padfTransform[4] + line*padfTransform[5];
-    if (nMagic == vrc_magic_metres)
+    if (nMagic == vrc_magic)
     {
         padfTransform[0] = dLeft;
         padfTransform[1] =
@@ -845,7 +845,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
     const unsigned int nb64k1 = VRGetUInt(poOpenInfo->pabyHeader, 8);
     const bool b64k1 = (nb64k1 == 0x00010001);
 
-    if (nMagic == vrc_magic_metres)
+    if (nMagic == vrc_magic)
     {
         CPLDebug("Viewranger", "VRCmetres file %s supported",
                  poOpenInfo->pszFilename);
@@ -1674,7 +1674,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             }
         }
 
-        if (poDS->nMagic == vrc_magic_metres)
+        if (poDS->nMagic == vrc_magic)
         {
             // nRasterXSize,nRasterYSize are fine
             // (perhaps except for short tiles ?)
@@ -2891,7 +2891,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                  "read_VRC_Tile_Metres passed no image");
         return;
     }
-    if (poVRCDS->nMagic != vrc_magic_metres)
+    if (poVRCDS->nMagic != vrc_magic)
     {
         // Second "if" will be temporary
         // if we can read "VRC36" file data at the subtile/block level.
@@ -3240,7 +3240,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
 
             switch (poVRCDS->nMagic)
             {
-                case vrc_magic_metres:
+                case vrc_magic:
                 {
                     unsigned int nPNGwidth = 0;
                     unsigned int nPNGheight = 0;
@@ -3405,7 +3405,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                              "... read PNG tile (%u %u) overview "
                              "%d block (%d %d) completed",
                              loopX, loopY, nThisOverview, block_xx, block_yy);
-                }  // case vrc_magic_metres
+                }  // case vrc_magic
                 break;
 
                 default:
