@@ -45,8 +45,8 @@
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
 // #define VRC36_PIXEL_IS_PIXEL 1
 
-static const unsigned int vrc_magic = 0x002e1f7e;         // 0x7e1f2e00; //
-static const unsigned int vrc_magic36 = 0x01ce6336;       // 0x3663ce01; //
+static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //
+static const unsigned int vrc_magic36 = 0x01ce6336;  // 0x3663ce01; //
 
 // static const unsigned int nVRCNoData = 0xffffffff;
 // static const unsigned int nVRCNoData = 255;
