@@ -20,18 +20,18 @@ signed int VRGetInt(const void *base, unsigned int byteOffset)
 {
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     signed int vv = buf[0];
-    vv |= (buf[1] << 8U);
-    vv |= (buf[2] << 16U);
-    vv |= (buf[3] << 24U);
+    vv |= (static_cast<signed int>(buf[1])) << 8U;
+    vv |= (static_cast<signed int>(buf[2])) << 16U;
+    vv |= (static_cast<signed int>(buf[3])) << 24U;
     return (vv);
 }
 unsigned int VRGetUInt(const void *base, const unsigned int byteOffset)
 {
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     auto vv = static_cast<unsigned int>(buf[0]);
-    vv |= static_cast<unsigned int>(buf[1]) << 8U;
-    vv |= static_cast<unsigned int>(buf[2]) << 16U;
-    vv |= static_cast<unsigned int>(buf[3]) << 24U;
+    vv |= (static_cast<unsigned int>(buf[1])) << 8U;
+    vv |= (static_cast<unsigned int>(buf[2])) << 16U;
+    vv |= (static_cast<unsigned int>(buf[3])) << 24U;
 
     return (static_cast<unsigned int>(vv));
 }
