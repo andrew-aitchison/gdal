@@ -75,7 +75,7 @@ static unsigned int PNGGetUInt(const void *base, const unsigned int byteOffset)
     }
 
     // const unsigned char
-    auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
+    auto *buf = &(static_cast<const unsigned char *>(base)[byteOffset]);
     unsigned int vv = buf[3];
     vv |= static_cast<unsigned int>(buf[2]) << 8;
     vv |= static_cast<unsigned int>(buf[1]) << 16;
@@ -258,9 +258,9 @@ char *VRCDataset::VRCGetString(VSILFILE *fp, unsigned int byteaddr)
         return (VSIStrdup(""));
     }
 
-    pszNewString[string_length] = 0;
+    pszNewString[ustring_length] = 0;
     // CPLDebug("Viewranger", "read string %s at %08x - length %d",
-    //         pszNewString, byteaddr, string_length);
+    //         pszNewString, byteaddr, ustring_length);
     return pszNewString;
 }  // VRCDataset::VRCGetString( VSILFILE *fp, unsigned int byteaddr )
 
