@@ -32,6 +32,8 @@
 #ifndef VRC_UTILS_H_INCLUDED
 #define VRC_UTILS_H_INCLUDED
 
+// #if defined(__clang__)
+// #endif // defined(__clang__)
 #include "gdal_pam.h"
 #include "ogr_spatialref.h"
 // #include "cpl_string.h"
