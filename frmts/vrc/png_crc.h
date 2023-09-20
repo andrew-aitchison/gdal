@@ -7,7 +7,8 @@
 #ifndef PNG_CRC_H_INCLUDED
 #define PNG_CRC_H_INCLUDED
 
-#include "cpl_port.h"
+#include <stdint.h>
+#include <cpl_port.h>
 
 CPL_C_START
 
@@ -18,8 +19,8 @@ CPL_C_START
 #endif
 
 /* Return the PNG CRC of the bytes buf[0..len-1]. */
-extern unsigned long pngcrc_for_VRC(const unsigned char *buf,
-                                    const unsigned int len);
+extern uint32_t pngcrc_for_VRC(const unsigned char *buf,
+                               const unsigned int len);
 
 CPL_C_END
 
