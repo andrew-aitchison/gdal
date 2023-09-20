@@ -86,7 +86,7 @@ class VRHVDataset : public GDALDataset
     short nCountry = -1;
 
   public:
-    VRHVDataset();
+    VRHVDataset() = default;
     ~VRHVDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
@@ -171,7 +171,7 @@ class VRHRasterBand : public GDALRasterBand
     int nRecordSize;
 
     GDALColorInterp eBandInterp;
-    signed short *pVRHVData;
+    signed short *pVRHVData = nullptr;
 
     void read_VRH_Tile(VSILFILE *fp, int tile_xx, int tile_yy, void *pimage);
     void read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy, void *pimage);
@@ -196,7 +196,6 @@ class VRHRasterBand : public GDALRasterBand
 /************************************************************************/
 
 VRHRasterBand::VRHRasterBand(VRHVDataset *poDSIn, int nBandIn, int iOverviewIn)
-    : pVRHVData(nullptr)
 {
     this->poDS = poDSIn;
     this->nBand = nBandIn;
@@ -382,24 +381,6 @@ GDALColorInterp VRHRasterBand::GetColorInterpretation()
 /*                            VRHVDataset                                */
 /* ==================================================================== */
 /************************************************************************/
-
-/************************************************************************/
-/*                            VRHVDataset()                              */
-/************************************************************************/
-
-VRHVDataset::VRHVDataset()
-    : fp(nullptr),
-      // poColorTable(nullptr),
-      // Man of these values are only here to keep static analyzers quiet.
-      // They may make the program think things are OK when they are not.
-      abyHeader{0},  // Inefficient since we never use the initial value.
-      nMagic(0), nPixelMetres(0), nVRHVersion(-1), nLeft(INT_MAX),
-      nRight(INT_MIN), nTop(INT_MIN), nBottom(INT_MAX), nScale(0),
-      anColumnIndex(nullptr), anTileIndex(nullptr), poSRS(nullptr),
-      pszLongTitle(nullptr), pszCopyright(nullptr), sDatum(CPLStrdup("")),
-      nCountry(-1)
-{
-}
 
 /************************************************************************/
 /*                           ~VRHVDataset()                             */
@@ -1250,7 +1231,7 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
              pixelnum, nBlockXSize, nBlockYSize);
     (void)pixelnum;  // cppcheck ignores CPLDebug args.
                      // Don't complain that pixelnum is never used.
-}  // VRHRasterBand::read_VMC_Tile()
+}                    // VRHRasterBand::read_VMC_Tile()
 
 /************************************************************************/
 /*                            GetFileList()                             */
