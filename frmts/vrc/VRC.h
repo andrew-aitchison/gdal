@@ -35,6 +35,8 @@
 #define FRMT_viewranger
 #endif
 
+// #if defined(__clang__)
+// #endif // defined(__clang__)
 #include "gdal_pam.h"
 #include "ogr_spatialref.h"
 // #include "cpl_string.h"
@@ -77,7 +79,7 @@ extern unsigned int VRReadUInt(VSILFILE *fp);
 extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
-enum VRCinterleave
+enum VRCinterleave : uint8_t
 {
     band,
     pixel
