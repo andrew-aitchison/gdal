@@ -40,6 +40,7 @@
 
 #include <algorithm>  // for std::max and std::min
 #include <array>
+#include <cinttypes>
 
 void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 {
@@ -60,8 +61,8 @@ typedef struct
 // but this breaks the Windows (MSVC 16) build.
 {
     png_bytep pData;
-    signed long length;
-    signed long current;
+    std::ptrdiff_t length;
+    std::ptrdiff_t current;
 } VRCpng_data;
 
 // PNG values are opposite-endian from other values in the .VRC file.
@@ -82,6 +83,11 @@ static unsigned int PNGGetUInt(const void *base, const unsigned int byteOffset)
     vv |= static_cast<unsigned int>(buf[0]) << 24;
 
     return (vv);
+}
+
+static signed int PNGGetInt(const void *base, const unsigned int byteOffset)
+{
+    return (static_cast<signed int>(PNGGetUInt(base, byteOffset)));
 }
 
 static bool isNullTileIndex(unsigned int nIndex)
@@ -131,7 +137,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
                  pVRCpng_data->current);
         return;
     }
-    const long nSpare = pVRCpng_data->length - pVRCpng_data->current;
+    const std::ptrdiff_t nSpare = pVRCpng_data->length - pVRCpng_data->current;
     if (nSpare < 0)
     {
         CPLDebug("Viewranger PNG",
@@ -140,7 +146,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
         return;
     }
     // Sanity check the function args
-    if (static_cast<long>(length) > nSpare)
+    if (static_cast<std::ptrdiff_t>(length) > nSpare)
     {
 
         // Copy the data we have ...
@@ -157,7 +163,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     }
 
     memcpy(data, pVRCpng_data->pData + pVRCpng_data->current, length);
-    pVRCpng_data->current += static_cast<long>(length);
+    pVRCpng_data->current += static_cast<std::ptrdiff_t>(length);
 }  // VRC_png_read_data_fn
 
 static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
@@ -169,10 +175,10 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
         return -1;
     }
     const unsigned char *pBuf = &oVRCpng_data->pData[oVRCpng_data->current - 4];
-    auto nLen = PNGGetUInt(&oVRCpng_data->pData[oVRCpng_data->current - 8], 0);
+    int32_t nLen =
+        PNGGetInt(&oVRCpng_data->pData[oVRCpng_data->current - 8], 0);
 
-    if (nLen > static_cast<unsigned long int>(oVRCpng_data->length) ||
-        nLen > static_cast<unsigned long int>(1LLU << 31U))
+    if (nLen > oVRCpng_data->length /* || nLen > 1L << 31U */)
     {
         // from PNG spec nLen <= 2^31
         CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %ld",
@@ -185,32 +191,35 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
                  oVRCpng_data->current, nLen, nGiven);
     }
 
-    const unsigned long nFileCRC =
+    const uint32_t nFileCRC =
         0xffffffff &
         PNGGetUInt(oVRCpng_data->pData,
-                   (static_cast<unsigned int>(oVRCpng_data->current) + nLen));
+                   static_cast<unsigned int>(oVRCpng_data->current + nLen));
     if (nGiven == nFileCRC)
     {
         CPLDebug("Viewranger PNG",
-                 "PNGCRCcheck(x%08lx) given CRC matches CRC from file",
+                 "PNGCRCcheck(x%08" PRIu32 ") given CRC matches CRC from file",
                  nFileCRC);
     }
     else
     {
-        CPLDebug(
-            "Viewranger PNG",
-            "PNGCRCcheck(x%08lx) CRC given does not match x%08lx from file",
-            nGiven, nFileCRC);
+        CPLDebug("Viewranger PNG",
+                 "PNGCRCcheck(x%08lx) CRC given does not match x%08" PRIu32
+                 " from file",
+                 nGiven, nFileCRC);
         return -1;
     }
 
-    const unsigned long nComputed = pngcrc_for_VRC(pBuf, nLen + 4) & 0xffffffff;
+    const uint32_t nComputed =
+        pngcrc_for_VRC(pBuf, static_cast<unsigned int>(
+                                 static_cast<unsigned int>(nLen) + 4U)) &
+        0xffffffff;
     const int ret = (nGiven == nComputed);
     if (ret == 0)
     {
         CPLDebug("Viewranger PNG",
-                 "PNG file: CRC given x%08lx, calculated x%08lx", nGiven,
-                 nComputed);
+                 "PNG file: CRC given x%08lx, calculated x%08" PRIu32 "x",
+                 nGiven, nComputed);
     }
 
     return ret;
@@ -461,12 +470,18 @@ VRCRasterBand::~VRCRasterBand()
              this, poDS, nBand, nThisOverview, nOverviewCount,
              papoOverviewBands);
 
-    if (nThisOverview < 0 && papoOverviewBands)
+    if (papoOverviewBands)
     {
+        if (nThisOverview >= 0)
+        {
+            CPLDebug("Viewranger",
+                     "Did not expect an overview %p to have overviews %p", this,
+                     papoOverviewBands);
+        }
+
         CPLDebug("Viewranger", "deleting papoOverviewBands %p",
                  papoOverviewBands);
         VRCRasterBand **papo = papoOverviewBands;
-        papoOverviewBands = nullptr;
         if (nOverviewCount > 0)
         {
             const int nC = nOverviewCount;
@@ -484,7 +499,8 @@ VRCRasterBand::~VRCRasterBand()
                 }
             }
         }
-        CPLFree(papo);
+        CPLFree(papoOverviewBands);
+        papoOverviewBands = nullptr;
     }
 }  // VRCRasterBand::~VRCRasterBand()
 
@@ -1339,7 +1355,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             }
         }
         VSIFree(paszStrings);
-
     }  // if (nStringCount > 0)
 
     poDS->nLeft = VRGetInt(poDS->abyHeader, nNextString);
@@ -1399,8 +1414,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Invalid dimensions : %f x %f", dfRasterXSize,
                      dfRasterYSize);
-            GDALClose(&poDS);
-            poDS = nullptr;
+            GDALClose(poDS);
+            // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
         if (poDS->nRasterXSize <= 0 || poDS->nRasterYSize <= 0)
@@ -1408,8 +1423,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Invalid dimensions : %d x %d", poDS->nRasterXSize,
                      poDS->nRasterYSize);
-            GDALClose(&poDS);
-            poDS = nullptr;
+            GDALClose(poDS);
+            // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
     }  // block with no name
@@ -1421,8 +1436,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "tileSizeMax is zero and invalid");
-            GDALClose(&poDS);
-            poDS = nullptr;
+            GDALClose(poDS);
+            // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
         if (poDS->tileSizeMin == 0)
@@ -2081,12 +2096,12 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     // clang-format on
 
     VRCpng_data oVRCpng_data = {nullptr, 0, 0};
-    oVRCpng_data.length =
-        static_cast<long>(sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
-                          3L * 256 +     // enough for 256x3 entry palette
-                          3L * 4 +       //  length, "PLTE" and checksum
-                          nVRCDataLen +  // IDAT chunks
-                          sizeof(IEND_chunk));
+    oVRCpng_data.length = static_cast<std::ptrdiff_t>(
+        sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
+        3L * 256 +     // enough for 256x3 entry palette
+        3L * 4 +       //  length, "PLTE" and checksum
+        nVRCDataLen +  // IDAT chunks
+        sizeof(IEND_chunk));
 
     oVRCpng_data.pData = static_cast<png_byte *>(
         png_malloc(png_ptr, static_cast<png_size_t>(oVRCpng_data.length)));
@@ -2230,7 +2245,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     auto nPNGcompress = static_cast<unsigned char>(aVRCHeader[10]);
     auto nPNGfilter = static_cast<unsigned char>(aVRCHeader[11]);
     auto nPNGinterlace = static_cast<unsigned char>(aVRCHeader[12]);
-    const unsigned int nPNGcrc = PNGGetUInt(&aVRCHeader, 13);
+    const uint32_t nPNGcrc = PNGGetUInt(&aVRCHeader, 13);
 
     CPLDebug("Viewranger PNG",
              "PNG file: %u x %u depth %d colour %d, compress=%d, "
@@ -2467,10 +2482,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         // Abort now.
         // FixME: We should either realloc, or use some other memory
         // allocation system ...
-        const long long nNeeded = oVRCpng_data.current +
-                                  static_cast<long long>(nVRCDataLen) +
-                                  static_cast<long long>(sizeof(IEND_chunk));
-        const long long nMore = nNeeded - oVRCpng_data.length;
+        const std::ptrdiff_t nNeeded =
+            oVRCpng_data.current + static_cast<long long>(nVRCDataLen) +
+            static_cast<long long>(sizeof(IEND_chunk));
+        const std::ptrdiff_t nMore = nNeeded - oVRCpng_data.length;
         CPLError(CE_Failure, CPLE_OutOfMemory,
                  "allocated %ld bytes for PNG but need %lu more",
                  oVRCpng_data.length, static_cast<unsigned long>(nMore));
@@ -3623,7 +3638,7 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
             for (int jj = nCopyStartCol, jjj = nBand - 1; jj < nCopyStopCol;
                  jj++, jjj += 6)
             {
-                unsigned short temp = (pbyPNGbuffer + i1)[jjj];
+                uint16_t temp = (pbyPNGbuffer + i1)[jjj];
                 temp += (pbyPNGbuffer + i2)[jjj];
                 temp += (pbyPNGbuffer + i1)[jjj + 3];
                 temp += (pbyPNGbuffer + i2)[jjj + 3];
