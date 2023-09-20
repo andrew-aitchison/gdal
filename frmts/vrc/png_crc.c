@@ -20,7 +20,7 @@ CPL_C_START
 #include <errno.h>
 #include <string.h>
 
-const unsigned long nBitsPerBytes = 8;
+const uint32_t nBitsPerByte = 8;
 
 //  Table of CRCs of all 8-bit messages.
 // #define ncrc_table_size 256
@@ -30,7 +30,7 @@ enum eTABLESIZE
 {
     NCRC_TABLE_SIZE = 256
 };
-static unsigned long crc_table[NCRC_TABLE_SIZE]
+static uint32_t crc_table[NCRC_TABLE_SIZE]
     // clang-format off
 = {
     0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,
@@ -65,12 +65,12 @@ static void make_crc_table(void)
 {
     // unsigned int n, k;
 
-    unsigned long const crc_magic = 0xedb88320L;
+    uint32_t const crc_magic = 0xedb88320L;
 
     for (unsigned int n = 0; n < NCRC_TABLE_SIZE; n++)
     {
-        unsigned long c = (unsigned long)n;
-        for (unsigned int k = 0; k < nBitsPerBytes; k++)
+        uint32_t c = (uint32_t)n;
+        for (unsigned int k = 0; k < nBitsPerByte; k++)
         {
             if (c & 1U)
             {
@@ -91,11 +91,10 @@ static void make_crc_table(void)
    is the 1's complement of the final running CRC (see the
    crc() routine below)). */
 
-static unsigned long update_crc(const unsigned long crc,
-                                const unsigned char *buf,
-                                const unsigned int len)
+static uint32_t update_crc(const uint32_t crc, const unsigned char *buf,
+                           const unsigned int len)
 {
-    unsigned long c = crc;
+    uint32_t c = crc;
 
     if (!crc_table_computed)
     {
@@ -104,16 +103,15 @@ static unsigned long update_crc(const unsigned long crc,
     const unsigned char fullbyte = 0xff;
     for (unsigned int n = 0; n < len; n++)
     {
-        c = crc_table[(c ^ buf[n]) & fullbyte] ^ (c >> nBitsPerBytes);
+        c = crc_table[(c ^ buf[n]) & fullbyte] ^ (c >> nBitsPerByte);
     }
     return c;
 }
 
 /* Return the CRC of the bytes buf[0..len-1]. */
-extern unsigned long pngcrc_for_VRC(const unsigned char *buf,
-                                    const unsigned int len)
+extern uint32_t pngcrc_for_VRC(const unsigned char *buf, const unsigned int len)
 {
-    const unsigned long full32bits = 0xffffffffL;
+    const uint32_t full32bits = 0xffffffffL;
     return update_crc(full32bits, buf, len) ^ full32bits;
 }
 
