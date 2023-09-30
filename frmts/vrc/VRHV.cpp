@@ -32,7 +32,8 @@
 // #ifdef FRMT_vrc
 // #ifdef FRMT_vrhv
 
-#include "VRCutils.h"
+// #include "VRCutils.h"
+#include "VRC.h"
 
 CPL_C_START
 void GDALRegister_VRHV(void);
@@ -77,7 +78,7 @@ class VRHVDataset : public GDALDataset
     signed int nTop = INT_MIN, nBottom = INT_MIN;
     unsigned int nScale = 0;
     unsigned int *anColumnIndex = nullptr;
-    unsigned int *anTileIndex = nullptr;
+    // unsigned int *anTileIndex = nullptr;
     OGRSpatialReference *poSRS = nullptr;
     char *pszLongTitle = nullptr;
     char *pszCopyright = nullptr;
@@ -87,7 +88,9 @@ class VRHVDataset : public GDALDataset
 
   public:
     VRHVDataset() = default;
+#ifdef EXPLICIT_DELETE
     ~VRHVDataset() override;
+#endif  // def EXPLICIT_DELETE
 
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static int Identify(GDALOpenInfo *poOpenInfo);
@@ -171,7 +174,7 @@ class VRHRasterBand : public GDALRasterBand
     int nRecordSize;
 
     GDALColorInterp eBandInterp;
-    signed short *pVRHVData = nullptr;
+    // signed short *pVRHVData=nullptr;
 
     void read_VRH_Tile(VSILFILE *fp, int tile_xx, int tile_yy, void *pimage);
     void read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy, void *pimage);
@@ -179,7 +182,7 @@ class VRHRasterBand : public GDALRasterBand
 
   public:
     VRHRasterBand(VRHVDataset *poDSIn, int nBandIn, int iOverviewIn);
-    ~VRHRasterBand() override;
+    // ~VRHRasterBand() override;
 
     // virtual
     GDALColorInterp GetColorInterpretation() override;
@@ -263,7 +266,7 @@ VRHRasterBand::VRHRasterBand(VRHVDataset *poDSIn, int nBandIn, int iOverviewIn)
 /************************************************************************/
 /*                          ~VRHRasterBand()                            */
 /************************************************************************/
-
+#ifdef EXPLICIT_DELETE
 VRHRasterBand::~VRHRasterBand()
 {
     if (pVRHVData)
@@ -272,6 +275,7 @@ VRHRasterBand::~VRHRasterBand()
         pVRHVData = nullptr;
     }
 }
+#endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
 /*                             IReadBlock()                             */
@@ -385,7 +389,7 @@ GDALColorInterp VRHRasterBand::GetColorInterpretation()
 /************************************************************************/
 /*                           ~VRHVDataset()                             */
 /************************************************************************/
-
+#ifdef EXPLICIT_DELETE
 VRHVDataset::~VRHVDataset()
 {
     GDALDataset::FlushCache(TRUE);
@@ -398,11 +402,13 @@ VRHVDataset::~VRHVDataset()
         VSIFree(anColumnIndex);
         anColumnIndex = nullptr;
     }
+#ifdef USE_TILE_INDEX
     if (anTileIndex != nullptr)
     {
         VSIFree(anTileIndex);
         anTileIndex = nullptr;
     }
+#endif  // USE_TILE_INDEX
     if (pszLongTitle != nullptr)
     {
         VSIFree(pszLongTitle);
@@ -419,6 +425,7 @@ VRHVDataset::~VRHVDataset()
         poSRS = nullptr;
     }
 }
+#endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
@@ -538,7 +545,8 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
                  poOpenInfo->pszFilename);
         return TRUE;
     }
-    else if (magic == vmc_magic)
+
+    if (magic == vmc_magic)
     {
         // This match could easily be accidental,
         // so we require the correct extension even though
@@ -556,13 +564,12 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
                      poOpenInfo->pszFilename);
             return TRUE;
         }
-        else
-        {
-            CPLDebug("ViewrangerHV", "unexpected vmc version %08x", version);
-            return FALSE;
-        }
+
+        CPLDebug("ViewrangerHV", "unexpected vmc version %08x", version);
+        return FALSE;
     }
-    else if (magic == vrv_magic)
+
+    if (magic == vrv_magic)
     {
         // should do more checks here;
         // matching this magic could easily be accidental
@@ -577,16 +584,15 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
                      poOpenInfo->pszFilename);
             return TRUE;
         }
-        else
-        {
-            CPLDebug("ViewrangerHV",
-                     "ignoring possible VRV file %s with unexpected extension",
-                     poOpenInfo->pszFilename);
-            return FALSE;
-        }
+
+        CPLDebug("ViewrangerHV",
+                 "ignoring possible VRV file %s with unexpected extension",
+                 poOpenInfo->pszFilename);
+        return FALSE;
     }
-    else if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "VRH") ||
-             EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "vrh"))
+
+    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "VRH") ||
+        EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "vrh"))
     {
         // *some* .VRH files have no magic.
         // http://lists.osgeo.org/pipermail/gdal-dev/2013-February/035530.html
@@ -891,8 +897,8 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         delete poDS;
         return nullptr;
     }
-#define MAX_X 1024  // 2711
-#define MAX_Y 1024  // 3267 AllFranceVRHs/Corsica.VRH
+#define MAX_X 2711  // Danmark/GermanyCH.VRH
+#define MAX_Y 3267  // AllFranceVRHs/Corsica.VRH
     if (poDS->nRasterXSize > MAX_X || poDS->nRasterYSize > MAX_Y)
     {
         if (poDS->nMagic != vrh_magic)
@@ -920,7 +926,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         char *pszSRS = nullptr;
         if (!poDS->poSRS)
         {
-            poDS->poSRS = CRSfromCountry(poDS->nCountry);
+            poDS->poSRS = CRSfromCountry(poDS->nCountry, 0);
         }
         poDS->poSRS->exportToWkt(&pszSRS);
         if (pszSRS)

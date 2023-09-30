@@ -34,32 +34,30 @@
 
 // #if defined(__clang__)
 // #endif // defined(__clang__)
-#include "gdal_pam.h"
-#include "ogr_spatialref.h"
-// #include "cpl_string.h"
+#include <gdal_pam.h>
+#include <ogr_spatialref.h>
+// #include <cpl_string.h>
 
-int VRReadChar(VSILFILE *fp);
-int VRReadInt(VSILFILE *fp);
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
-extern OGRSpatialReference *CRSfromCountry(int nCountry);
-extern const char *CharsetFromCountry(int nCountry);
+extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID);
+extern const char *CharsetFromCountry(int16_t nCountry);
 
 extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
                                unsigned int nOverviewCount,
-                               unsigned int anTileOverviewIndex[],
-                               const int tile_xx, const int tile_yy);
+                               unsigned int anTileOverviewIndex[], int tile_xx,
+                               int tile_yy);
 
 extern short VRGetShort(const void *base, int byteOffset);
-extern signed int VRGetInt(const void *base, unsigned int byteOffset);
-extern unsigned int VRGetUInt(const void *base, unsigned int byteOffset);
+extern int32_t VRGetInt(const void *base, unsigned int byteOffset);
+extern uint32_t VRGetUInt(const void *base, unsigned int byteOffset);
 
 extern int VRReadChar(VSILFILE *fp);
 extern int VRReadShort(VSILFILE *fp);
-extern int VRReadInt(VSILFILE *fp);
-extern int VRReadInt(VSILFILE *fp, unsigned int byteOffset);
-extern unsigned int VRReadUInt(VSILFILE *fp);
-extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
+extern int32_t VRReadInt(VSILFILE *fp);
+extern int32_t VRReadInt(VSILFILE *fp, unsigned int byteOffset);
+extern uint32_t VRReadUInt(VSILFILE *fp);
+extern uint32_t VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 
 #endif  // ndef VRC_UTILS_H_INCLUDED
 
