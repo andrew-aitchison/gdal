@@ -175,7 +175,7 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
         return -1;
     }
     const unsigned char *pBuf = &oVRCpng_data->pData[oVRCpng_data->current - 4];
-    int32_t nLen =
+    const int32_t nLen =
         PNGGetInt(&oVRCpng_data->pData[oVRCpng_data->current - 8], 0);
 
     if (nLen > oVRCpng_data->length /* || nLen > 1L << 31U */)
@@ -185,11 +185,9 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
                  nLen, oVRCpng_data->length);
         return -1;
     }
-    else
-    {
-        CPLDebug("Viewranger PNG", "PNGCRCcheck((%p, %lu) %u, x%08lx)", pBuf,
-                 oVRCpng_data->current, nLen, nGiven);
-    }
+
+    CPLDebug("Viewranger PNG", "PNGCRCcheck((%p, %lu) %u, x%08lx)", pBuf,
+             oVRCpng_data->current, nLen, nGiven);
 
     const uint32_t nFileCRC =
         0xffffffff &
@@ -336,7 +334,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
         // GCI_Undefined;  // GCI_GrayIndex;  // GCI_PaletteIndex;
         // GCI_RedBand;  // GCI_GreenBand;  // GCI_BlueBand;  //GCI_AlphaBand;
 
-        CPLDebug("Viewranger", "vrcmetres_pixel_is_pixel nThisOverview=%d",
+        CPLDebug("Viewranger", "vrc_pixel_is_pixel nThisOverview=%d",
                  nThisOverview);
         if (nThisOverview < -1)
         {
@@ -463,7 +461,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
 /************************************************************************/
 /*                          ~VRCRasterBand()                            */
 /************************************************************************/
-
+#ifdef EXPLICIT_DELETE
 VRCRasterBand::~VRCRasterBand()
 {
     CPLDebug("Viewranger", "deleting %p->VRCRasterBand(%p, %d, %d, %d, %p)",
@@ -502,7 +500,8 @@ VRCRasterBand::~VRCRasterBand()
         CPLFree(papoOverviewBands);
         papoOverviewBands = nullptr;
     }
-}  // VRCRasterBand::~VRCRasterBand()
+}       // VRCRasterBand::~VRCRasterBand()
+#endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
 /*                             IReadBlock()                             */
@@ -667,12 +666,13 @@ GDALColorInterp VRCRasterBand::GetColorInterpretation()
     if (poGDS->nMagic == vrc_magic)
     {
         CPLDebug("Viewranger",
-                 "VRCRasterBand::GetColorInterpretation vrcmetres "
+                 "VRCRasterBand::GetColorInterpretation vrc "
                  "GetColorInterpretation %08x %d",
                  poGDS->nMagic, this->eBandInterp);
         return this->eBandInterp;
     }
-    else if (poGDS->nMagic == vrc_magic36)
+
+    if (poGDS->nMagic == vrc_magic36)
     {
         CPLDebug("Viewranger",
                  "VRCRasterBand::GetColorInterpretation vrc36 "
@@ -680,14 +680,12 @@ GDALColorInterp VRCRasterBand::GetColorInterpretation()
                  poGDS->nMagic, this->eBandInterp);
         return this->eBandInterp;
     }
-    else
-    {
-        CPLDebug("Viewranger",
-                 "VRCRasterBand::GetColorInterpretation unexpected magic %08x "
-                 "- GetColorInterpretation %d -but returning GrayIndex",
-                 poGDS->nMagic, this->eBandInterp);
-        return GCI_GrayIndex;
-    }
+
+    CPLDebug("Viewranger",
+             "VRCRasterBand::GetColorInterpretation unexpected magic %08x "
+             "- GetColorInterpretation %d -but returning GrayIndex",
+             poGDS->nMagic, this->eBandInterp);
+    return GCI_GrayIndex;
 }
 
 /************************************************************************/
@@ -714,7 +712,7 @@ GDALColorTable *VRCRasterBand::GetColorTable()
 /************************************************************************/
 /*                           ~VRCDataset()                             */
 /************************************************************************/
-
+#ifdef EXPLICIT_DELETE
 VRCDataset::~VRCDataset()
 {
     GDALDataset::FlushCache(TRUE);
@@ -739,7 +737,8 @@ VRCDataset::~VRCDataset()
         poSRS->Release();
         poSRS = nullptr;
     }
-}  // VRCDataset::~VRCDataset()
+}       // VRCDataset::~VRCDataset()
+#endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
@@ -757,11 +756,16 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
     {
         // This may not be correct
         // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps
-        // have coordinate unit of
-        //   1 degree/ten million
+        // have coordinate unit which is not metres.
+        // It might be some part of a degree, eg 1 degree/ten million.
         CPLDebug("Viewranger",
-                 "country/srs 17 USA?Discovery(Spain, Greece)?Belgium grid is "
-                 "unknown. Current guess is unlikely to be correct.");
+                 "MapID %d country/srs 17 USA?Discovery(Spain, Greece)?Belgium "
+                 "grid is "
+                 "unknown. Current guess is unlikely to be correct.",
+                 nMapID);
+        CPLDebug("Viewranger",
+                 "raw corner positions: TL: %.10g %.10g BR: %.10g %.10g", dTop,
+                 dLeft, dBottom, dRight);
         const double nineMillion = 9.0 * 1000 * 1000;
         dLeft /= nineMillion;
         dRight /= nineMillion;
@@ -863,7 +867,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
 
     if (nMagic == vrc_magic)
     {
-        CPLDebug("Viewranger", "VRCmetres file %s supported",
+        CPLDebug("Viewranger", "VRC file %s supported",
                  poOpenInfo->pszFilename);
         if (!b64k1)
         {
@@ -874,7 +878,8 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
         }
         return GDAL_IDENTIFY_TRUE;
     }
-    else if (nMagic == vrc_magic36)
+
+    if (nMagic == vrc_magic36)
     {
         CPLError(
             CE_Warning, CPLE_AppDefined,
@@ -882,6 +887,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
             poOpenInfo->pszFilename);
         return GDAL_IDENTIFY_FALSE;
     }
+
     return GDAL_IDENTIFY_FALSE;
 }  // VRCDataset::Identify()
 
@@ -1205,7 +1211,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->nCountry = VRGetShort(poDS->abyHeader, 6);
     const char *szInCharset = CharsetFromCountry(poDS->nCountry);
 
-    CPLDebug("ViewRanger", "Country %d has charset %s", poDS->nCountry,
+    CPLDebug("ViewRanger", "Country %hd has charset %s", poDS->nCountry,
              szInCharset);
 
     poDS->nMapID = VRGetInt(poDS->abyHeader, 14);
@@ -1716,7 +1722,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     /********************************************************************/
     if (!poDS->poSRS)
     {
-        poDS->poSRS = CRSfromCountry(poDS->nCountry);
+        poDS->poSRS = CRSfromCountry(poDS->nCountry, poDS->nMapID);
     }
 
     /********************************************************************/
@@ -1773,9 +1779,10 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     return (poDS);
 }  // VRCDataset::Open()
 
-void dumpPPM(unsigned int width, unsigned int height, unsigned char *const data,
-             unsigned int rowlength, CPLString osBaseLabel,
-             VRCinterleave eInterleave, unsigned int nMaxPPM)
+void dumpPPM(unsigned int width, unsigned int height,
+             const unsigned char *const data, unsigned int rowlength,
+             CPLString osBaseLabel, VRCinterleave eInterleave,
+             unsigned int nMaxPPM)
 {
     // is static the best way to count the PPMs ?
     static unsigned int nPPMcount = 0;
@@ -2411,11 +2418,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VSIFree(pbyPNGbuffer);
             return nullptr;
         }
-        else
-        {
-            CPLDebug("Viewranger PNG", "palette %u=x%08x bytes, %d entries",
-                     nPNGPlteLen, nPNGPlteLen, nPNGPlteLen / 3);
-        }
+
+        CPLDebug("Viewranger PNG", "palette %u=x%08x bytes, %d entries",
+                 nPNGPlteLen, nPNGPlteLen, nPNGPlteLen / 3);
+
         memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
                static_cast<char *>(pVRCPalette), 4);
         oVRCpng_data.current += 4;
@@ -2715,10 +2721,8 @@ int VRCRasterBand::GetOverviewCount()
     {
         return poFullBand->nOverviewCount;
     }
-    else
-    {
-        return 0;
-    }
+
+    return 0;
 
 }  // VRCRasterBand::GetOverviewCount
 
@@ -2797,26 +2801,24 @@ GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
                  this, iOverviewIn, nBand, nOverviewCount);
         return nullptr;
     }
-    else
+
+    VRCRasterBand *pThisOverview = poFullBand->papoOverviewBands[iOverviewIn];
+    CPLDebug("Viewranger",
+             "GetOverview(%d) nBand %d - returns %d x %d overview %p "
+             "(overview count is %d)",
+             iOverviewIn, nBand, pThisOverview->nRasterXSize,
+             pThisOverview->nRasterYSize, pThisOverview, nOverviewCount);
+    if (this == pThisOverview)
     {
-        VRCRasterBand *pThisOverview =
-            poFullBand->papoOverviewBands[iOverviewIn];
-        CPLDebug("Viewranger",
-                 "GetOverview(%d) nBand %d - returns %d x %d overview %p "
-                 "(overview count is %d)",
-                 iOverviewIn, nBand, pThisOverview->nRasterXSize,
-                 pThisOverview->nRasterYSize, pThisOverview, nOverviewCount);
-        if (this == pThisOverview)
-        {
-            static int nCount = 0;
-            nCount++;
-            CPLDebug("VRC",
-                     "%p->VRCRasterBand::GetOverview(%d) returns itself - "
-                     "called %d times",
-                     this, iOverviewIn, nCount);
-        }
-        return pThisOverview;
+        static int nCount = 0;
+        nCount++;
+        CPLDebug("VRC",
+                 "%p->VRCRasterBand::GetOverview(%d) returns itself - "
+                 "called %d times",
+                 this, iOverviewIn, nCount);
     }
+
+    return pThisOverview;
 }  // VRCRasterBand::GetOverview
 
 extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
