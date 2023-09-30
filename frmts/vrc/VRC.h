@@ -37,9 +37,9 @@
 
 // #if defined(__clang__)
 // #endif // defined(__clang__)
-#include "gdal_pam.h"
-#include "ogr_spatialref.h"
-// #include "cpl_string.h"
+#include <gdal_pam.h>
+#include <ogr_spatialref.h>
+// #include <cpl_string.h>
 
 // We have not fully deciphered the data format
 // of VRC files with magic=0x01ce6336.
@@ -65,7 +65,7 @@ class VRCRasterBand;
 extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
                                unsigned int nOverviewCount,
                                const unsigned int anTileOverviewIndex[],
-                               const int tile_xx, const int tile_yy);
+                               int tile_xx, int tile_yy);
 
 extern short VRGetShort(const void *base, int byteOffset);
 extern signed int VRGetInt(const void *base, unsigned int byteOffset);
@@ -85,12 +85,12 @@ enum VRCinterleave : uint8_t
     pixel
 };
 
-void dumpPPM(unsigned int width, unsigned int height, unsigned char *const data,
+void dumpPPM(unsigned int width, unsigned int height, const unsigned char *data,
              unsigned int rowlength, CPLString osBaseLabel,
              VRCinterleave eInterleave, unsigned int nMaxPPM);
 
-OGRSpatialReference *CRSfromCountry(int nCountry);
-extern const char *CharsetFromCountry(int nCountry);
+extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID);
+extern const char *CharsetFromCountry(int16_t nCountry);
 
 /************************************************************************/
 /* ==================================================================== */
@@ -111,13 +111,13 @@ class VRCDataset : public GDALDataset
     unsigned int *anTileIndex = nullptr;
     unsigned int nMagic = 0;
     double dfPixelMetres = 0.0;
-    signed int nMapID = -1;
+    int32_t nMapID = -1;
     signed int nLeft = INT_MAX, nRight = INT_MAX;
     signed int nTop = INT_MIN, nBottom = INT_MIN;
     signed int nTopSkipPix = 0, nRightSkipPix = 0;
     unsigned int nScale = 0;
     // unsigned int nMaxOverviewCount=7;
-    short nCountry = -1;
+    int16_t nCountry = -1;
     OGRSpatialReference *poSRS = nullptr;
 
     std::string sFileName;
@@ -136,7 +136,9 @@ class VRCDataset : public GDALDataset
 
   public:
     VRCDataset() = default;  // This does not initialize abyHeader
+#ifdef EXPLICIT_DELETE
     ~VRCDataset() override;
+#endif  // def EXPLICIT_DELETE
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -210,24 +212,24 @@ class VRCRasterBand : public GDALRasterBand
     VRCRasterBand(VRCDataset *poDSIn, int nBandIn, int nThisOverviewIn,
                   int nOverviewCountIn, VRCRasterBand **papoOverviewBandsIn);
 
+#ifdef EXPLICIT_DELETE
     ~VRCRasterBand() override;
+#endif  // def EXPLICIT_DELETE
 
-    virtual GDALColorInterp GetColorInterpretation() override;
-    virtual CPLErr
-    SetColorInterpretation(GDALColorInterp eColorInterp) override;
-    virtual GDALColorTable *GetColorTable() override;
+    GDALColorInterp GetColorInterpretation() override;
+    CPLErr SetColorInterpretation(GDALColorInterp eColorInterp) override;
+    GDALColorTable *GetColorTable() override;
 
-    virtual double GetNoDataValue(int *) override;
-    // // virtual CPLErr SetNoDataValue(double) override;
-    CPLErr SetNoDataValue(double) override final;
+    double GetNoDataValue(int *pbSuccess) override;
+    // CPLErr SetNoDataValue(double) override;
+    CPLErr SetNoDataValue(double dfNoDataValue) final;
 
-    virtual int GetOverviewCount() override;
-    virtual GDALRasterBand *GetOverview(int) override;
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    int GetOverviewCount() override;
+    GDALRasterBand *GetOverview(int iOverviewIn) override;
+    CPLErr IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage) override;
 
-    virtual int IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize,
-                                       int nYSize, int nMaskFlagStop,
-                                       double *pdfDataPct) override;
+    int IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize, int nYSize,
+                               int nMaskFlagStop, double *pdfDataPct) override;
 };  // class VRCRasterBand
 
-#endif  // ndef VRC_H_INCLUDED
+#endif  // VRC_H_INCLUDED
