@@ -16,24 +16,24 @@ extern short VRGetShort(const void *base, int byteOffset)
     return (vv);
 }
 
-signed int VRGetInt(const void *base, unsigned int byteOffset)
+int32_t VRGetInt(const void *base, unsigned int byteOffset)
 {
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
-    signed int vv = buf[0];
-    vv |= (static_cast<signed int>(buf[1])) << 8U;
-    vv |= (static_cast<signed int>(buf[2])) << 16U;
-    vv |= (static_cast<signed int>(buf[3])) << 24U;
+    int32_t vv = buf[0];
+    vv |= (static_cast<int32_t>(buf[1])) << 8U;
+    vv |= (static_cast<int32_t>(buf[2])) << 16U;
+    vv |= (static_cast<int32_t>(buf[3])) << 24U;
     return (vv);
 }
-unsigned int VRGetUInt(const void *base, const unsigned int byteOffset)
+uint32_t VRGetUInt(const void *base, const uint32_t byteOffset)
 {
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
-    auto vv = static_cast<unsigned int>(buf[0]);
-    vv |= (static_cast<unsigned int>(buf[1])) << 8U;
-    vv |= (static_cast<unsigned int>(buf[2])) << 16U;
-    vv |= (static_cast<unsigned int>(buf[3])) << 24U;
+    auto vv = static_cast<uint32_t>(buf[0]);
+    vv |= (static_cast<uint32_t>(buf[1])) << 8U;
+    vv |= (static_cast<uint32_t>(buf[2])) << 16U;
+    vv |= (static_cast<uint32_t>(buf[3])) << 24U;
 
-    return (static_cast<unsigned int>(vv));
+    return (static_cast<uint32_t>(vv));
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -61,7 +61,7 @@ int VRReadShort(VSILFILE *fp)
     return (vv);
 }
 
-int VRReadInt(VSILFILE *fp)
+int32_t VRReadInt(VSILFILE *fp)
 {
     std::array<unsigned char, 4> buf;
     // size_t ret =
@@ -75,7 +75,7 @@ int VRReadInt(VSILFILE *fp)
     // if (ret<4) return (EOF);
     return (vv);
 }
-int VRReadInt(VSILFILE *fp, unsigned int byteOffset)
+int32_t VRReadInt(VSILFILE *fp, unsigned int byteOffset)
 {
     if (VSIFSeekL(fp, byteOffset, SEEK_SET))
     {
@@ -87,16 +87,16 @@ int VRReadInt(VSILFILE *fp, unsigned int byteOffset)
     return VRReadInt(fp);
 }
 
-unsigned int VRReadUInt(VSILFILE *fp)
+uint32_t VRReadUInt(VSILFILE *fp)
 {
-    // unsigned int vv;
+    // uint32_t vv;
     std::array<unsigned char, 4> buf;
     // size_t ret =
     VSIFReadL(&buf, 1, 4, fp);
     // if (ret<4) return (EOF);
     return (VRGetUInt(&buf, 0));
 }
-unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
+uint32_t VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
 {
     if (VSIFSeekL(fp, byteOffset, SEEK_SET))
     {
@@ -111,11 +111,6 @@ unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
 /*
  *               CRSfromCountry
  *
- * GDAL v1:
- * const char *CRSfromCountry(int nCountry)
- * GDAL v2 and v3:
- * OGRSpatialReference* CRSfromCountry(int nCountry)
- *
  */
 
 // Some CRS use the "old" axis convention
@@ -125,7 +120,7 @@ unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
     nEPSG = (A);                                                               \
     errImport = poSRS->importFromEPSGA(nEPSG)
 
-extern OGRSpatialReference *CRSfromCountry(int nCountry)
+extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
 {
     OGRErr errImport = OGRERR_NONE;
     int nEPSG = 0;
@@ -160,7 +155,7 @@ extern OGRSpatialReference *CRSfromCountry(int nCountry)
             VRC_EPSG(28992);
             break;
         case 13:  // Slovenia
-            VRC_EPSG(3907);
+            VRC_EPSG(8677);
             // tbc
             break;
         case 14:  // Sweden SWEREF99
@@ -174,9 +169,19 @@ extern OGRSpatialReference *CRSfromCountry(int nCountry)
             VRC_EPSG(32632);
             break;
         case 17:
-            // USA, Discovery(Spain/Canaries) and Belgium VRH (height) files
-            VRC_EPSG(4267);
-            VRC_SWAP_AXES;
+            // USA, Discovery(Spain/Canaries/Greece)
+            // and Belgium VRH (height) files
+            switch (nMapID)
+            {
+                case 0:
+                    VRC_EPSG(4267);
+                    VRC_SWAP_AXES;
+                    break;
+                default:
+                    VRC_EPSG(4326);
+                    VRC_SWAP_AXES;
+                    break;
+            }
             break;
         case 18:  // New Zealand
             VRC_EPSG(2193);
@@ -206,7 +211,7 @@ extern OGRSpatialReference *CRSfromCountry(int nCountry)
             break;
         default:
             CPLDebug("Viewranger",
-                     "CRSfromCountry(country %d unknown) assuming WGS 84",
+                     "CRSfromCountry(country %hd unknown) assuming WGS 84",
                      nCountry);
             VRC_EPSG(4326);
             break;
@@ -214,9 +219,10 @@ extern OGRSpatialReference *CRSfromCountry(int nCountry)
 
     if (errImport != OGRERR_NONE)
     {
-        CPLDebug("Viewranger",
-                 "failed to import EPSG:%d for CRSfromCountry(%d) error %d",
-                 nEPSG, nCountry, errImport);
+        CPLDebug(
+            "Viewranger",
+            "failed to import EPSG:%d for CRSfromCountry(%hd, %d) error %d",
+            nEPSG, nCountry, nMapID, errImport);
         delete poSRS;
         poSRS = nullptr;
     }
@@ -225,7 +231,7 @@ extern OGRSpatialReference *CRSfromCountry(int nCountry)
 #undef VRC_EPSG
 #undef VRC_SWAP_AXES
 
-extern const char *CharsetFromCountry(int nCountry)
+extern const char *CharsetFromCountry(int16_t nCountry)
 {
     // CPLDebug("Viewranger", "CharsetFromCountry(%d)", nCountry);
     switch (nCountry)
@@ -259,6 +265,7 @@ extern const char *CharsetFromCountry(int nCountry)
         case 19:  // France
             return "LATIN9";
         case 20:  // Greece
+            // return "UTF-8";
             return "LATIN9";
         // case 21:  // Spain, but not Discovery Walking Guides ?
         //     return "UTF-8";
