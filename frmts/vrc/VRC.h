@@ -4,7 +4,7 @@
  * Author:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2019-21, Andrew C Aitchison
+ * Copyright (c) 2019-23, Andrew C Aitchison
  ******************************************************************************
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
