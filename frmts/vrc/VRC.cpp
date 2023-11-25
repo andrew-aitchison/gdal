@@ -6,7 +6,7 @@
  * Authors:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2015-21, Andrew C Aitchison
+ * Copyright (c) 2015-23, Andrew C Aitchison
  ******************************************************************************
  * Portions taken from gdal-2.2.3/frmts/png/pngdataset.cpp and other GDAL code
  * Copyright (c) 2000, Frank Warmerdam
@@ -500,7 +500,7 @@ VRCRasterBand::~VRCRasterBand()
         CPLFree(papoOverviewBands);
         papoOverviewBands = nullptr;
     }
-}       // VRCRasterBand::~VRCRasterBand()
+}  // VRCRasterBand::~VRCRasterBand()
 #endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
@@ -737,7 +737,7 @@ VRCDataset::~VRCDataset()
         poSRS->Release();
         poSRS = nullptr;
     }
-}       // VRCDataset::~VRCDataset()
+}  // VRCDataset::~VRCDataset()
 #endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
@@ -1384,9 +1384,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         CPLDebug("Viewranger", "VRC %f metre pixels is not exactly 1:%u",
                  poDS->dfPixelMetres, poDS->nScale);
     }
-    else
-    {
-    }
 
     if (poDS->dfPixelMetres < 0.5)
     {
@@ -1902,7 +1899,7 @@ void dumpPPM(unsigned int width, unsigned int height,
                 }
                 pRow += rowlength;
             }  // pixel or band interleaved ?
-        }      // for row r
+        }  // for row r
     }
     else
     {  // nHeaderSize!=nHeaderWriteResult
@@ -2289,8 +2286,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                          "16/48bit RGB unexpected");
                 break;
             }
-            CPL_FALLTHROUGH
-            // [[fallthrough]];
+#if __cplusplus > 201402L
+            [[fallthrough]];
+#else
+#endif
         case 3:                 // Palette
             if (nPNGdepth < 16  //-V560
                 && nPNGcolour == 3)
@@ -3431,7 +3430,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                              poVRCDS->nMagic);
                     return;
             }  // switch (poVRCDS->nMagic)
-        }      // for (loopY
+        }  // for (loopY
         nLeftCol = nRightCol;
     }  // for (loopX
 
