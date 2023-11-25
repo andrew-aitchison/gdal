@@ -6,7 +6,7 @@
  * Authors:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2015-21, Andrew C Aitchison
+ * Copyright (c) 2015-23, Andrew C Aitchison
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -442,7 +442,7 @@ CPLErr VRHVDataset::GetGeoTransform(double *padfTransform)
     if (nCountry == 17)
     {
         // This may not be correct
-        // USA, Discovery (Spain) and some Belgium (VRH height) maps
+        // USA, Discovery (Spain,Greece) and some Belgium (VRH height) maps
         // have coordinate unit of something like  1 degree/ten million
         CPLDebug("ViewrangerHV",
                  "country/srs 17 USA?Belgium?Discovery(Spain) grid is unknown. "
@@ -808,7 +808,6 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
                          poDS->nRasterXSize);
             }
 
-            poDS->nCountry = VRGetShort(poDS->abyHeader, 6);
             {
                 const char *szInCharset = CharsetFromCountry(poDS->nCountry);
                 const char *szOutCharset = "UTF-8";
@@ -1237,7 +1236,7 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
              pixelnum, nBlockXSize, nBlockYSize);
     (void)pixelnum;  // cppcheck ignores CPLDebug args.
                      // Don't complain that pixelnum is never used.
-}                    // VRHRasterBand::read_VMC_Tile()
+}  // VRHRasterBand::read_VMC_Tile()
 
 /************************************************************************/
 /*                            GetFileList()                             */
