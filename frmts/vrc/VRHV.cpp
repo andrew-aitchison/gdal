@@ -6,7 +6,7 @@
  * Authors:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2015-23, Andrew C Aitchison
+ * Copyright (c) 2015-24, Andrew C Aitchison
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -34,6 +34,8 @@
 
 // #include "VRCutils.h"
 #include "VRC.h"
+
+#include <algorithm>  // for std::max and std::min
 
 CPL_C_START
 void GDALRegister_VRHV(void);
@@ -1073,10 +1075,7 @@ void VRHRasterBand::read_VRH_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
                          value);
             }
         }
-        if (value > max)
-        {
-            max = value;
-        }
+        max = std::max(value, max);
         while (length > 0)
         {
             length--;
@@ -1145,10 +1144,7 @@ void VRHRasterBand::read_VMC_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
         for (int y = nBlockYSize - 1; y >= 0; y--)
         {
             const int nPix = x + y * nBlockXSize;
-            if (nPix > nMaxPix)
-            {
-                nMaxPix = nPix;
-            }
+            nMaxPix = std::max(nPix, nMaxPix);
             pnBottomPixel[nPix] = (nCurrentData & 1) ? nVMCYesData : nVMCNoData;
             CPLDebug("ViewrangerHV",
                      "read_VMC_Tile: %p %3d %3d [%06d] = x%02x x%02x %d/%d",
