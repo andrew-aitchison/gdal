@@ -33,7 +33,7 @@ uint32_t VRGetUInt(const void *base, const uint32_t byteOffset)
     vv |= (static_cast<uint32_t>(buf[2])) << 16U;
     vv |= (static_cast<uint32_t>(buf[3])) << 24U;
 
-    return (static_cast<uint32_t>(vv));
+    return (vv);
 }
 
 ///////////////////////////////////////////////////////////////////
