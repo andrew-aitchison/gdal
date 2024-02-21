@@ -6,7 +6,7 @@
  * Authors:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2015-23, Andrew C Aitchison
+ * Copyright (c) 2015-24, Andrew C Aitchison
  ******************************************************************************
  * Portions taken from gdal-2.2.3/frmts/png/pngdataset.cpp and other GDAL code
  * Copyright (c) 2000, Frank Warmerdam
@@ -209,9 +209,7 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
     }
 
     const uint32_t nComputed =
-        pngcrc_for_VRC(pBuf, static_cast<unsigned int>(
-                                 static_cast<unsigned int>(nLen) + 4U)) &
-        0xffffffff;
+        pngcrc_for_VRC(pBuf, static_cast<unsigned int>(nLen) + 4U) & 0xffffffff;
     const int ret = (nGiven == nComputed);
     if (ret == 0)
     {
@@ -1852,6 +1850,7 @@ void dumpPPM(unsigned int width, unsigned int height,
                             width, height));
             break;
     }
+
     // CPLsnprintf may return negative values;
     // the cast to size_t converts these to large positive
     // values, so we only need one test.
@@ -2047,10 +2046,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
     png_voidp user_error_ptr = nullptr;
     // Initialize PNG structures
-    png_structp png_ptr = png_create_read_struct(
-        PNG_LIBPNG_VER_STRING, static_cast<png_voidp>(user_error_ptr),
-        // user_error_fn, user_warning_fn
-        nullptr, nullptr);
+    png_structp png_ptr =
+        png_create_read_struct(PNG_LIBPNG_VER_STRING, user_error_ptr,
+                               // user_error_fn, user_warning_fn
+                               nullptr, nullptr);
     if (png_ptr == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -2288,7 +2287,6 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             }
 #if __cplusplus > 201402L
             [[fallthrough]];
-#else
 #endif
         case 3:                 // Palette
             if (nPNGdepth < 16  //-V560
@@ -2422,14 +2420,14 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                  nPNGPlteLen, nPNGPlteLen, nPNGPlteLen / 3);
 
         memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-               static_cast<char *>(pVRCPalette), 4);
+               pVRCPalette, 4);
         oVRCpng_data.current += 4;
         memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
                "PLTE", 4);
         oVRCpng_data.current += 4;
 
         memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-               static_cast<char *>(pVRCPalette) + 4, nPNGPlteLen + 4);
+               pVRCPalette + 4, nPNGPlteLen + 4);
         oVRCpng_data.current += nPNGPlteLen + 4;
         VSIFree(pVRCPalette);
     }
@@ -2638,7 +2636,7 @@ void CPL_DLL GDALRegister_VRC()
     poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
 
     poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "ViewRanger (.VRC)");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "frmt_various.html#VRC");
+    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/vrc.html");
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "VRC");
 
     // poDriver->SetMetadataItem( GDAL_DMD_CREATIONDATATYPES, "Byte Int16"
@@ -3289,11 +3287,8 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                                 // poVRCDS->sLongTitle.c_str(),
                                 nThisOverview, block_xx, block_yy, loopX, loopY,
                                 nBand, nHeader);
-                            dumpPPM(static_cast<unsigned int>(nPNGwidth),
-                                    static_cast<unsigned int>(nPNGheight),
-                                    pbyPNGbuffer,
-                                    static_cast<unsigned int>(nPNGwidth),
-                                    osBaseLabel, pixel, nEnvTile);
+                            dumpPPM(nPNGwidth, nPNGheight, pbyPNGbuffer,
+                                    nPNGwidth, osBaseLabel, pixel, nEnvTile);
                         }
 
                         if (nPrevPNGwidth == 0)
