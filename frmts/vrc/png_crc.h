@@ -12,11 +12,7 @@
 
 CPL_C_START
 
-// #ifdef INTERNAL_PNG
-// #include "../png/libpng/png.h"
-// #else
 #include <png.h>
-// #endif
 
 /* Return the PNG CRC of the bytes buf[0..len-1]. */
 extern uint32_t pngcrc_for_VRC(const unsigned char *buf, unsigned int len);
