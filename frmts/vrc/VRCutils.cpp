@@ -169,8 +169,9 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
             VRC_EPSG(32632);
             break;
         case 17:
+            // This "country" code uses a different, unknown, unit - not metres.
             // USA, Discovery(Spain/Canaries/Greece)
-            // and Belgium VRH (height) files
+            // and US + Belgium .VRH (height) files
             switch (nMapID)
             {
                 case 0:
@@ -190,10 +191,10 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
         case 19:  // France
             VRC_EPSG(2154);
             break;
-        case 20:  // Greece
+        case 20:  // Greece (also see 17 for Discovery Walking Guides)
             VRC_EPSG(2100);
             break;
-        case 21:  // Spain (Including Discovery Walking Guides)
+        case 21:  // Spain (also see 17 for Discovery Walking Guides)
             VRC_EPSG(3042);
             VRC_SWAP_AXES;
             break;
@@ -257,8 +258,8 @@ extern const char *CharsetFromCountry(int16_t nCountry)
             return "LATIN9";
         case 16:  // Italy
             return "LATIN9";
-        case 17:  // USA, Discovery(Spain/Canaries)
-            // (Belgium .VRH files are also 17, but .VRH files have no strings).
+        case 17:  // USA, Discovery(Spain/Canaries/Greece)
+            // (US + Belgium .VRH files are also 17, but .VRH files have no strings).
             return "LATIN9";
         case 18:  // New Zealand
             return "LATIN9";
