@@ -177,6 +177,7 @@ Raster drivers
    tsx
    usgsdem
    vicar
+   vrc
    vrt
    wcs
    webp
