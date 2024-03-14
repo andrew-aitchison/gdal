@@ -11,7 +11,7 @@ if (GDAL_USE_PNG AND GDAL_USE_ZLIB)
             VRC.h
             VRCutils.cpp
     PLUGIN_CAPABLE_IF
-           "NOT GDAL_USE_PNG_INTERNAL;NOT GDAL_USE_ZLIB_INTERNAL"
+           "NOT GDAL_USE_PNG_INTERNAL\\\;NOT GDAL_USE_ZLIB_INTERNAL"
     )
 
   gdal_standard_includes(gdal_VRC)
