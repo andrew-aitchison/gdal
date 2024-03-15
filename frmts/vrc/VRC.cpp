@@ -51,7 +51,7 @@ void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 #define STRERR_DEBUG(...)
 
     STRERR_DEBUG("Viewranger", "%s", VSIStrerror(nFileErr));
-    (void)snprintf(buf, buflen, "%s", VSIStrerror(nFileErr));
+    (void)CPLsnprintf(buf, buflen, "%s", VSIStrerror(nFileErr));
 #undef STRERR_DEBUG
 }  // VRC_file_strerror_r()
 
@@ -997,17 +997,17 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         CPLError(CE_Failure, CPLE_AppDefined,
                  "VRCBuildTileIndex called for a map with mapID %d", nMapID);
     }
-    if (VSIFSeekL(fp, static_cast<size_t>(nTileIndexStart), SEEK_SET))
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "cannot seek to VRC tile index start 0x%xu", nTileIndexStart);
-        return nullptr;
-    }
     if (tileXcount <= 0 || tileYcount <= 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "VRCBuildTileIndex(x%x) called for empty (%d x %d) image",
                  nTileIndexStart, tileXcount, tileYcount);
+        return nullptr;
+    }
+    if (VSIFSeekL(fp, static_cast<size_t>(nTileIndexStart), SEEK_SET))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "cannot seek to VRC tile index start 0x%xu", nTileIndexStart);
         return nullptr;
     }
 
@@ -2287,6 +2287,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             }
 #if __cplusplus > 201402L
             [[fallthrough]];
+#else
+            [[clang::fallthrough]];
 #endif
         case 3:                 // Palette
             if (nPNGdepth < 16  //-V560

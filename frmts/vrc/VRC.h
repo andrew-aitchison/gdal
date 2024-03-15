@@ -4,7 +4,7 @@
  * Author:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2019-23, Andrew C Aitchison
+ * Copyright (c) 2019-24, Andrew C Aitchison
  ******************************************************************************
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -59,6 +59,7 @@ static const unsigned int vrc_magic36 = 0x01ce6336;  // 0x3663ce01; //
 // (any one will trigger nodata).
 // Try:
 static const unsigned int nVRCNoData = 1;
+// 1 doesn't work for Map ID 3038 :-(
 
 class VRCRasterBand;
 
