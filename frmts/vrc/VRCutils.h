@@ -4,7 +4,7 @@
  * Author:  Andrew C Aitchison
  *
  ******************************************************************************
- * Copyright (c) 2020-23, Andrew C Aitchison
+ * Copyright (c) 2020-24, Andrew C Aitchison
  ******************************************************************************
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
