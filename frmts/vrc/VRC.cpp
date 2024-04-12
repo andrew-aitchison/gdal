@@ -38,9 +38,15 @@
 #include "VRC.h"
 #include "png_crc.h"  // for crc pngcrc_for_VRC, used in: PNGCRCcheck
 
-#include <algorithm>  // for std::max and std::min
+#include <algorithm>  // for std::max, std::min and std::copy
 #include <array>
 #include <cinttypes>
+
+template <class T, class U> void vector_append(T &a, U &b)
+{
+    // a.insert(std::end(a),std::begin(b),std::end(b));
+    std::copy(b.begin(), b.end(), std::back_inserter(a));
+};
 
 void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 {
@@ -56,14 +62,10 @@ void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 }  // VRC_file_strerror_r()
 
 typedef struct
-// clang tidy suggests:
-// __attribute__((aligned(32)))
-// but this breaks the Windows (MSVC 16) build.
 {
-    png_bytep pData;
-    std::ptrdiff_t length;
-    std::ptrdiff_t current;
-} VRCpng_data;
+    size_t nCurrent;
+    std::vector<png_byte> vData;
+} VRCpng_callback_t;
 
 // PNG values are opposite-endian from other values in the .VRC file.
 
@@ -83,11 +85,6 @@ static unsigned int PNGGetUInt(const void *base, const unsigned int byteOffset)
     vv |= static_cast<unsigned int>(buf[0]) << 24;
 
     return (vv);
-}
-
-static signed int PNGGetInt(const void *base, const unsigned int byteOffset)
-{
-    return (static_cast<signed int>(PNGGetUInt(base, byteOffset)));
 }
 
 static bool isNullTileIndex(unsigned int nIndex)
@@ -123,76 +120,74 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
         return;
     }
 
-    auto *pVRCpng_data =
-        static_cast<VRCpng_data *>(png_get_io_ptr(png_read_ptr));
+    auto *pVRCpng_callback =
+        static_cast<VRCpng_callback_t *>(png_get_io_ptr(png_read_ptr));
 
     // Sanity checks on our data pointer
-    if (pVRCpng_data->pData == nullptr)
+    if (pVRCpng_callback == nullptr)
     {
         return;
     }
-    if (pVRCpng_data->current < 0)
-    {
-        CPLDebug("Viewranger PNG", "VRC_png_read_data_fn() current %ld < 0",
-                 pVRCpng_data->current);
-        return;
-    }
-    const std::ptrdiff_t nSpare = pVRCpng_data->length - pVRCpng_data->current;
-    if (nSpare < 0)
-    {
-        CPLDebug("Viewranger PNG",
-                 "VRC_png_read_data_fn() current %ld > length %ld - diff %ld",
-                 pVRCpng_data->current, pVRCpng_data->length, -nSpare);
-        return;
-    }
+
     // Sanity check the function args
-    if (static_cast<std::ptrdiff_t>(length) > nSpare)
+    if (length > pVRCpng_callback->vData.size())
     {
 
+        const size_t nSpare =
+            pVRCpng_callback->vData.size() - pVRCpng_callback->nCurrent;
         // Copy the data we have ...
         if (nSpare > 0)
-        {  // pVRCpng_data->current < pVRCpng_data->length)
-            memcpy(data, pVRCpng_data->pData + pVRCpng_data->current,
+        {  // pVRCpng_callback->nCurrent < pVRCpng_callback.size())
+            memcpy(data,
+                   pVRCpng_callback->vData.data() + pVRCpng_callback->nCurrent,
                    static_cast<size_t>(nSpare));
         }
         else
         {
         }
-        pVRCpng_data->current = pVRCpng_data->length;
+        pVRCpng_callback->nCurrent = pVRCpng_callback->vData.size();
         return;
     }
 
-    memcpy(data, pVRCpng_data->pData + pVRCpng_data->current, length);
-    pVRCpng_data->current += static_cast<std::ptrdiff_t>(length);
+    memcpy(data, pVRCpng_callback->vData.data() + pVRCpng_callback->nCurrent,
+           length);
+    pVRCpng_callback->nCurrent += length;
+
+    if (pVRCpng_callback->nCurrent > pVRCpng_callback->vData.size())
+    {
+        CPLDebug("Viewranger PNG",
+                 "VRC_png_read_data_fn(%p %p %zd) reached end of data",
+                 png_read_ptr, data, length);
+    }
 }  // VRC_png_read_data_fn
 
-static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
+static int PNGCRCcheck(std::vector<png_byte> vData, unsigned long nGiven)
 {
-    if (oVRCpng_data->current < 8)
+    if (vData.size() < 8)
     {
         CPLDebug("Viewranger PNG", "PNGCRCcheck: current %ld < 8",
-                 oVRCpng_data->current);
+                 vData.size());
         return -1;
     }
-    const unsigned char *pBuf = &oVRCpng_data->pData[oVRCpng_data->current - 4];
-    const int32_t nLen =
-        PNGGetInt(&oVRCpng_data->pData[oVRCpng_data->current - 8], 0);
+    const unsigned char *pBuf = &(vData.back()) - 3;
+    // const int32_t nLen = PNGGetInt(&vVRCpng_callback->pData[vVRCpng_callback->current - 8], 0);
+    const uint32_t nLen = PNGGetUInt(pBuf - 4, 0);
 
-    if (nLen > oVRCpng_data->length /* || nLen > 1L << 31U */)
+    if (nLen > vData.size() /* || nLen > 1L << 31U */)
     {
         // from PNG spec nLen <= 2^31
         CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %ld",
-                 nLen, oVRCpng_data->length);
+                 nLen, vData.size());
         return -1;
     }
 
-    CPLDebug("Viewranger PNG", "PNGCRCcheck((%p, %lu) %u, x%08lx)", pBuf,
-             oVRCpng_data->current, nLen, nGiven);
+    //CPLDebug("Viewranger PNG", "PNGCRCcheck((%p, %lu) %u, x%08lx)", pBuf,
+    //             vVRCpng_callback->current, nLen, nGiven);
 
     const uint32_t nFileCRC =
-        0xffffffff &
-        PNGGetUInt(oVRCpng_data->pData,
-                   static_cast<unsigned int>(oVRCpng_data->current + nLen));
+        // 0xffffffff &
+        PNGGetUInt(vData.data(),
+                   static_cast<unsigned int>(vData.size() + nLen));
     if (nGiven == nFileCRC)
     {
         CPLDebug("Viewranger PNG",
@@ -219,7 +214,7 @@ static int PNGCRCcheck(VRCpng_data *oVRCpng_data, unsigned long nGiven)
     }
 
     return ret;
-}
+}  // PNGCRCcheck
 
 // -------------------------------------------------------------------------
 // Returns a (null-terminated) string allocated from VSIMalloc.
@@ -1933,8 +1928,8 @@ static void dumpPNG(
     static unsigned int nPNGcount = 0;
 
     CPLDebug("Viewranger PNG",
-             // "dumpPNG(%d %d %p %d %s) count %u)",
-             "dumpPNG(%p %d %s) count %u)",
+             // "dumpPNG(%d %d %p %d %s) count %u",
+             "dumpPNG(%p %d %s) count %u",
              // width, height,
              data, nDataLen, osBaseLabel.c_str(), nPNGcount);
     if (osBaseLabel == nullptr)
@@ -2098,30 +2093,17 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
          0xae, 0x42, 0x60, 0x82};
     // clang-format on
 
-    VRCpng_data oVRCpng_data = {nullptr, 0, 0};
-    oVRCpng_data.length = static_cast<std::ptrdiff_t>(
-        sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
-        3L * 256 +     // enough for 256x3 entry palette
-        3L * 4 +       //  length, "PLTE" and checksum
-        nVRCDataLen +  // IDAT chunks
-        sizeof(IEND_chunk));
-
-    oVRCpng_data.pData = static_cast<png_byte *>(
-        png_malloc(png_ptr, static_cast<png_size_t>(oVRCpng_data.length)));
-    if (oVRCpng_data.pData == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_OutOfMemory,
-                 "Cannot allocate memory for copy of PNG file");
-        return nullptr;
-    }
-    oVRCpng_data.current = 0;
-    memcpy(static_cast<void *>(oVRCpng_data.pData), &PNG_sig, sizeof(PNG_sig));
-    oVRCpng_data.current += sizeof(PNG_sig);
+    VRCpng_callback_t VRCpng_callback = {0UL, std::vector<png_byte>{}};
+    // auto vVRCpng_data = std::vector<png_byte>{};
+    VRCpng_callback.vData.reserve(sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
+                                  3L * 256 +  // enough for 256x3 entry palette
+                                  3L * 4 +    //  length, "PLTE" and checksum
+                                  nVRCDataLen +  // IDAT chunks
+                                  sizeof(IEND_chunk));
+    vector_append(VRCpng_callback.vData, PNG_sig);
 
     // IHDR starts here
-    memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-           &IHDR_head, sizeof(IHDR_head));
-    oVRCpng_data.current += sizeof(IHDR_head);
+    vector_append(VRCpng_callback.vData, IHDR_head);
 
     // IHDR_data here
 
@@ -2153,9 +2135,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                  static_cast<int>(count));
         return nullptr;
     }
+    vector_append(VRCpng_callback.vData, aVRCHeader);
 
-    memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-           &aVRCHeader, 17);
     const unsigned int nPNGwidth = PNGGetUInt(&aVRCHeader, 0);
     *pPNGwidth = nPNGwidth;
     const unsigned int nPNGheight = PNGGetUInt(&aVRCHeader, 4);
@@ -2341,15 +2322,13 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             return nullptr;
     }
 
-    const int check = PNGCRCcheck(&oVRCpng_data, nPNGcrc);
+    const int check = PNGCRCcheck(VRCpng_callback.vData, nPNGcrc);
+
     if (1 != check)
     {
-        VSIFree(pbyPNGbuffer);
-        return nullptr;
+        // VSIFree(pbyPNGbuffer);
+        // return nullptr;
     }
-
-    oVRCpng_data.current += 13;
-    oVRCpng_data.current += 4;
 
     // PLTE chunk here (no "PLTE" type string in VRC data)
     if (nPalette != 0)
@@ -2360,6 +2339,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             return nullptr;
         }
 
+        const unsigned int maxPlteLen = 3 * 256 + 2 * sizeof(uint32_t);
         const unsigned int nVRCPlteLen = VRReadUInt(fp);
         if (nVRCPlteLen > static_cast<VRCDataset *>(poDS)->oStatBufL.st_size)
         {
@@ -2369,16 +2349,18 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VSIFree(pbyPNGbuffer);
             return nullptr;
         }
-        char *pVRCPalette = static_cast<char *>(VSIMalloc(nVRCPlteLen));
-        if (pVRCPalette == nullptr)
+        if (nVRCPlteLen > maxPlteLen)
         {
-            CPLDebug("Viewranger PNG",
-                     "could not allocate memory for pVRCPalette");
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "unsupported palette length %u=x%08x > x%08x", nVRCPlteLen,
+                     nVRCPlteLen, maxPlteLen);
             VSIFree(pbyPNGbuffer);
             return nullptr;
         }
+        auto aVRCpalette = std::array<char, maxPlteLen>{};
 
-        const size_t nBytesRead = VSIFReadL(pVRCPalette, 1, nVRCPlteLen, fp);
+        const size_t nBytesRead =
+            VSIFReadL(aVRCpalette.data(), 1, nVRCPlteLen, fp);
         if (nVRCPlteLen != nBytesRead)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
@@ -2392,7 +2374,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             return nullptr;
         }
 
-        const unsigned int nPNGPlteLen = PNGGetUInt(pVRCPalette, 0);
+        const unsigned int nPNGPlteLen = PNGGetUInt(aVRCpalette.data(), 0);
         if (nVRCPlteLen != nPNGPlteLen + 8)
         {
             CPLDebug("Viewranger PNG",
@@ -2421,17 +2403,20 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         CPLDebug("Viewranger PNG", "palette %u=x%08x bytes, %d entries",
                  nPNGPlteLen, nPNGPlteLen, nPNGPlteLen / 3);
 
-        memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-               pVRCPalette, 4);
-        oVRCpng_data.current += 4;
-        memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-               "PLTE", 4);
-        oVRCpng_data.current += 4;
+        // vector_append_uint32(VRCpng_callback.vData, &nVRCPlteLen); // wrong
+        VRCpng_callback.vData.push_back((nPNGPlteLen >> 24) & 0xff);
+        VRCpng_callback.vData.push_back((nPNGPlteLen >> 16) & 0xff);
+        VRCpng_callback.vData.push_back((nPNGPlteLen >> 8) & 0xff);
+        VRCpng_callback.vData.push_back(nPNGPlteLen & 0xff);
 
-        memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-               pVRCPalette + 4, nPNGPlteLen + 4);
-        oVRCpng_data.current += nPNGPlteLen + 4;
-        VSIFree(pVRCPalette);
+        const std::string PLTE = "PLTE";
+
+        vector_append(VRCpng_callback.vData, PLTE);
+
+        std::copy(aVRCpalette.data() + 4, aVRCpalette.data() + nVRCPlteLen,
+                  std::back_inserter(VRCpng_callback.vData));
+        CPLDebug("Viewranger PNG", "PLTE %llu, VRClen %ld", nPalette,
+                 VRCpng_callback.vData.size());
     }
     else
     {  // if (nVRCpalette!=0)
@@ -2440,33 +2425,31 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             CPLDebug("Viewranger PNG",
                      "Colour type 3 PNG: needs a PLTE. Assuming Greyscale.");
             // Next four bytes are 3*256 in PNGendian
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0;  // -V525
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0;  // -V525
-            oVRCpng_data.pData[oVRCpng_data.current++] = 3;  // -V525
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0;  // -V525
-
-            memcpy(
-                static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-                "PLTE", 4);
-            oVRCpng_data.current += 4;
-
+            VRCpng_callback.vData.push_back(0);  // -V525
+            VRCpng_callback.vData.push_back(0);  // -V525
+            VRCpng_callback.vData.push_back(3);  // -V525
+            VRCpng_callback.vData.push_back(0);  // -V525
+            const std::string PLTE = "PLTE";
+            vector_append(VRCpng_callback.vData, PLTE);
             for (int i = 0; i < 256; i++)
             {
                 // for (unsigned char i=0; i<256; i++) gives
                 //  i<256 is always true.
-                // "& 255" is shorter than "static_cast<char>(i)"
-                oVRCpng_data.pData[oVRCpng_data.current++] = i & 255;
-                oVRCpng_data.pData[oVRCpng_data.current++] = i & 255;
-                oVRCpng_data.pData[oVRCpng_data.current++] = i & 255;
+                // "i & 255" is shorter than "static_cast<char>(i)"
+                VRCpng_callback.vData.push_back(i & 255);
+                VRCpng_callback.vData.push_back(i & 255);
+                VRCpng_callback.vData.push_back(i & 255);
             }
 
             // The checksum 0xe2b05d7d (not 0xa5d99fdd) of the greyscale
             // palette.
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0xe2;
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0xb0;
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0x5d;
-            oVRCpng_data.pData[oVRCpng_data.current++] = 0x7d;
+            VRCpng_callback.vData.push_back(0xe2);
+            VRCpng_callback.vData.push_back(0xb0);
+            VRCpng_callback.vData.push_back(0x5d);
+            VRCpng_callback.vData.push_back(0x7d);
         }
+        CPLDebug("Viewranger PNG", "PLTE finishes at %ld",
+                 VRCpng_callback.vData.size());
     }
 
     // Jump to VRCData
@@ -2478,29 +2461,15 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         return nullptr;
     }
 
-    if (static_cast<size_t>(oVRCpng_data.length) <
-        static_cast<size_t>(oVRCpng_data.current) +
-            static_cast<size_t>(nVRCDataLen) + sizeof(IEND_chunk))
+    char *pVRCpngData = static_cast<char *>(VSIMalloc(nVRCDataLen));
+    if (pVRCpngData == nullptr)
     {
-        // Either we seg-faulted before we got here (if current > length)
-        // or we will do.
-        // Abort now.
-        // FixME: We should either realloc, or use some other memory
-        // allocation system ...
-        const std::ptrdiff_t nNeeded =
-            oVRCpng_data.current + static_cast<long long>(nVRCDataLen) +
-            static_cast<long long>(sizeof(IEND_chunk));
-        const std::ptrdiff_t nMore = nNeeded - oVRCpng_data.length;
-        CPLError(CE_Failure, CPLE_OutOfMemory,
-                 "allocated %ld bytes for PNG but need %lu more",
-                 oVRCpng_data.length, static_cast<unsigned long>(nMore));
+        CPLDebug("Viewranger PNG", "could not allocate memory for VRCpngData");
         VSIFree(pbyPNGbuffer);
-        // exit(0);
         return nullptr;
     }
-
-    auto nBytesRead = static_cast<unsigned>(VSIFReadL(
-        &oVRCpng_data.pData[oVRCpng_data.current], 1, nVRCDataLen, fp));
+    auto nBytesRead =
+        static_cast<unsigned>(VSIFReadL(pVRCpngData, 1, nVRCDataLen, fp));
     if (nVRCDataLen != nBytesRead)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -2509,36 +2478,14 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         VSIFree(pbyPNGbuffer);
         return nullptr;
     }
-
-    oVRCpng_data.current += nVRCDataLen;
+    CPLDebug("Viewranger PNG", "   was %zu", VRCpng_callback.vData.size());
+    std::copy(pVRCpngData, pVRCpngData + nVRCDataLen,
+              std::back_inserter(VRCpng_callback.vData));
+    CPLDebug("Viewranger PNG", "   now %zu", VRCpng_callback.vData.size());
+    VSIFree(pVRCpngData);
 
     // IEND chunk is fixed and pre-canned.
-    memcpy(static_cast<void *>(&oVRCpng_data.pData[oVRCpng_data.current]),
-           &IEND_chunk, sizeof(IEND_chunk));
-    oVRCpng_data.current += sizeof(IEND_chunk);
-
-    if (oVRCpng_data.length > oVRCpng_data.current)
-    {
-        const int nPNGPlteLen =
-            static_cast<int>(768 + oVRCpng_data.current - oVRCpng_data.length);
-        if (nPNGPlteLen % 3 != 0 || nPNGPlteLen < 0 || nPNGPlteLen > 768)
-        {
-            if (nPNGPlteLen != 780 ||
-                (nPNGcolour != 0 && nPNGcolour != 4  //-V560
-                 ))
-            {
-                CPLDebug("Viewranger PNG",
-                         "allocated %ld bytes for PNG but only copied %ld "
-                         "- short %ld bytes",
-                         oVRCpng_data.length, oVRCpng_data.current,
-                         oVRCpng_data.length - oVRCpng_data.current);
-            }
-            else
-            {
-                // We allowed for a 768byte palette but the tile has none.
-            }
-        }
-    }
+    vector_append(VRCpng_callback.vData, IEND_chunk);
 
     const char *szDumpPNG = CPLGetConfigOption("VRC_DUMP_PNG", "");
     if (szDumpPNG != nullptr && *szDumpPNG != 0)
@@ -2555,20 +2502,12 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         dumpPNG(
             // static_cast<unsigned int>(nPNGwidth),
             // static_cast<unsigned int>(nPNGheight),
-            oVRCpng_data.pData, static_cast<int>(oVRCpng_data.current),
-            osBaseLabel, nEnvPNGDump);
+            VRCpng_callback.vData.data(),
+            static_cast<int>(VRCpng_callback.vData.size()), osBaseLabel,
+            nEnvPNGDump);
     }
 
-    // return to start of buffer
-    // ... but skip the png magic - see below.
-    oVRCpng_data.current = sizeof(PNG_sig);
-
-    // The first eight, png-identifying, magic, bytes of the PNG file
-    // are not present in the VRC data; we tell libpng to skip them.
-    png_set_sig_bytes(png_ptr, static_cast<int>(oVRCpng_data.current));
-
     //******************************************************************/
-
     // if (color_type == PNG_COLOR_TYPE_PALETTE)
     //     png_set_palette_to_rgb(png_ptr);
     //
@@ -2577,10 +2516,12 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     //
 
     // png_set_read_fn( png_ptr, info_ptr, VRC_png_read_data_fn );
-    png_set_read_fn(png_ptr, &oVRCpng_data, VRC_png_read_data_fn);
+    png_set_read_fn(png_ptr, &VRCpng_callback, VRC_png_read_data_fn);
 
-    CPLDebug("Viewranger PNG", "oVRCpng_data %p (%p %ld %ld)", &oVRCpng_data,
-             oVRCpng_data.pData, oVRCpng_data.length, oVRCpng_data.current);
+    CPLDebug("Viewranger PNG",
+             "before png_read_png\nVRCpng_callback.vData %p (%p %ld %ld)",
+             &VRCpng_callback, VRCpng_callback.vData.data(),
+             VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
     // May wish to change this so that the result is RGBA (currently RGB)
     png_read_png(png_ptr, info_ptr,
@@ -2597,17 +2538,13 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                      PNG_TRANSFORM_EXPAND,
                  nullptr);
 
-    CPLDebug("Viewranger PNG", "read oVRCpng_data %p (%p %ld %ld) to %p",
-             &oVRCpng_data, oVRCpng_data.pData, oVRCpng_data.length,
-             oVRCpng_data.current, pbyPNGbuffer);
-
-    png_free(png_ptr, oVRCpng_data.pData);
+    CPLDebug("Viewranger PNG",
+             "after png_read_png\nVRCpng_callback.vData %p (%p %ld %ld)",
+             &VRCpng_callback, VRCpng_callback.vData.data(),
+             VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
     png_free_data(png_ptr, info_ptr, PNG_FREE_ALL, -1);
     png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
-
-    oVRCpng_data.pData = nullptr;
-    oVRCpng_data.current = oVRCpng_data.length = 0;
 
     return pbyPNGbuffer;
 
