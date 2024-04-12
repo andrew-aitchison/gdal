@@ -30,6 +30,7 @@ enum eTABLESIZE
 {
     NCRC_TABLE_SIZE = 256
 };
+
 static uint32_t crc_table[NCRC_TABLE_SIZE]
     // clang-format off
 = {
