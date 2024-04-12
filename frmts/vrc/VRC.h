@@ -151,6 +151,7 @@ class VRCDataset : public GDALDataset
     {
         return poSRS;
     }
+
     // const char *_GetProjectionRef
 
     CPLErr GetGeoTransform(double *padfTransform) override;

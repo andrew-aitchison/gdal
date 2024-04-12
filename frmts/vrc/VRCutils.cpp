@@ -25,6 +25,7 @@ int32_t VRGetInt(const void *base, unsigned int byteOffset)
     vv |= (static_cast<int32_t>(buf[3])) << 24U;
     return (vv);
 }
+
 uint32_t VRGetUInt(const void *base, const uint32_t byteOffset)
 {
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
@@ -75,6 +76,7 @@ int32_t VRReadInt(VSILFILE *fp)
     // if (ret<4) return (EOF);
     return (vv);
 }
+
 int32_t VRReadInt(VSILFILE *fp, unsigned int byteOffset)
 {
     if (VSIFSeekL(fp, byteOffset, SEEK_SET))
@@ -96,6 +98,7 @@ uint32_t VRReadUInt(VSILFILE *fp)
     // if (ret<4) return (EOF);
     return (VRGetUInt(&buf, 0));
 }
+
 uint32_t VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
 {
     if (VSIFSeekL(fp, byteOffset, SEEK_SET))
@@ -229,6 +232,7 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
     }
     return poSRS;
 }  // CRSfromCountry()
+
 #undef VRC_EPSG
 #undef VRC_SWAP_AXES
 
