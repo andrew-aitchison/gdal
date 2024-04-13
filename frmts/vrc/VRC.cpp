@@ -165,8 +165,7 @@ static int PNGCRCcheck(std::vector<png_byte> vData, uint32_t nGiven)
 {
     if (vData.size() < 8)
     {
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: current %zu < 8",
-                 vData.size());
+        CPLDebug("Viewranger PNG", "PNGCRCcheck: current %u < 8", vData.size());
         return -1;
     }
     const unsigned char *pBuf = &(vData.back()) - 3;
@@ -176,7 +175,7 @@ static int PNGCRCcheck(std::vector<png_byte> vData, uint32_t nGiven)
     if (nLen > vData.size() /* || nLen > 1L << 31U */)
     {
         // from PNG spec nLen <= 2^31
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %zu",
+        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %u",
                  nLen, vData.size());
         return -1;
     }
@@ -1894,7 +1893,7 @@ void dumpPPM(unsigned int width, unsigned int height,
                 }
                 pRow += rowlength;
             }  // pixel or band interleaved ?
-        }      // for row r
+        }  // for row r
     }
     else
     {  // nHeaderSize!=nHeaderWriteResult
@@ -2451,7 +2450,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VRCpng_callback.vData.push_back(0x5d);
             VRCpng_callback.vData.push_back(0x7d);
         }
-        CPLDebug("Viewranger PNG", "PLTE finishes at %zu",
+        CPLDebug("Viewranger PNG", "PLTE finishes at %u",
                  VRCpng_callback.vData.size());
     }
 
@@ -2542,7 +2541,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                  nullptr);
 
     CPLDebug("Viewranger PNG",
-             "after png_read_png\nVRCpng_callback.vData %p (%p %ld %ld)",
+             "after png_read_png\nVRCpng_callback.vData %p (%p %ld %lu)",
              &VRCpng_callback, VRCpng_callback.vData.data(),
              VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
@@ -3367,7 +3366,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                              poVRCDS->nMagic);
                     return;
             }  // switch (poVRCDS->nMagic)
-        }      // for (loopY
+        }  // for (loopY
         nLeftCol = nRightCol;
     }  // for (loopX
 
