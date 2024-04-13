@@ -46,7 +46,7 @@ template <class T, class U> void vector_append(T &a, U &b)
 {
     // a.insert(std::end(a),std::begin(b),std::end(b));
     std::copy(b.begin(), b.end(), std::back_inserter(a));
-};
+}
 
 void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
 {
@@ -2270,7 +2270,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 #if __cplusplus > 201402L
             [[fallthrough]];
 #else
-            [[clang::fallthrough]];
+            CPL_FALLTHROUGH
 #endif
         case 3:                 // Palette
             if (nPNGdepth < 16  //-V560
