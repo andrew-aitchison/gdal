@@ -290,7 +290,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
             }
             return;
         }  // end else clause of if(bTileShrink == false)
-    }  // nMapID != 8
+    }      // nMapID != 8
 
     // We have reached the start of the tile
     // ... but it is split into subtiles (of a format yet to be determined)
@@ -546,8 +546,8 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                     "skipping %s: expected 0 <= x%lx <= x%lx <= x%lx filesize",
                     osBaseLabel.c_str(), nStart, nFinish, nFileSize);
             }  // end range check
-        }  // for loopY
-    }  // for loopX
+        }      // for loopY
+    }          // for loopX
 
     const char *szDumpTile = CPLGetConfigOption("VRC_DUMP_TILE", "");
     if (szDumpTile != nullptr && *szDumpTile != 0 && 1 == nBand)
