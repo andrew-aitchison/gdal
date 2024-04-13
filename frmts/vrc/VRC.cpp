@@ -2269,8 +2269,10 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             }
 #if __cplusplus > 201402L
             [[fallthrough]];
-#else
+#elif defined(CPL_FALLTHROUGH)
             CPL_FALLTHROUGH
+#else
+            /* FALLTHROUGH */
 #endif
         case 3:                 // Palette
             if (nPNGdepth < 16  //-V560
