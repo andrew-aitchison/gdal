@@ -161,11 +161,11 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     }
 }  // VRC_png_read_data_fn
 
-static int PNGCRCcheck(std::vector<png_byte> vData, unsigned long nGiven)
+static int PNGCRCcheck(std::vector<png_byte> vData, uint32_t nGiven)
 {
     if (vData.size() < 8)
     {
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: current %ld < 8",
+        CPLDebug("Viewranger PNG", "PNGCRCcheck: current %zu < 8",
                  vData.size());
         return -1;
     }
@@ -176,7 +176,7 @@ static int PNGCRCcheck(std::vector<png_byte> vData, unsigned long nGiven)
     if (nLen > vData.size() /* || nLen > 1L << 31U */)
     {
         // from PNG spec nLen <= 2^31
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %ld",
+        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %zu",
                  nLen, vData.size());
         return -1;
     }
@@ -197,19 +197,20 @@ static int PNGCRCcheck(std::vector<png_byte> vData, unsigned long nGiven)
     else
     {
         CPLDebug("Viewranger PNG",
-                 "PNGCRCcheck(x%08lx) CRC given does not match x%08" PRIu32
-                 " from file",
+                 "PNGCRCcheck(x%08" PRIu32
+                 ") CRC given does not match x%08" PRIu32 " from file",
                  nGiven, nFileCRC);
         return -1;
     }
 
     const uint32_t nComputed =
-        pngcrc_for_VRC(pBuf, static_cast<unsigned int>(nLen) + 4U) & 0xffffffff;
+        pngcrc_for_VRC(pBuf, static_cast<unsigned int>(nLen) + 4U);
     const int ret = (nGiven == nComputed);
     if (ret == 0)
     {
         CPLDebug("Viewranger PNG",
-                 "PNG file: CRC given x%08lx, calculated x%08" PRIu32 "x",
+                 "PNG file: CRC given x%08" PRIu32 ", calculated x%08" PRIu32
+                 "x",
                  nGiven, nComputed);
     }
 
@@ -2339,7 +2340,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             return nullptr;
         }
 
-        const unsigned int maxPlteLen = 3 * 256 + 2 * sizeof(uint32_t);
+        const unsigned int maxPlteLen = 0x300 + 2UL * sizeof(uint32_t);
         const unsigned int nVRCPlteLen = VRReadUInt(fp);
         if (nVRCPlteLen > static_cast<VRCDataset *>(poDS)->oStatBufL.st_size)
         {
@@ -2415,7 +2416,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
         std::copy(aVRCpalette.data() + 4, aVRCpalette.data() + nVRCPlteLen,
                   std::back_inserter(VRCpng_callback.vData));
-        CPLDebug("Viewranger PNG", "PLTE %llu, VRClen %ld", nPalette,
+        CPLDebug("Viewranger PNG", "PLTE %llu, VRClen %zu", nPalette,
                  VRCpng_callback.vData.size());
     }
     else
@@ -2448,7 +2449,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VRCpng_callback.vData.push_back(0x5d);
             VRCpng_callback.vData.push_back(0x7d);
         }
-        CPLDebug("Viewranger PNG", "PLTE finishes at %ld",
+        CPLDebug("Viewranger PNG", "PLTE finishes at %zu",
                  VRCpng_callback.vData.size());
     }
 
@@ -2519,7 +2520,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     png_set_read_fn(png_ptr, &VRCpng_callback, VRC_png_read_data_fn);
 
     CPLDebug("Viewranger PNG",
-             "before png_read_png\nVRCpng_callback.vData %p (%p %ld %ld)",
+             "before png_read_png\nVRCpng_callback.vData %p (%p %zu %zu)",
              &VRCpng_callback, VRCpng_callback.vData.data(),
              VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
@@ -2583,13 +2584,13 @@ void CPL_DLL GDALRegister_VRC()
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES, "");
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
 
-    // See https://gdal.org/development/rfc/rfc34_license_policy.html
-    poDriver->SetMetadataItem("LICENSE_POLICY", "NONRECIPROCAL");
-
     // Which of these is correct ?
     // poDriver->SetMetadataItem(GDALMD_AREA_OR_POINT, GDALMD_AOP_POINT);
     poDriver->SetMetadataItem(GDALMD_AREA_OR_POINT, GDALMD_AOP_AREA);
     // GDALMD_AOP_AREA is the GDAL default.
+
+    // See https://gdal.org/development/rfc/rfc34_license_policy.html
+    poDriver->SetMetadataItem("LICENSE_POLICY", "NONRECIPROCAL");
 
     // poDriver->SetMetadataItem( "INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE"
     // );
