@@ -1894,7 +1894,7 @@ void dumpPPM(unsigned int width, unsigned int height,
                 }
                 pRow += rowlength;
             }  // pixel or band interleaved ?
-        }  // for row r
+        }      // for row r
     }
     else
     {  // nHeaderSize!=nHeaderWriteResult
@@ -3367,7 +3367,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                              poVRCDS->nMagic);
                     return;
             }  // switch (poVRCDS->nMagic)
-        }  // for (loopY
+        }      // for (loopY
         nLeftCol = nRightCol;
     }  // for (loopX
 
