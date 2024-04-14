@@ -990,10 +990,11 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         CPLError(CE_Failure, CPLE_AppDefined,
                  "VRCBuildTileIndex called for a map with mapID %d", nMapID);
     }
-    if (tileXcount <= 0 || tileYcount <= 0)
+    // Is this limit (eg 64k x 64k tiles) reasonable ?
+    if (tileXcount * tileYcount >= UINT_MAX)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "VRCBuildTileIndex(x%x) called for empty (%u x %u) image",
+                 "VRCBuildTileIndex(x%x) called for oversized (%u x %u) image",
                  nTileIndexStart, tileXcount, tileYcount);
         return nullptr;
     }
