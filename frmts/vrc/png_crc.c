@@ -110,7 +110,7 @@ static uint32_t update_crc(const uint32_t crc, const unsigned char *buf,
 }
 
 /* Return the CRC of the bytes buf[0..len-1]. */
-extern uint32_t pngcrc_for_VRC(const unsigned char *buf, const uint32_t len)
+extern uint32_t pngcrc_for_VRC(const unsigned char *buf, const unsigned int len)
 {
     const uint32_t full32bits = 0xffffffffL;
     return update_crc(full32bits, buf, len) ^ full32bits;
