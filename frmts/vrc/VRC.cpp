@@ -156,26 +156,26 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     if (pVRCpng_callback->nCurrent > pVRCpng_callback->vData.size())
     {
         CPLDebug("Viewranger PNG",
-                 "VRC_png_read_data_fn(%p %p %zd) reached end of data",
+                 "VRC_png_read_data_fn(%p %p %zu) reached end of data",
                  png_read_ptr, data, length);
     }
 }  // VRC_png_read_data_fn
 
-static int PNGCRCcheck(std::vector<png_byte> vData, uint32_t nGiven)
+static int PNGCRCcheck(const std::vector<png_byte> vData, uint32_t nGiven)
 {
     if (vData.size() < 8)
     {
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: current %u < 8", vData.size());
+        CPLDebug("Viewranger PNG",
+                 "PNGCRCcheck: only %lu bytes - need at least 8", vData.size());
         return -1;
     }
     const unsigned char *pBuf = &(vData.back()) - 3;
-    // const int32_t nLen = PNGGetInt(&vVRCpng_callback->pData[vVRCpng_callback->current - 8], 0);
     const uint32_t nLen = PNGGetUInt(pBuf - 4, 0);
 
     if (nLen > vData.size() /* || nLen > 1L << 31U */)
     {
         // from PNG spec nLen <= 2^31
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %u",
+        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %lu",
                  nLen, vData.size());
         return -1;
     }
@@ -183,10 +183,8 @@ static int PNGCRCcheck(std::vector<png_byte> vData, uint32_t nGiven)
     //CPLDebug("Viewranger PNG", "PNGCRCcheck((%p, %lu) %u, x%08lx)", pBuf,
     //             vVRCpng_callback->current, nLen, nGiven);
 
-    const uint32_t nFileCRC =
-        // 0xffffffff &
-        PNGGetUInt(vData.data(),
-                   static_cast<unsigned int>(vData.size() + nLen));
+    const uint32_t nFileCRC = PNGGetUInt(
+        vData.data(), static_cast<unsigned int>(vData.size() + nLen));
     if (nGiven == nFileCRC)
     {
         CPLDebug("Viewranger PNG",
@@ -915,10 +913,10 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     // rotating it as we read it,
     // since viewranger files start by going up the left column
     // whilst gdal expects to go left to right across the top row.
-    for (int i = 0; i < tileXcount; i++)
+    for (unsigned int i = 0; i < tileXcount; i++)
     {
-        int q = tileXcount * (tileYcount - 1) + i;
-        for (int j = 0; j < tileYcount; j++)
+        unsigned int q = tileXcount * (tileYcount - 1) + i;
+        for (unsigned int j = 0; j < tileYcount; j++)
         {
             unsigned int nValue = VRReadUInt(fp);
             // Ignore the index if it points
@@ -940,13 +938,13 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
 
     // Separate loop, since the previous loop has sequential reads
     // and this loop has random reads.
-    for (int q = 0; q < tileXcount * tileYcount; q++)
+    for (unsigned int q = 0; q < tileXcount * tileYcount; q++)
     {
         const unsigned int nIndex = anNewTileIndex[q];
         if (nIndex < 16)
         {
             CPLDebug("Viewranger",
-                     "anNewTileIndex[%d]=x%08x=%d - points into file header", q,
+                     "anNewTileIndex[%d]=x%08x=%u - points into file header", q,
                      nIndex, nIndex);
             anNewTileIndex[q] = 0;
             continue;
@@ -963,12 +961,12 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
             anNewTileIndex[q] = 0;
             continue;
         }
-        const int nValue = VRReadInt(fp, nIndex);
+        const uint32_t nValue = VRReadUInt(fp, nIndex);
         if (/*nIndex>0 && */ nValue != 7)
         {
             CPLDebug(
                 "Viewranger",
-                "anNewTileIndex[%d]=%08x points to %d=x%08x - expected seven.",
+                "anNewTileIndex[%d]=%08x points to %u=x%08x - expected seven.",
                 q, nIndex, nValue, nValue);
         }
     }
@@ -1026,14 +1024,13 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         return nullptr;
     }
 
-    for (unsigned int ii = 0U;
-         ii < static_cast<unsigned int>(tileXcount * tileYcount); ii++)
+    for (unsigned int ii = 0U; ii < tileXcount * tileYcount; ii++)
     {
         anFirstTileIndex[ii] =
             VRReadUInt(fp, nTileIndexAddr + ii * sizeof(unsigned int));
         anNewTileIndex[ii] = 0;
     }
-    int nTileFound = 0;
+    unsigned int nTileFound = 0;
     unsigned int nLastTileFound = anNewTileIndex[nTileFound++] =
         nTileIndexStart;
 
@@ -1047,27 +1044,28 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
 
         // VR tiles start at the bottom left and count up then right;
         // GDAL tiles start at the top left and count across then down.
-        const int nVRow = nTileFound % tileYcount;
+        const unsigned int nVRow = nTileFound % tileYcount;
         // int nGRow = tileYcount-1 - nVRow;
         // int nVCol = (nTileFound-nVRow) / tileYcount;
         // int nGCol = nVCol;
         // int nGdalTile = nGCol + nGRow * tileXcount;
         // int nGdalTile = (nTileFound-nTileFound % tileYcount) / tileYcount
         //    + (tileYcount-1 - nTileFound % tileYcount) * tileXcount;
-        const int nGdalTile =
+        const unsigned int nGdalTile =
             (nTileFound - nVRow) / tileYcount + nVRow * tileXcount;
 
         // Ignore the index if it points
         // outside the limits of the file
         if (/* nLastTileFound <= 0 || */ nLastTileFound >= oStatBufL.st_size)
         {
+            anNewTileIndex[nTileFound] = 0;
             nTileFound++;
             continue;  // Hack. rename nLastFound to ..count.. ?
         }
 
         const int nOverviewCount = VRReadInt(fp, nLastTileFound);
 
-        const int nVRCmaxOverviews = 7;
+        const uint32_t nVRCmaxOverviews = 7;
         if (nOverviewCount != nVRCmaxOverviews)
         {
             CPLDebug("Viewranger",
@@ -1115,17 +1113,17 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         nTileFound++;
     }  // while (nTileFound < tileXcount * tileYcount)
 
-    for (int y = 0; y < tileYcount; y++)
+    for (unsigned int y = 0; y < tileYcount; y++)
     {
-        for (int x = 0; x < tileXcount; x++)
+        for (unsigned int x = 0; x < tileXcount; x++)
         {
             CPLDebug("Viewranger", "anFirstTileIndex[%d,%d] = 0x%08x", x, y,
                      anFirstTileIndex[x + y * tileXcount]);
         }
     }
-    for (int y = 0; y < tileYcount; y++)
+    for (unsigned int y = 0; y < tileYcount; y++)
     {
-        for (int x = 0; x < tileXcount; x++)
+        for (unsigned int x = 0; x < tileXcount; x++)
         {
             CPLDebug("Viewranger", "anNewTileIndex[%d,%d] = 0x%08x", x, y,
                      anNewTileIndex[x + y * tileXcount]);
@@ -1469,8 +1467,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                      chksum);
         }
 
-        poDS->tileXcount = VRGetInt(poDS->abyHeader, nNextString + 36);
-        poDS->tileYcount = VRGetInt(poDS->abyHeader, nNextString + 40);
+        poDS->tileXcount = VRGetUInt(poDS->abyHeader, nNextString + 36);
+        poDS->tileYcount = VRGetUInt(poDS->abyHeader, nNextString + 40);
         const long long nTileXYcount =
             static_cast<long long>(poDS->tileXcount) *
             static_cast<long long>(poDS->tileYcount);
@@ -1523,9 +1521,9 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             CPLDebug("Viewranger",
                      "Pay-by-tile: skipping %dx%d values after tile count:",
                      poDS->tileXcount, poDS->tileYcount);
-            for (int ii = 0; ii < poDS->tileXcount; ii++)
+            for (unsigned int ii = 0; ii < poDS->tileXcount; ii++)
             {
-                for (int jj = 0; jj < poDS->tileYcount; jj++)
+                for (unsigned int jj = 0; jj < poDS->tileYcount; jj++)
                 {
                     const int nValue = VRReadInt(poDS->fp);
                     CPLDebug("Viewranger", "\t(%d,%d) = 0x%08x=%d", ii, jj,
@@ -1538,8 +1536,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 
         // Verify 07 00 00 00 01 00 01 00 01 00 01
         const unsigned int nSecondSevenPtr =
-            nTileIndexAddr + 4 * static_cast<unsigned int>(poDS->tileXcount) *
-                                 static_cast<unsigned int>(poDS->tileYcount);
+            nTileIndexAddr + 4 * poDS->tileXcount * poDS->tileYcount;
 
         if (VSIFSeekL(poDS->fp, nSecondSevenPtr, SEEK_SET))
         {
@@ -2450,7 +2447,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VRCpng_callback.vData.push_back(0x5d);
             VRCpng_callback.vData.push_back(0x7d);
         }
-        CPLDebug("Viewranger PNG", "PLTE finishes at %u",
+        CPLDebug("Viewranger PNG", "PLTE finishes at %zu",
                  VRCpng_callback.vData.size());
     }
 
@@ -2867,7 +2864,9 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
     // const int tilenum = poVRCDS->nRasterXSize * block_xx + block_yy;
     // const int tilenum = nBlockYSize * block_xx + block_yy;
     // const int tilenum = poVRCDS->tileYcount * block_xx + block_yy;
-    const int tilenum = poVRCDS->tileXcount * block_yy + block_xx;
+    const unsigned int tilenum =
+        poVRCDS->tileXcount * static_cast<unsigned int>(block_yy) +
+        static_cast<unsigned int>(block_xx);
 
     const unsigned int nTileIndex = poVRCDS->anTileIndex[tilenum];
     CPLDebug("Viewranger",
@@ -3081,7 +3080,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
     {
         CPLDebug("Viewranger",
                  "nPNGXcount %u x pngXsize %u too big > nBlockXSize %d * "
-                 "nShrinkFactor %d",
+                 "nShrinkFactor %u",
                  nPNGXcount, pngXsize, nBlockXSize, nShrinkFactor);
         // return;
     }
@@ -3091,14 +3090,14 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
     {
         CPLDebug("Viewranger",
                  "nPNGYcount %u x pngYsize %u too big > nBlockYSize %d * "
-                 "nShrinkFactor %d",
+                 "nShrinkFactor %u",
                  nPNGYcount, pngYsize, nBlockYSize, nShrinkFactor);
         // return;
     }
 
     CPLDebug("Viewranger",
              "ovrvw %d nPNGXcount %u nPNGYcount %u pngXsize %u pngYsize %u "
-             "nShrinkFactor %d",
+             "nShrinkFactor %u",
              nThisOverview, nPNGXcount, nPNGYcount, pngXsize, pngYsize,
              nShrinkFactor);
 
@@ -3317,7 +3316,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                         {
                             CPLDebug("Viewranger",
                                      "Band %d: Shrink_Tile_ (%u "
-                                     "%u) into_Block (%u %d) [%d "
+                                     "%u) into_Block (%d %d) [%d "
                                      "%d)x[%d %d)",
                                      nBand, loopX, loopY, block_xx, block_yy,
                                      nLeftCol, nRightCol, nTopRow, nBottomRow);
