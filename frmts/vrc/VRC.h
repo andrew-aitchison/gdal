@@ -127,7 +127,7 @@ class VRCDataset : public GDALDataset
     // std::string sDatum;
 
     unsigned int tileSizeMax = 0, tileSizeMin = INT_MAX;
-    int tileXcount = 0, tileYcount = 0;
+    unsigned int tileXcount = 0, tileYcount = 0;
 
     unsigned int *VRCGetTileIndex(unsigned int nTileIndexStart);
     unsigned int *VRCBuildTileIndex(unsigned int nTileIndexAddr,
