@@ -723,7 +723,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
             {
                 CPLDebug(
                     "ViewrangerHV",
-                    "Map with %d metre pixels is too large scale (detailed)"
+                    "Map with %u metre pixels is too large scale (detailed)"
                     "for the current VRHV driver",
                     poDS->nPixelMetres);
             }
