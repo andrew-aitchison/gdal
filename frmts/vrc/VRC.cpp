@@ -165,8 +165,10 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
 {
     if (vData.size() < 8)
     {
-        CPLDebug("Viewranger PNG",
-                 "PNGCRCcheck: only %lu bytes - need at least 8", vData.size());
+        CPLDebug(
+            "Viewranger PNG",
+            //"PNGCRCcheck: only %lu bytes - need at least 8", vData.size());
+            "PNGCRCcheck: only %zu bytes - need at least 8", vData.size());
         return -1;
     }
     const unsigned char *pBuf = &(vData.back()) - 3;
@@ -2539,7 +2541,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                  nullptr);
 
     CPLDebug("Viewranger PNG",
-             "after png_read_png\nVRCpng_callback.vData %p (%p %lu %lu)",
+             //"after png_read_png\nVRCpng_callback.vData %p (%p %u %u)",
+             "after png_read_png\nVRCpng_callback.vData %p (%p %zu %zu)",
              &VRCpng_callback, VRCpng_callback.vData.data(),
              VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
