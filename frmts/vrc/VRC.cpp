@@ -174,11 +174,23 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     const unsigned char *pBuf = &(vData.back()) - 3;
     const uint32_t nLen = PNGGetUInt(pBuf - 4, 0);
 
+    if (sizeof(size_t) != sizeof(std::vector<png_byte>::size_type))
+    {
+        //      #warning "sizeof(size_t) != sizeof(std::vector<png_byte>::size_type)"
+        CPLDebug("Viewranger",
+                 "sizeof(size_t) = %lu != %lu "
+                 "sizeof(std::vector<png_byte>::size_type)",
+                 sizeof(size_t), sizeof(std::vector<png_byte>::size_type));
+    }
+
     if (nLen > vData.size() /* || nLen > 1L << 31U */)
     {
         // from PNG spec nLen <= 2^31
-        CPLDebug("Viewranger PNG", "PNGCRCcheck: nLen %u > buffer length %lu",
-                 nLen, vData.size());
+        CPLDebug("Viewranger PNG",
+                 // "PNGCRCcheck: nLen %u > buffer length %lu",
+                 // "PNGCRCcheck: nLen %u > buffer length %llu",
+                 "PNGCRCcheck: nLen %u > buffer length %zu", nLen,
+                 vData.size());
         return -1;
     }
 
