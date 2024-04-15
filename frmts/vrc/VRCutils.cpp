@@ -246,29 +246,29 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
         CPLDebug("VRCTests", "%%x %x %%lx %lx %%llx %llx %%zx %zx", zx, zx, zx,
                  zx);
         // CPLDebug("VRCTests",
-        // 		 "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
-        //		 zx,zx,zx,zx);
+        //          "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
+        //         zx,zx,zx,zx);
 
         // Test printing signed variables as hex
         auto x = static_cast<signed int>(0xfedcba98);
         CPLDebug("VRCTests", "%%x %x %%lx %lx %%llx %llx %%zx %zx", x, x, x, x);
         // CPLDebug("VRCTests",
-        //		 "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
-        //		 x,x,x,x);
+        //         "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
+        //         x,x,x,x);
 
         auto lx = static_cast<signed long>(0xfedcba9876543210);
         CPLDebug("VRCTests", "%%x %x %%lx %lx %%llx %llx %%zx %zx", lx, lx, lx,
                  lx);
         // CPLDebug("VRCTests",
-        //		 "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
-        //		 lx,lx,lx,lx);
+        //         "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
+        //         lx,lx,lx,lx);
 
         auto llx = static_cast<signed long long>(0xfedcba9876543210);
         CPLDebug("VRCTests", "%%x %x %%lx %lx %%llx %llx %%zx %zx", llx, llx,
                  llx, llx);
         // CPLDebug("VRCTests",
-        //		 "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
-        //		 llx,llx,llx,llx);
+        //         "%%dx %dx %%ldx %ldx %%lldx %lldx %%zdx %zdx",
+        //         llx,llx,llx,llx);
     }
 
     return poSRS;
