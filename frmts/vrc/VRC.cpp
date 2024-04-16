@@ -156,8 +156,9 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     if (pVRCpng_callback->nCurrent > pVRCpng_callback->vData.size())
     {
         CPLDebug("Viewranger PNG",
-                 "VRC_png_read_data_fn(%p %p %zu) reached end of data",
-                 png_read_ptr, data, length);
+                 "VRC_png_read_data_fn(%p %p " PRI_SIZET
+                 ") reached end of data",
+                 png_read_ptr, data, static_cast<unsigned long>(length));
     }
 }  // VRC_png_read_data_fn
 
