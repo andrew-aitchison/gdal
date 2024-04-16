@@ -47,6 +47,21 @@
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
 // #define VRC36_PIXEL_IS_PIXEL 1
 
+#include <inttypes.h>
+#include <stdio.h>
+
+// printf("%zu", ...) is not supported on mingw
+// eg build-windows-msys2-mingw
+#ifdef _WIN32
+#ifdef _WIN64
+#define PRI_SIZET PRIu64
+#else
+#define PRI_SIZET PRIu32
+#endif
+#else
+#define PRI_SIZET "%zu"
+#endif
+
 static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //
 static const unsigned int vrc_magic36 = 0x01ce6336;  // 0x3663ce01; //
 
