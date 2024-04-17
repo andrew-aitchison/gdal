@@ -158,7 +158,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
         CPLDebug("Viewranger PNG",
                  "VRC_png_read_data_fn(%p %p " PRI_SIZET
                  ") reached end of data",
-                 png_read_ptr, data, static_cast<unsigned long>(length));
+                 png_read_ptr, data, length);
     }
 }  // VRC_png_read_data_fn
 
