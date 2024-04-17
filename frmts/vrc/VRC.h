@@ -35,8 +35,6 @@
 #define FRMT_viewranger
 #endif
 
-// #if defined(__clang__)
-// #endif // defined(__clang__)
 #include <gdal_pam.h>
 #include <ogr_spatialref.h>
 // #include <cpl_string.h>
@@ -47,8 +45,8 @@
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
 // #define VRC36_PIXEL_IS_PIXEL 1
 
-#include <inttypes.h>
-#include <stdio.h>
+#include <cinttypes>
+#include <cstdio>
 
 // printf("%zu", ...) is not supported on mingw
 // eg build-windows-msys2-mingw
