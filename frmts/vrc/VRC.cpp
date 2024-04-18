@@ -69,8 +69,7 @@ typedef struct
 
 // PNG values are opposite-endian from other values in the .VRC file.
 
-// static unsigned int PNGGetUInt(const unsigned char *base, const unsigned int byteOffset)
-static unsigned int PNGGetUInt(const void *base, const unsigned int byteOffset)
+static unsigned int PNGGetUInt(const void *base, const size_t byteOffset)
 {
     if (nullptr == base)
     {
@@ -178,7 +177,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     {
         //      #warning "sizeof(size_t) != sizeof(std::vector<png_byte>::size_type)"
         CPLDebug("Viewranger",
-                 "sizeof(size_t) = %lu != %lu "
+                 "sizeof(size_t) = " PRI_SIZET " != " PRI_SIZET
                  "sizeof(std::vector<png_byte>::size_type)",
                  sizeof(size_t), sizeof(std::vector<png_byte>::size_type));
     }
@@ -187,8 +186,6 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     {
         // from PNG spec nLen <= 2^31
         CPLDebug("Viewranger PNG",
-                 // "PNGCRCcheck: nLen %u > buffer length %lu",
-                 // "PNGCRCcheck: nLen %u > buffer length %llu",
                  "PNGCRCcheck: nLen %u > buffer length " PRI_SIZET, nLen,
                  vData.size());
         return -1;
@@ -197,8 +194,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     //CPLDebug("Viewranger PNG", "PNGCRCcheck((%p, %lu) %u, x%08lx)", pBuf,
     //             vVRCpng_callback->current, nLen, nGiven);
 
-    const uint32_t nFileCRC = PNGGetUInt(
-        vData.data(), static_cast<unsigned int>(vData.size() + nLen));
+    const uint32_t nFileCRC = PNGGetUInt(vData.data(), vData.size() + nLen);
     if (nGiven == nFileCRC)
     {
         CPLDebug("Viewranger PNG",
