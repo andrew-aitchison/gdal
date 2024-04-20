@@ -335,6 +335,25 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
         // GCI_Undefined;  // GCI_GrayIndex;  // GCI_PaletteIndex;
         // GCI_RedBand;  // GCI_GreenBand;  // GCI_BlueBand;  //GCI_AlphaBand;
 
+        switch (nBand)
+        {
+            case 1:
+                eBandInterp = GCI_RedBand;
+                break;
+            case 2:
+                eBandInterp = GCI_GreenBand;
+                break;
+            case 3:
+                eBandInterp = GCI_BlueBand;
+                break;
+            case 4:
+                eBandInterp = GCI_AlphaBand;
+                break;
+            default:
+                CPLDebug("Viewranger",
+                         "vrc_pixel_is_pixel band %d unexpected !", nBand);
+        }
+
         CPLDebug("Viewranger", "vrc_pixel_is_pixel nThisOverview=%d",
                  nThisOverview);
         if (nThisOverview < -1)
