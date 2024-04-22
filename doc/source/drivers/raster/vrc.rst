@@ -6,7 +6,7 @@ VRC -- ViewRanger Chart Image File Format
 
 .. versionadded:: not before 3.9
 
-.. shortname:: VRC
+.. shortname:: ViewrangerVRC
 
 .. built_in_by_default:: ??? Uses the same png and zlib libraries as the PNG driver.
  
