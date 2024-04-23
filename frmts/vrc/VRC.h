@@ -57,7 +57,7 @@
 #define PRI_SIZET PRIu32
 #endif
 #else
-#define PRI_SIZET "%zu"
+#define PRI_SIZET "zu"
 #endif
 
 static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //

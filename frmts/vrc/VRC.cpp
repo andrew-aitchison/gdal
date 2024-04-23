@@ -155,7 +155,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     if (pVRCpng_callback->nCurrent > pVRCpng_callback->vData.size())
     {
         CPLDebug("Viewranger PNG",
-                 "VRC_png_read_data_fn(%p %p " PRI_SIZET
+                 "VRC_png_read_data_fn(%p %p %" PRI_SIZET
                  ") reached end of data",
                  png_read_ptr, data, length);
     }
@@ -166,7 +166,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     if (vData.size() < 8)
     {
         CPLDebug("Viewranger PNG",
-                 "PNGCRCcheck: only " PRI_SIZET " bytes - need at least 8",
+                 "PNGCRCcheck: only %" PRI_SIZET " bytes - need at least 8",
                  vData.size());
         return -1;
     }
@@ -177,7 +177,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     {
         //      #warning "sizeof(size_t) != sizeof(std::vector<png_byte>::size_type)"
         CPLDebug("Viewranger",
-                 "sizeof(size_t) = " PRI_SIZET " != " PRI_SIZET
+                 "sizeof(size_t) = %" PRI_SIZET " != %" PRI_SIZET
                  "sizeof(std::vector<png_byte>::size_type)",
                  sizeof(size_t), sizeof(std::vector<png_byte>::size_type));
     }
@@ -186,7 +186,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     {
         // from PNG spec nLen <= 2^31
         CPLDebug("Viewranger PNG",
-                 "PNGCRCcheck: nLen %u > buffer length " PRI_SIZET, nLen,
+                 "PNGCRCcheck: nLen %u > buffer length %" PRI_SIZET, nLen,
                  vData.size());
         return -1;
     }
@@ -2444,7 +2444,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
         std::copy(aVRCpalette.data() + 4, aVRCpalette.data() + nVRCPlteLen,
                   std::back_inserter(VRCpng_callback.vData));
-        CPLDebug("Viewranger PNG", "PLTE %llu, VRClen " PRI_SIZET, nPalette,
+        CPLDebug("Viewranger PNG", "PLTE %llu, VRClen %" PRI_SIZET, nPalette,
                  VRCpng_callback.vData.size());
     }
     else
@@ -2477,7 +2477,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VRCpng_callback.vData.push_back(0x5d);
             VRCpng_callback.vData.push_back(0x7d);
         }
-        CPLDebug("Viewranger PNG", "PLTE finishes at " PRI_SIZET,
+        CPLDebug("Viewranger PNG", "PLTE finishes at %" PRI_SIZET,
                  VRCpng_callback.vData.size());
     }
 
@@ -2507,11 +2507,11 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         VSIFree(pbyPNGbuffer);
         return nullptr;
     }
-    CPLDebug("Viewranger PNG", "   was " PRI_SIZET,
+    CPLDebug("Viewranger PNG", "   was %" PRI_SIZET,
              VRCpng_callback.vData.size());
     std::copy(pVRCpngData, pVRCpngData + nVRCDataLen,
               std::back_inserter(VRCpng_callback.vData));
-    CPLDebug("Viewranger PNG", "   now " PRI_SIZET,
+    CPLDebug("Viewranger PNG", "   now %" PRI_SIZET,
              VRCpng_callback.vData.size());
     VSIFree(pVRCpngData);
 
@@ -2550,8 +2550,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     png_set_read_fn(png_ptr, &VRCpng_callback, VRC_png_read_data_fn);
 
     CPLDebug("Viewranger PNG",
-             "before png_read_png\nVRCpng_callback.vData %p (%p " PRI_SIZET
-             " " PRI_SIZET ")",
+             "before png_read_png\nVRCpng_callback.vData %p (%p %" PRI_SIZET
+             " %" PRI_SIZET ")",
              &VRCpng_callback, VRCpng_callback.vData.data(),
              VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
@@ -2572,8 +2572,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
     CPLDebug("Viewranger PNG",
              //"after png_read_png\nVRCpng_callback.vData %p (%p %u %u)",
-             "after png_read_png\nVRCpng_callback.vData %p (%p " PRI_SIZET
-             " " PRI_SIZET ")",
+             "after png_read_png\nVRCpng_callback.vData %p (%p %" PRI_SIZET
+             " %" PRI_SIZET ")",
              &VRCpng_callback, VRCpng_callback.vData.data(),
              VRCpng_callback.vData.size(), VRCpng_callback.nCurrent);
 
