@@ -623,7 +623,7 @@ int VRCRasterBand::IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize,
     {
         for (int iX = iXBlockStart; iX <= iXBlockEnd; ++iX)
         {
-            const int nBlockId = iX + iY * nBlocksPerRow;
+            const int nBlockId = iX + (iY * nBlocksPerRow);
             bool bHasData = false;
             if (poGDS->anTileIndex[nBlockId] == 0)
             {
@@ -944,7 +944,7 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     // whilst gdal expects to go left to right across the top row.
     for (unsigned int i = 0; i < tileXcount; i++)
     {
-        unsigned int q = tileXcount * (tileYcount - 1) + i;
+        unsigned int q = (tileXcount * (tileYcount - 1)) + i;
         for (unsigned int j = 0; j < tileYcount; j++)
         {
             unsigned int nValue = VRReadUInt(fp);
@@ -1057,7 +1057,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
     for (unsigned int ii = 0U; ii < tileXcount * tileYcount; ii++)
     {
         anFirstTileIndex[ii] =
-            VRReadUInt(fp, nTileIndexAddr + ii * sizeof(unsigned int));
+            VRReadUInt(fp, nTileIndexAddr + (ii * sizeof(unsigned int)));
         anNewTileIndex[ii] = 0;
     }
     unsigned int nTileFound = 0;
@@ -1082,7 +1082,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         // int nGdalTile = (nTileFound-nTileFound % tileYcount) / tileYcount
         //    + (tileYcount-1 - nTileFound % tileYcount) * tileXcount;
         const unsigned int nGdalTile =
-            (nTileFound - nVRow) / tileYcount + nVRow * tileXcount;
+            ((nTileFound - nVRow) / tileYcount) + (nVRow * tileXcount);
 
         // Ignore the index if it points
         // outside the limits of the file
@@ -1124,10 +1124,11 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
                 anNewTileIndex[nGdalTile] = VRReadUInt(
                     fp,
                     anOverviewIndex[nLastOI] +
-                        (2 + 2    // tile count and size
-                         + x * y  // ignore x by y matrix
-                         // and read the "pointer to end of last tile"
-                         ) * sizeof(unsigned int));
+                        ((2 + 2      // tile count and size
+                          + (x * y)  // ignore x by y matrix
+                          // and read the "pointer to end of last tile"
+                          ) *
+                         sizeof(unsigned int)));
                 nLastTileFound = anNewTileIndex[nGdalTile];
                 CPLDebug("Viewranger", "\tanNewTileIndex[%u] = 0x%08x=%u",
                          nGdalTile, nLastTileFound, nLastTileFound);
@@ -1148,7 +1149,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         for (unsigned int x = 0; x < tileXcount; x++)
         {
             CPLDebug("Viewranger", "anFirstTileIndex[%u,%u] = 0x%08x", x, y,
-                     anFirstTileIndex[x + y * tileXcount]);
+                     anFirstTileIndex[x + (y * tileXcount)]);
         }
     }
     for (unsigned int y = 0; y < tileYcount; y++)
@@ -1156,7 +1157,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         for (unsigned int x = 0; x < tileXcount; x++)
         {
             CPLDebug("Viewranger", "anNewTileIndex[%u,%u] = 0x%08x", x, y,
-                     anNewTileIndex[x + y * tileXcount]);
+                     anNewTileIndex[x + (y * tileXcount)]);
         }
     }
 
@@ -1566,7 +1567,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 
         // Verify 07 00 00 00 01 00 01 00 01 00 01
         const unsigned int nSecondSevenPtr =
-            nTileIndexAddr + 4 * poDS->tileXcount * poDS->tileYcount;
+            nTileIndexAddr + (4 * poDS->tileXcount * poDS->tileYcount);
 
         if (VSIFSeekL(poDS->fp, nSecondSevenPtr, SEEK_SET))
         {
@@ -2122,11 +2123,12 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
     VRCpng_callback_t VRCpng_callback = {0UL, std::vector<png_byte>{}};
     // auto vVRCpng_data = std::vector<png_byte>{};
-    VRCpng_callback.vData.reserve(sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
-                                  3L * 256 +  // enough for 256x3 entry palette
-                                  3L * 4 +    //  length, "PLTE" and checksum
-                                  nVRCDataLen +  // IDAT chunks
-                                  sizeof(IEND_chunk));
+    VRCpng_callback.vData.reserve(
+        sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
+        (3L * 256) +   // enough for 256x3 entry palette
+        (3L * 4) +     //  length, "PLTE" and checksum
+        nVRCDataLen +  // IDAT chunks
+        sizeof(IEND_chunk));
     vector_append(VRCpng_callback.vData, PNG_sig);
 
     // IHDR starts here
@@ -2368,7 +2370,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             return nullptr;
         }
 
-        const unsigned int maxPlteLen = 0x300 + 2UL * sizeof(uint32_t);
+        const unsigned int maxPlteLen = 0x300 + (2UL * sizeof(uint32_t));
         const unsigned int nVRCPlteLen = VRReadUInt(fp);
         if (nVRCPlteLen > static_cast<VRCDataset *>(poDS)->oStatBufL.st_size)
         {
@@ -2900,8 +2902,8 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
     // const int tilenum = nBlockYSize * block_xx + block_yy;
     // const int tilenum = poVRCDS->tileYcount * block_xx + block_yy;
     const unsigned int tilenum =
-        poVRCDS->tileXcount * static_cast<unsigned int>(block_yy) +
-        static_cast<unsigned int>(block_xx);
+        static_cast<unsigned int>(block_xx) +
+        (poVRCDS->tileXcount * static_cast<unsigned int>(block_yy));
 
     const unsigned int nTileIndex = poVRCDS->anTileIndex[tilenum];
     CPLDebug("Viewranger",
@@ -2915,7 +2917,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
         {
             for (int i = 0; i < nBlockXSize; i++)
             {
-                const int pixelnum = j * nBlockXSize + i;
+                const int pixelnum = i = (j * nBlockXSize);
                 if (nBand == 4)
                 {
                     static_cast<GByte *>(pImage)[pixelnum] =
@@ -3137,7 +3139,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
 
     // Read in this tile's index to png sub-tiles.
     std::vector<unsigned int> anPngIndex;
-    anPngIndex.reserve(static_cast<size_t>(nPNGXcount) * nPNGYcount + 1);
+    anPngIndex.reserve((static_cast<size_t>(nPNGXcount) * nPNGYcount) + 1);
     for (unsigned long loop = 0;
          loop <= static_cast<unsigned long>(nPNGXcount) * nPNGYcount;
          // <= because there is an extra entry
@@ -3202,7 +3204,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
             --loopY;
 
             const unsigned int loop =
-                (nYlimit - 1 - loopY) + loopX * nPNGYcount;
+                (nYlimit - 1 - loopY) + (loopX * nPNGYcount);
 
             const unsigned int nHeader =
                 anPngIndex[static_cast<unsigned>(loop)];
@@ -3419,7 +3421,7 @@ int VRCRasterBand::Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
              nBottomRow, pImage, nBand);
 
     const int rowStartPixel =
-        nTopRow * std::max(nPNGwidth, nBlockXSize) + nLeftCol;
+        (nTopRow * std::max(nPNGwidth, nBlockXSize)) + nLeftCol;
     // Need to adjust if we have a short (underheight) tile.
     // werdna, 2020 July 09 done ? No.
     // What about underwide tiles/blocks ?
@@ -3481,7 +3483,7 @@ int VRCRasterBand::Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
             for (int jj = 0, jjj = nBand - 1; jj < nCopyStopCol; jj++, jjj += 3)
             {
                 const unsigned char temp =
-                    (pbyPNGbuffer + 3L * nPNGwidth * ii)[jjj];
+                    (pbyPNGbuffer + (3L * nPNGwidth * ii))[jjj];
                 pGImage[jj] = temp;
             }
         }
@@ -3543,12 +3545,10 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
     // If nBlockXYSize is not divisible by a sufficiently large
     // power of two then nPNGwidthheight*2^k may be slightly bigger
     // than nBlockXYSize
-    const int nCopyStopCol = std::min(nLeftCol + (nPNGwidth + 1) / 2,
-                                      std::min(nRightCol, nBlockYSize));
+    const int nCopyStopCol =
+        std::min({nLeftCol + ((nPNGwidth + 1) / 2), nRightCol, nBlockYSize});
     const int nCopyStopRow =
-        std::min(nTopRow + (nPNGheight + 1) / 2, nBottomRow);
-
-    // here 10 Feb 2021
+        std::min(nTopRow + ((nPNGheight + 1) / 2), nBottomRow);
 
     const int nOutRowStartPixel = nCopyStartRow * nBlockXSize;
     // std::max((1+nPNGwidth)/2, nBlockXSize)
@@ -3575,7 +3575,7 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
     {
         const int i1 = 3 * nPNGwidth * 2 * (nBottomRow - 1 - nCopyStartRow);
         // const int i2=i1+3*nPNGwidth;
-        const int jjj = (nBand - 1) + (nCopyStopCol - 1 - nCopyStartCol) * 6;
+        const int jjj = (nBand - 1) + ((nCopyStopCol - 1 - nCopyStartCol) * 6);
         if (i1 + jjj > 3 * nPNGwidth * nPNGheight - 16)
         {
             CPLDebug("Viewranger PNG", "Band %d: i1 %d = 3 * %d * 2 * %d",
@@ -3604,7 +3604,7 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
         else
         {
             const int i1 = 3 * nPNGwidth * 2 * (ii - nCopyStartRow);
-            const int i2 = i1 + 3 * nPNGwidth;
+            const int i2 = i1 + (3 * nPNGwidth);
             for (int jj = nCopyStartCol, jjj = nBand - 1; jj < nCopyStopCol;
                  jj++, jjj += 6)
             {
