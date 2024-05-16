@@ -80,8 +80,9 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
              static_cast<void *>(fp), block_xx, block_yy, pImage);
 
     const unsigned int tilenum =
-        poGDS->tileXcount * static_cast<unsigned int>(block_yy) +
-        static_cast<unsigned int>(block_xx);
+        static_cast<unsigned int>(block_xx) +
+        (poGDS->tileXcount * static_cast<unsigned int>(block_yy));
+
     // VRC36_PIXEL_IS_PIXEL
     // this will be the default
     CPLDebug("Viewranger", "vrc36_pixel_is_pixel only partially implemented");
