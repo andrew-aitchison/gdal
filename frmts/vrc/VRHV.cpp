@@ -1143,7 +1143,7 @@ void VRHRasterBand::read_VMC_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
     {
         for (int y = nBlockYSize - 1; y >= 0; y--)
         {
-            const int nPix = x + y * nBlockXSize;
+            const int nPix = x + (y * nBlockXSize);
             nMaxPix = std::max(nPix, nMaxPix);
             pnBottomPixel[nPix] = (nCurrentData & 1) ? nVMCYesData : nVMCNoData;
             CPLDebug("ViewrangerHV",
@@ -1221,7 +1221,7 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
             int nPixel = VRReadChar(fp);
             if (nPixel == 0)
                 nPixel = nVRVNoData;
-            pnBottomPixel[y * nBlockXSize + x] = static_cast<char>(nPixel);
+            pnBottomPixel[x + (y * nBlockXSize)] = static_cast<char>(nPixel);
 
             pixelnum++;
         }
