@@ -39,11 +39,14 @@
 
 #include "gtest_include.h"
 
-namespace marching_squares
+namespace test_marching_squares_tile
 {
+using namespace marching_squares;
+
 struct Writer
 {
     typedef std::pair<Point, Point> Segment;
+
     static bool coordEquals(double a, double b)
     {
         return (a - b) * (a - b) < 0.001;
@@ -62,8 +65,14 @@ struct Writer
     // check if a segment is in a set of borders
     bool segmentInBorders(int levelIdx, const Segment &segmentToTest) const
     {
-        std::vector<Segment> segments = borders.find(levelIdx)->second;
-        for (Segment &s : segments)
+        const auto iter = borders.find(levelIdx);
+        if (iter == borders.end())
+        {
+            CPLAssert(false);
+            return false;
+        }
+        const auto &segments = iter->second;
+        for (const Segment &s : segments)
         {
             // (A,B) == (A,B) || (A,B) == (B,A)
             if (((coordEquals(s.first.x, segmentToTest.first.x)) &&
@@ -78,11 +87,18 @@ struct Writer
         }
         return false;
     }
+
     // check if a segment is in a set of contours
     bool segmentInContours(int levelIdx, const Segment &segmentToTest) const
     {
-        std::vector<Segment> segments = contours.find(levelIdx)->second;
-        for (Segment &s : segments)
+        const auto iter = contours.find(levelIdx);
+        if (iter == contours.end())
+        {
+            CPLAssert(false);
+            return false;
+        }
+        const auto &segments = iter->second;
+        for (const Segment &s : segments)
         {
             // (A,B) == (A,B) || (A,B) == (B,A)
             if (((coordEquals(s.first.x, segmentToTest.first.x)) &&
@@ -101,6 +117,7 @@ struct Writer
     void beginningOfLine()
     {
     }
+
     void endOfLine()
     {
     }
@@ -109,11 +126,6 @@ struct Writer
     std::map<int, std::vector<Segment>> borders;
     const bool polygonize = true;
 };
-}  // namespace marching_squares
-
-namespace
-{
-using namespace marching_squares;
 
 // Common fixture with test data
 struct test_ms_tile : public ::testing::Test
@@ -497,4 +509,4 @@ TEST_F(test_ms_tile, tile_four_pixels_2)
         EXPECT_EQ(writer.borders[1].size(), size_t(12));
     }
 }
-}  // namespace
+}  // namespace test_marching_squares_tile

@@ -47,6 +47,7 @@
 #include "cpl_error.h"
 #include "cpl_error_internal.h"
 #include "cpl_http.h"
+#include "cpl_json.h"
 #include "cpl_multiproc.h"
 #include "cpl_string.h"
 #include "cpl_vsi.h"
@@ -82,6 +83,7 @@ struct OGRSpatialReference::Private
         explicit Listener(OGRSpatialReference::Private *poObj) : m_poObj(poObj)
         {
         }
+
         Listener(const Listener &) = delete;
         Listener &operator=(const Listener &) = delete;
 
@@ -91,6 +93,7 @@ struct OGRSpatialReference::Private
         }
     };
 
+    OGRSpatialReference *m_poSelf = nullptr;
     PJ *m_pj_crs = nullptr;
 
     // Temporary state used for object construction
@@ -137,7 +140,7 @@ struct OGRSpatialReference::Private
 
     double m_coordinateEpoch = 0;  // as decimal year
 
-    Private();
+    explicit Private(OGRSpatialReference *poSelf);
     ~Private();
     Private(const Private &) = delete;
     Private &operator=(const Private &) = delete;
@@ -191,8 +194,9 @@ static OSRAxisMappingStrategy GetDefaultAxisMappingStrategy()
     return OAMS_AUTHORITY_COMPLIANT;
 }
 
-OGRSpatialReference::Private::Private()
-    : m_poListener(std::shared_ptr<Listener>(new Listener(this)))
+OGRSpatialReference::Private::Private(OGRSpatialReference *poSelf)
+    : m_poSelf(poSelf),
+      m_poListener(std::shared_ptr<Listener>(new Listener(this)))
 {
     // Get the default value for m_axisMappingStrategy from the
     // OSR_DEFAULT_AXIS_MAPPING_STRATEGY configuration option, if set.
@@ -272,7 +276,24 @@ void OGRSpatialReference::Private::setRoot(OGR_SRSNode *poRoot)
 void OGRSpatialReference::Private::setPjCRS(PJ *pj_crsIn,
                                             bool doRefreshAxisMapping)
 {
-    proj_assign_context(m_pj_crs, getPROJContext());
+    auto ctxt = getPROJContext();
+
+#if PROJ_AT_LEAST_VERSION(9, 2, 0)
+    if (proj_get_type(pj_crsIn) == PJ_TYPE_COORDINATE_METADATA)
+    {
+        const double dfEpoch =
+            proj_coordinate_metadata_get_epoch(ctxt, pj_crsIn);
+        if (!std::isnan(dfEpoch))
+        {
+            m_poSelf->SetCoordinateEpoch(dfEpoch);
+        }
+        auto crs = proj_get_source_crs(ctxt, pj_crsIn);
+        proj_destroy(pj_crsIn);
+        pj_crsIn = crs;
+    }
+#endif
+
+    proj_assign_context(m_pj_crs, ctxt);
     proj_destroy(m_pj_crs);
     m_pj_crs = pj_crsIn;
     if (m_pj_crs)
@@ -348,8 +369,7 @@ void OGRSpatialReference::Private::refreshRootFromProjObj()
 
         const char *pszWKT;
         {
-            CPLErrorStateBackuper oErrorStateBackuper;
-            CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+            CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
             pszWKT = proj_as_wkt(getPROJContext(), m_pj_crs,
                                  m_bMorphToESRI ? PJ_WKT1_ESRI : PJ_WKT1_GDAL,
                                  aosOptions.List());
@@ -767,7 +787,8 @@ void OGRsnPrintDouble(char *pszStrBuf, size_t size, double dfValue)
  * be initialized, or NULL (the default).
  */
 
-OGRSpatialReference::OGRSpatialReference(const char *pszWKT) : d(new Private())
+OGRSpatialReference::OGRSpatialReference(const char *pszWKT)
+    : d(new Private(this))
 {
     if (pszWKT != nullptr)
         importFromWkt(pszWKT);
@@ -820,7 +841,7 @@ OGRSpatialReferenceH CPL_STDCALL OSRNewSpatialReference(const char *pszWKT)
  * @param oOther other spatial reference
  */
 OGRSpatialReference::OGRSpatialReference(const OGRSpatialReference &oOther)
-    : d(new Private())
+    : d(new Private(this))
 {
     *this = oOther;
 }
@@ -1249,6 +1270,14 @@ const char *OGRSpatialReference::GetAttrValue(const char *pszNodeName,
         {
             return GetAttrValue("METHOD", iAttr);
         }
+        else if (d->m_bNodesWKT2 && EQUAL(pszNodeName, "PROJCS|PROJECTION"))
+        {
+            return GetAttrValue("PROJCRS|METHOD", iAttr);
+        }
+        else if (d->m_bNodesWKT2 && EQUAL(pszNodeName, "PROJCS"))
+        {
+            return GetAttrValue("PROJCRS", iAttr);
+        }
         return nullptr;
     }
 
@@ -1559,13 +1588,13 @@ static PJ *GDAL_proj_crs_create_bound_crs_to_WGS84(PJ_CONTEXT *ctx, PJ *pj,
  *     node is returned.
  *     WKT1 is an alias of WKT1_GDAL.
  *     WKT2 will default to the latest revision implemented (currently
- * WKT2_2018) WKT2_2019 can be used as an alias of WKT2_2018 since GDAL 3.2
+ *     WKT2_2018) WKT2_2019 can be used as an alias of WKT2_2018 since GDAL 3.2
+ * </li>
  * <li>ALLOW_ELLIPSOIDAL_HEIGHT_AS_VERTICAL_CRS=YES/NO. Default is NO. If set
  * to YES and FORMAT=WKT1_GDAL, a Geographic 3D CRS or a Projected 3D CRS will
  * be exported as a compound CRS whose vertical part represents an ellipsoidal
  * height (for example for use with LAS 1.4 WKT1).
  * Requires PROJ 7.2.1 and GDAL 3.2.1.</li>
- * </li>
  * </ul>
  *
  * Starting with GDAL 3.0.3, if the OSR_ADD_TOWGS84_ON_EXPORT_TO_WKT1
@@ -1626,6 +1655,7 @@ OGRErr OGRSpatialReference::exportToWkt(char **ppszResult,
     }
     else if (pszFormat[0] == '\0')
     {
+        // cppcheck-suppress knownConditionTrueFalse
         if (IsDerivedGeographic())
         {
             wktFormat = PJ_WKT2_2018;
@@ -1726,6 +1756,57 @@ OGRErr OGRSpatialReference::exportToWkt(char **ppszResult,
 }
 
 /************************************************************************/
+/*                            exportToWkt()                             */
+/************************************************************************/
+
+/**
+ * Convert this SRS into a WKT string.
+ *
+ * Consult also the <a href="wktproblems.html">OGC WKT Coordinate System
+ * Issues</a> page for implementation details of WKT 1 in OGR.
+ *
+ * @param papszOptions NULL terminated list of options, or NULL. Currently
+ * supported options are
+ * <ul>
+ * <li>MULTILINE=YES/NO. Defaults to NO.</li>
+ * <li>FORMAT=SFSQL/WKT1_SIMPLE/WKT1/WKT1_GDAL/WKT1_ESRI/WKT2_2015/WKT2_2018/WKT2/DEFAULT.
+ *     If SFSQL, a WKT1 string without AXIS, TOWGS84, AUTHORITY or EXTENSION
+ *     node is returned.
+ *     If WKT1_SIMPLE, a WKT1 string without AXIS, AUTHORITY or EXTENSION
+ *     node is returned.
+ *     WKT1 is an alias of WKT1_GDAL.
+ *     WKT2 will default to the latest revision implemented (currently
+ *     WKT2_2019)
+ * </li>
+ * <li>ALLOW_ELLIPSOIDAL_HEIGHT_AS_VERTICAL_CRS=YES/NO. Default is NO. If set
+ * to YES and FORMAT=WKT1_GDAL, a Geographic 3D CRS or a Projected 3D CRS will
+ * be exported as a compound CRS whose vertical part represents an ellipsoidal
+ * height (for example for use with LAS 1.4 WKT1).
+ * Requires PROJ 7.2.1.</li>
+ * </ul>
+ *
+ * If the OSR_ADD_TOWGS84_ON_EXPORT_TO_WKT1
+ * configuration option is set to YES, when exporting to WKT1_GDAL, this method
+ * will try to add a TOWGS84[] node, if there's none attached yet to the SRS and
+ * if the SRS has a EPSG code. See the AddGuessedTOWGS84() method for how this
+ * TOWGS84[] node may be added.
+ *
+ * @return a non-empty string if successful.
+ * @since GDAL 3.9
+ */
+
+std::string
+OGRSpatialReference::exportToWkt(const char *const *papszOptions) const
+{
+    std::string osWKT;
+    char *pszWKT = nullptr;
+    if (exportToWkt(&pszWKT, papszOptions) == OGRERR_NONE)
+        osWKT = pszWKT;
+    CPLFree(pszWKT);
+    return osWKT;
+}
+
+/************************************************************************/
 /*                           OSRExportToWkt()                           */
 /************************************************************************/
 
@@ -1803,7 +1884,6 @@ OGRErr OSRExportToWktEx(OGRSpatialReferenceH hSRS, char **ppszReturn,
 OGRErr OGRSpatialReference::exportToPROJJSON(
     char **ppszResult, CPL_UNUSED const char *const *papszOptions) const
 {
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 2
     d->refreshProjObj();
     if (!d->m_pj_crs)
     {
@@ -1822,12 +1902,6 @@ OGRErr OGRSpatialReference::exportToPROJJSON(
 
     *ppszResult = CPLStrdup(pszPROJJSON);
     return OGRERR_NONE;
-#else
-    CPLError(CE_Failure, CPLE_NotSupported,
-             "exportToPROJJSON() requires PROJ 6.2 or later");
-    *ppszResult = nullptr;
-    return OGRERR_UNSUPPORTED_OPERATION;
-#endif
 }
 
 /************************************************************************/
@@ -1864,6 +1938,11 @@ OGRErr OSRExportToPROJJSON(OGRSpatialReferenceH hSRS, char **ppszReturn,
  * much of the input string as needed to construct this SRS is consumed from
  * the input string, and the input string pointer
  * is then updated to point to the remaining (unused) input.
+ *
+ * Starting with PROJ 9.2, if invoked on a COORDINATEMETADATA[] construct,
+ * the CRS contained in it will be used to fill the OGRSpatialReference object,
+ * and the coordinate epoch potentially present used as the coordinate epoch
+ * property of the OGRSpatialReference object.
  *
  * Consult also the <a href="wktproblems.html">OGC WKT Coordinate System
  * Issues</a> page for implementation details of WKT in OGR.
@@ -1903,6 +1982,7 @@ OGRErr OGRSpatialReference::importFromWkt(const char **ppszInput,
 {
     if (!ppszInput || !*ppszInput)
         return OGRERR_FAILURE;
+
     if (strlen(*ppszInput) > 100 * 1000 &&
         CPLTestBool(CPLGetConfigOption("OSR_IMPORT_FROM_WKT_LIMIT", "YES")))
     {
@@ -1933,9 +2013,11 @@ OGRErr OGRSpatialReference::importFromWkt(const char **ppszInput,
                 aosOptions.SetNameValue("STRICT", "NO");
             PROJ_STRING_LIST warnings = nullptr;
             PROJ_STRING_LIST errors = nullptr;
-            d->setPjCRS(proj_create_from_wkt(d->getPROJContext(), *ppszInput,
-                                             aosOptions.List(), &warnings,
-                                             &errors));
+            auto ctxt = d->getPROJContext();
+            auto pj = proj_create_from_wkt(ctxt, *ppszInput, aosOptions.List(),
+                                           &warnings, &errors);
+            d->setPjCRS(pj);
+
             for (auto iter = warnings; iter && *iter; ++iter)
             {
                 d->m_wktImportWarnings.push_back(*iter);
@@ -2003,6 +2085,7 @@ OGRErr OGRSpatialReference::importFromWkt(const char **ppszInput,
     }
 #endif
 }
+
 /*! @endcond */
 
 /**
@@ -2359,7 +2442,7 @@ OGRErr OSRSetAngularUnits(OGRSpatialReferenceH hSRS, const char *pszUnits,
  *
  * @return the value to multiply by angular distances to transform them to
  * radians.
- * @deprecated GDAL 2.3.0. Use GetAngularUnits(const char**) const.
+ * @since GDAL 2.3.0
  */
 
 double OGRSpatialReference::GetAngularUnits(const char **ppszName) const
@@ -2444,7 +2527,7 @@ double OGRSpatialReference::GetAngularUnits(const char **ppszName) const
  *
  * @return the value to multiply by angular distances to transform them to
  * radians.
- * @since GDAL 2.3.0
+ * @deprecated GDAL 2.3.0. Use GetAngularUnits(const char**) const.
  */
 
 double OGRSpatialReference::GetAngularUnits(char **ppszName) const
@@ -3563,6 +3646,7 @@ CSLConstList OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get()
 /*                      RemoveIDFromMemberOfEnsembles()                 */
 /************************************************************************/
 
+// cppcheck-suppress constParameterReference
 static void RemoveIDFromMemberOfEnsembles(CPLJSONObject &obj)
 {
     // Remove "id" from members of datum ensembles for compatibility with
@@ -3667,7 +3751,8 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition)
  * possible applications should call the specific method appropriate if the
  * input is known to be in a particular format.
  *
- * This method does the same thing as the OSRSetFromUserInput() function.
+ * This method does the same thing as the OSRSetFromUserInput() and
+ * OSRSetFromUserInputEx() functions.
  *
  * @param pszDefinition text definition to try to deduce SRS from.
  *
@@ -3677,7 +3762,7 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition)
  *      Whether http:// or https:// access is allowed. Defaults to YES.
  * <li> ALLOW_FILE_ACCESS=YES/NO.
  *      Whether reading a file using the Virtual File System layer is allowed
- * (can also involve network access). Defaults to YES.
+ *      (can also involve network access). Defaults to YES.
  * </ol>
  *
  * @return OGRERR_NONE on success, or an error code if the name isn't
@@ -3688,6 +3773,10 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition)
 OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
                                              CSLConstList papszOptions)
 {
+    // Skip leading white space
+    while (isspace(static_cast<unsigned char>(*pszDefinition)))
+        pszDefinition++;
+
     if (STARTS_WITH_CI(pszDefinition, "ESRI::"))
     {
         pszDefinition += 6;
@@ -3702,7 +3791,7 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
         // WKT2"
         "GEODCRS", "GEOGCRS", "GEODETICCRS", "GEOGRAPHICCRS", "PROJCRS",
         "PROJECTEDCRS", "VERTCRS", "VERTICALCRS", "COMPOUNDCRS", "ENGCRS",
-        "ENGINEERINGCRS", "BOUNDCRS", "DERIVEDPROJCRS"};
+        "ENGINEERINGCRS", "BOUNDCRS", "DERIVEDPROJCRS", "COORDINATEMETADATA"};
     for (const char *keyword : wktKeywords)
     {
         if (STARTS_WITH_CI(pszDefinition, keyword))
@@ -3716,8 +3805,7 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
     {
         OGRErr eStatus = OGRERR_NONE;
 
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 1
-        if (strchr(pszDefinition, '+') != nullptr)
+        if (strchr(pszDefinition, '+') || strchr(pszDefinition, '@'))
         {
             // Use proj_create() as it allows things like EPSG:3157+4617
             // that are not normally supported by the below code that
@@ -3732,43 +3820,10 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
             return OGRERR_NONE;
         }
         else
-#endif
         {
             eStatus =
                 importFromEPSG(atoi(pszDefinition + (bStartsWithEPSG ? 5 : 6)));
         }
-
-#if !(PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 1)
-        // Do we want to turn this into a compound definition
-        // with a vertical datum?
-        if (eStatus == OGRERR_NONE && strchr(pszDefinition, '+') != nullptr)
-        {
-            OGRSpatialReference oVertSRS;
-
-            eStatus =
-                oVertSRS.importFromEPSG(atoi(strchr(pszDefinition, '+') + 1));
-            if (eStatus == OGRERR_NONE)
-            {
-                OGRSpatialReference oHorizSRS(*this);
-
-                Clear();
-
-                oHorizSRS.d->refreshProjObj();
-                oVertSRS.d->refreshProjObj();
-                if (!oHorizSRS.d->m_pj_crs || !oVertSRS.d->m_pj_crs)
-                    return OGRERR_FAILURE;
-
-                const char *pszHorizName = proj_get_name(oHorizSRS.d->m_pj_crs);
-                const char *pszVertName = proj_get_name(oVertSRS.d->m_pj_crs);
-
-                CPLString osName = pszHorizName ? pszHorizName : "";
-                osName += " + ";
-                osName += pszVertName ? pszVertName : "";
-
-                SetCompoundCS(osName, &oHorizSRS, &oVertSRS);
-            }
-        }
-#endif
 
         return eStatus;
     }
@@ -3777,7 +3832,8 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
         STARTS_WITH_CI(pszDefinition, "urn:ogc:def:crs,crs:") ||
         STARTS_WITH_CI(pszDefinition, "urn:x-ogc:def:crs:") ||
         STARTS_WITH_CI(pszDefinition, "urn:opengis:crs:") ||
-        STARTS_WITH_CI(pszDefinition, "urn:opengis:def:crs:"))
+        STARTS_WITH_CI(pszDefinition, "urn:opengis:def:crs:") ||
+        STARTS_WITH_CI(pszDefinition, "urn:ogc:def:coordinateMetadata:"))
         return importFromURN(pszDefinition);
 
     if (STARTS_WITH_CI(pszDefinition, "http://opengis.net/def/crs") ||
@@ -3881,6 +3937,18 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
     if (EQUAL(pszDefinition, "osgb:BNG"))
     {
         return importFromEPSG(27700);
+    }
+
+    // Used by German CityGML files
+    if (EQUAL(pszDefinition, "urn:adv:crs:ETRS89_UTM32*DE_DHHN92_NH"))
+    {
+        // "ETRS89 / UTM Zone 32N + DHHN92 height"
+        return SetFromUserInput("EPSG:25832+5783");
+    }
+    else if (EQUAL(pszDefinition, "urn:adv:crs:ETRS89_UTM32*DE_DHHN2016_NH"))
+    {
+        // "ETRS89 / UTM Zone 32N + DHHN2016 height"
+        return SetFromUserInput("EPSG:25832+7837");
     }
 
     // Deal with IGNF:xxx, ESRI:xxx, etc from the PROJ database
@@ -4019,6 +4087,8 @@ OGRErr OGRSpatialReference::SetFromUserInput(const char *pszDefinition,
  * \brief Set spatial reference from various text formats.
  *
  * This function is the same as OGRSpatialReference::SetFromUserInput()
+ *
+ * \see OSRSetFromUserInputEx() for a variant allowing to pass options.
  */
 OGRErr CPL_STDCALL OSRSetFromUserInput(OGRSpatialReferenceH hSRS,
                                        const char *pszDef)
@@ -4027,6 +4097,26 @@ OGRErr CPL_STDCALL OSRSetFromUserInput(OGRSpatialReferenceH hSRS,
     VALIDATE_POINTER1(hSRS, "OSRSetFromUserInput", OGRERR_FAILURE);
 
     return ToPointer(hSRS)->SetFromUserInput(pszDef);
+}
+
+/************************************************************************/
+/*                       OSRSetFromUserInputEx()                        */
+/************************************************************************/
+
+/**
+ * \brief Set spatial reference from various text formats.
+ *
+ * This function is the same as OGRSpatialReference::SetFromUserInput().
+ *
+ * @since GDAL 3.9
+ */
+OGRErr OSRSetFromUserInputEx(OGRSpatialReferenceH hSRS, const char *pszDef,
+                             CSLConstList papszOptions)
+
+{
+    VALIDATE_POINTER1(hSRS, "OSRSetFromUserInputEx", OGRERR_FAILURE);
+
+    return ToPointer(hSRS)->SetFromUserInput(pszDef, papszOptions);
 }
 
 /************************************************************************/
@@ -4065,12 +4155,34 @@ OGRErr OGRSpatialReference::importFromUrl(const char *pszUrl)
     /* -------------------------------------------------------------------- */
     CPLErrorReset();
 
-    const char *pszHeaders = "HEADERS=Accept: application/x-ogcwkt";
-    const char *pszTimeout = "TIMEOUT=10";
-    char *apszOptions[] = {const_cast<char *>(pszHeaders),
-                           const_cast<char *>(pszTimeout), nullptr};
+    std::string osUrl(pszUrl);
+    // We have historically supported "http://spatialreference.org/ref/AUTHNAME/CODE/"
+    // as a valid URL since we used a "Accept: application/x-ogcwkt" header
+    // to query WKT. To allow a static server to be used, rather append a
+    // "ogcwkt/" suffix.
+    for (const char *pszPrefix : {"https://spatialreference.org/ref/",
+                                  "http://spatialreference.org/ref/"})
+    {
+        if (STARTS_WITH(pszUrl, pszPrefix))
+        {
+            const CPLStringList aosTokens(
+                CSLTokenizeString2(pszUrl + strlen(pszPrefix), "/", 0));
+            if (aosTokens.size() == 2)
+            {
+                osUrl = "https://spatialreference.org/ref/";
+                osUrl += aosTokens[0];  // authority
+                osUrl += '/';
+                osUrl += aosTokens[1];  // code
+                osUrl += "/ogcwkt/";
+            }
+            break;
+        }
+    }
 
-    CPLHTTPResult *psResult = CPLHTTPFetch(pszUrl, apszOptions);
+    const char *pszTimeout = "TIMEOUT=10";
+    char *apszOptions[] = {const_cast<char *>(pszTimeout), nullptr};
+
+    CPLHTTPResult *psResult = CPLHTTPFetch(osUrl.c_str(), apszOptions);
 
     /* -------------------------------------------------------------------- */
     /*      Try to handle errors.                                           */
@@ -4144,6 +4256,7 @@ OGRErr OGRSpatialReference::importFromURNPart(const char *pszAuthority,
                                               const char *pszURN)
 {
 #if PROJ_AT_LEAST_VERSION(8, 1, 0)
+    (void)this;
     (void)pszAuthority;
     (void)pszCode;
     (void)pszURN;
@@ -4432,7 +4545,21 @@ OGRErr OGRSpatialReference::importFromCRSURL(const char *pszURL)
         return OGRERR_CORRUPT_DATA;
     }
 
-    auto obj = proj_create(d->getPROJContext(), pszURL);
+    PJ *obj;
+#if !PROJ_AT_LEAST_VERSION(9, 2, 0)
+    if (STARTS_WITH(pszURL, "http://www.opengis.net/def/crs/IAU/0/"))
+    {
+        obj = proj_create(
+            d->getPROJContext(),
+            CPLSPrintf("IAU:%s",
+                       pszURL +
+                           strlen("http://www.opengis.net/def/crs/IAU/0/")));
+    }
+    else
+#endif
+    {
+        obj = proj_create(d->getPROJContext(), pszURL);
+    }
     if (!obj)
     {
         return OGRERR_FAILURE;
@@ -5277,6 +5404,7 @@ OGRErr OGRSpatialReference::SetProjCS(const char *pszName)
 
 {
     d->refreshProjObj();
+    d->demoteFromBoundCRS();
     if (d->m_pjType == PJ_TYPE_PROJECTED_CRS)
     {
         d->setPjCRS(proj_alter_name(d->getPROJContext(), d->m_pj_crs, pszName));
@@ -5296,6 +5424,7 @@ OGRErr OGRSpatialReference::SetProjCS(const char *pszName)
 
         d->setPjCRS(projCRS);
     }
+    d->undoDemoteFromBoundCRS();
     return OGRERR_NONE;
 }
 
@@ -5375,6 +5504,59 @@ OGRErr OSRSetProjection(OGRSpatialReferenceH hSRS, const char *pszProjection)
 }
 
 /************************************************************************/
+/*                      GetWKT2ProjectionMethod()                       */
+/************************************************************************/
+
+/**
+ * \brief Returns info on the projection method, based on WKT2 naming
+ * conventions.
+ *
+ * The returned strings are short lived and should be considered to be
+ * invalidated by any further call to the GDAL API.
+ *
+ * @param[out] ppszMethodName Pointer to a string that will receive the
+ * projection method name.
+ * @param[out] ppszMethodAuthName null pointer, or pointer to a string that will
+ * receive the name of the authority that defines the projection method.
+ * *ppszMethodAuthName may be nullptr if the projection method is not linked to
+ * an authority.
+ * @param[out] ppszMethodCode null pointer, or pointer to a string that will
+ * receive the code that defines the projection method.
+ * *ppszMethodCode may be nullptr if the projection method is not linked to
+ * an authority.
+ *
+ * @return OGRERR_NONE on success.
+ */
+OGRErr
+OGRSpatialReference::GetWKT2ProjectionMethod(const char **ppszMethodName,
+                                             const char **ppszMethodAuthName,
+                                             const char **ppszMethodCode) const
+{
+    auto conv = proj_crs_get_coordoperation(d->getPROJContext(), d->m_pj_crs);
+    if (!conv)
+        return OGRERR_FAILURE;
+    const char *pszTmpMethodName = "";
+    const char *pszTmpMethodAuthName = "";
+    const char *pszTmpMethodCode = "";
+    int ret = proj_coordoperation_get_method_info(
+        d->getPROJContext(), conv, &pszTmpMethodName, &pszTmpMethodAuthName,
+        &pszTmpMethodCode);
+    // "Internalize" temporary strings returned by PROJ
+    CPLAssert(pszTmpMethodName);
+    if (ppszMethodName)
+        *ppszMethodName = CPLSPrintf("%s", pszTmpMethodName);
+    if (ppszMethodAuthName)
+        *ppszMethodAuthName = pszTmpMethodAuthName
+                                  ? CPLSPrintf("%s", pszTmpMethodAuthName)
+                                  : nullptr;
+    if (ppszMethodCode)
+        *ppszMethodCode =
+            pszTmpMethodCode ? CPLSPrintf("%s", pszTmpMethodCode) : nullptr;
+    proj_destroy(conv);
+    return ret ? OGRERR_NONE : OGRERR_FAILURE;
+}
+
+/************************************************************************/
 /*                            SetProjParm()                             */
 /************************************************************************/
 
@@ -5385,7 +5567,7 @@ OGRErr OSRSetProjection(OGRSpatialReferenceH hSRS, const char *pszProjection)
  *
  * This method is the same as the C function OSRSetProjParm().
  *
- * Please check http://www.remotesensing.org/geotiff/proj_list pages for
+ * Please check https://gdal.org/proj_list pages for
  * legal parameter names for specific projections.
  *
  *
@@ -5588,7 +5770,6 @@ double OGRSpatialReference::GetProjParm(const char *pszName,
     const int iChild = FindProjParm(pszName, poPROJCS);
     if (iChild == -1)
     {
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 3
         if (IsProjected() && GetAxesCount() == 3)
         {
             OGRSpatialReference *poSRSTmp = Clone();
@@ -5598,7 +5779,6 @@ double OGRSpatialReference::GetProjParm(const char *pszName,
             delete poSRSTmp;
             return dfRet;
         }
-#endif
 
         if (pnErr != nullptr)
             *pnErr = OGRERR_FAILURE;
@@ -7499,7 +7679,6 @@ OGRErr OSRSetUTM(OGRSpatialReferenceH hSRS, int nZone, int bNorth)
 int OGRSpatialReference::GetUTMZone(int *pbNorth) const
 
 {
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 3
     if (IsProjected() && GetAxesCount() == 3)
     {
         OGRSpatialReference *poSRSTmp = Clone();
@@ -7508,7 +7687,6 @@ int OGRSpatialReference::GetUTMZone(int *pbNorth) const
         delete poSRSTmp;
         return nZone;
     }
-#endif
 
     const char *pszProjection = GetAttrValue("PROJECTION");
 
@@ -7699,25 +7877,11 @@ OGRErr OGRSpatialReference::SetVerticalPerspective(
     double dfTopoOriginLat, double dfTopoOriginLon, double dfTopoOriginHeight,
     double dfViewPointHeight, double dfFalseEasting, double dfFalseNorthing)
 {
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 3
     return d->replaceConversionAndUnref(
         proj_create_conversion_vertical_perspective(
             d->getPROJContext(), dfTopoOriginLat, dfTopoOriginLon,
             dfTopoOriginHeight, dfViewPointHeight, dfFalseEasting,
             dfFalseNorthing, nullptr, 0, nullptr, 0));
-#else
-    CPL_IGNORE_RET_VAL(dfTopoOriginHeight);  // ignored by PROJ
-
-    OGRSpatialReference oSRS;
-    CPLString oProj4String;
-    oProj4String.Printf(
-        "+proj=nsper +lat_0=%.18g +lon_0=%.18g +h=%.18g +x_0=%.18g +y_0=%.18g",
-        dfTopoOriginLat, dfTopoOriginLon, dfViewPointHeight, dfFalseEasting,
-        dfFalseNorthing);
-    oSRS.SetFromUserInput(oProj4String);
-    return d->replaceConversionAndUnref(
-        proj_crs_get_coordoperation(d->getPROJContext(), oSRS.d->m_pj_crs));
-#endif
 }
 
 /************************************************************************/
@@ -7746,8 +7910,6 @@ OGRErr OGRSpatialReference::SetDerivedGeogCRSWithPoleRotationGRIBConvention(
     const char *pszCRSName, double dfSouthPoleLat, double dfSouthPoleLon,
     double dfAxisRotation)
 {
-#if PROJ_VERSION_MAJOR > 6 ||                                                  \
-    (PROJ_VERSION_MAJOR == 6 && PROJ_VERSION_MINOR >= 3)
     d->refreshProjObj();
     if (!d->m_pj_crs)
         return OGRERR_FAILURE;
@@ -7762,19 +7924,6 @@ OGRErr OGRSpatialReference::SetDerivedGeogCRSWithPoleRotationGRIBConvention(
     proj_destroy(conv);
     proj_destroy(cs);
     return OGRERR_NONE;
-#else
-    (void)pszCRSName;
-    SetProjection("Rotated_pole");
-    SetExtension(
-        "PROJCS", "PROJ4",
-        CPLSPrintf("+proj=ob_tran +lon_0=%.18g +o_proj=longlat +o_lon_p=%.18g "
-                   "+o_lat_p=%.18g +a=%.18g +b=%.18g +to_meter=0.0174532925199 "
-                   "+wktext",
-                   dfSouthPoleLon, dfAxisRotation == 0 ? 0 : -dfAxisRotation,
-                   dfSouthPoleLat == 0 ? 0 : -dfSouthPoleLat,
-                   GetSemiMajor(nullptr), GetSemiMinor(nullptr)));
-    return OGRERR_NONE;
-#endif
 }
 
 /************************************************************************/
@@ -7808,7 +7957,8 @@ OGRErr OGRSpatialReference::SetDerivedGeogCRSWithPoleRotationNetCDFCFConvention(
     SetExtension(
         "PROJCS", "PROJ4",
         CPLSPrintf("+proj=ob_tran +o_proj=longlat +lon_0=%.18g +o_lon_p=%.18g "
-                   "+o_lat_p=%.18g +a=%.18g +b=%.18g +to_meter=0.0174532925199 "
+                   "+o_lat_p=%.18g +a=%.18g +b=%.18g "
+                   "+to_meter=0.0174532925199433 "
                    "+wktext",
                    180.0 + dfGridNorthPoleLon, dfNorthPoleGridLon,
                    dfGridNorthPoleLat, GetSemiMajor(nullptr),
@@ -8005,6 +8155,36 @@ OGRSpatialReference::GetAuthorityCode(const char *pszTargetKey) const
         }
     }
 
+    // Special key for that context
+    else if (EQUAL(pszTargetKey, "HORIZCRS") &&
+             d->m_pjType == PJ_TYPE_COMPOUND_CRS)
+    {
+        auto ctxt = d->getPROJContext();
+        auto crs = proj_crs_get_sub_crs(ctxt, d->m_pj_crs, 0);
+        if (crs)
+        {
+            const char *ret = proj_get_id_code(crs, 0);
+            if (ret)
+                ret = CPLSPrintf("%s", ret);
+            proj_destroy(crs);
+            return ret;
+        }
+    }
+    else if (EQUAL(pszTargetKey, "VERTCRS") &&
+             d->m_pjType == PJ_TYPE_COMPOUND_CRS)
+    {
+        auto ctxt = d->getPROJContext();
+        auto crs = proj_crs_get_sub_crs(ctxt, d->m_pj_crs, 1);
+        if (crs)
+        {
+            const char *ret = proj_get_id_code(crs, 0);
+            if (ret)
+                ret = CPLSPrintf("%s", ret);
+            proj_destroy(crs);
+            return ret;
+        }
+    }
+
     /* -------------------------------------------------------------------- */
     /*      Find the node below which the authority should be put.          */
     /* -------------------------------------------------------------------- */
@@ -8105,6 +8285,36 @@ OGRSpatialReference::GetAuthorityName(const char *pszTargetKey) const
         d->undoDemoteFromBoundCRS();
         if (ret != nullptr || pszTargetKey == nullptr)
         {
+            return ret;
+        }
+    }
+
+    // Special key for that context
+    else if (EQUAL(pszTargetKey, "HORIZCRS") &&
+             d->m_pjType == PJ_TYPE_COMPOUND_CRS)
+    {
+        auto ctxt = d->getPROJContext();
+        auto crs = proj_crs_get_sub_crs(ctxt, d->m_pj_crs, 0);
+        if (crs)
+        {
+            const char *ret = proj_get_id_auth_name(crs, 0);
+            if (ret)
+                ret = CPLSPrintf("%s", ret);
+            proj_destroy(crs);
+            return ret;
+        }
+    }
+    else if (EQUAL(pszTargetKey, "VERTCRS") &&
+             d->m_pjType == PJ_TYPE_COMPOUND_CRS)
+    {
+        auto ctxt = d->getPROJContext();
+        auto crs = proj_crs_get_sub_crs(ctxt, d->m_pj_crs, 1);
+        if (crs)
+        {
+            const char *ret = proj_get_id_auth_name(crs, 0);
+            if (ret)
+                ret = CPLSPrintf("%s", ret);
+            proj_destroy(crs);
             return ret;
         }
     }
@@ -8637,24 +8847,19 @@ int OGRSpatialReference::IsDerivedGeographic() const
 {
     d->refreshProjObj();
     d->demoteFromBoundCRS();
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 3
     const bool isGeog = d->m_pjType == PJ_TYPE_GEOGRAPHIC_2D_CRS ||
                         d->m_pjType == PJ_TYPE_GEOGRAPHIC_3D_CRS;
     const bool isDerivedGeographic =
         isGeog && proj_is_derived_crs(d->getPROJContext(), d->m_pj_crs);
     d->undoDemoteFromBoundCRS();
     return isDerivedGeographic ? TRUE : FALSE;
-#else
-    d->undoDemoteFromBoundCRS();
-    return FALSE;
-#endif
 }
 
 /************************************************************************/
 /*                      OSRIsDerivedGeographic()                        */
 /************************************************************************/
 /**
- * \brief Check if derived geographic coordinate system.
+ * \brief Check if the CRS is a derived geographic coordinate system.
  * (for example a rotated long/lat grid)
  *
  * This function is the same as OGRSpatialReference::IsDerivedGeographic().
@@ -8665,6 +8870,51 @@ int OSRIsDerivedGeographic(OGRSpatialReferenceH hSRS)
     VALIDATE_POINTER1(hSRS, "OSRIsDerivedGeographic", 0);
 
     return ToPointer(hSRS)->IsDerivedGeographic();
+}
+
+/************************************************************************/
+/*                      IsDerivedProjected()                            */
+/************************************************************************/
+
+/**
+ * \brief Check if the CRS is a derived projected coordinate system.
+ *
+ * This method is the same as the C function OSRIsDerivedGeographic().
+ *
+ * @since GDAL 3.9.0 (and may only return non-zero starting with PROJ 9.2.0)
+ */
+
+int OGRSpatialReference::IsDerivedProjected() const
+
+{
+#if PROJ_AT_LEAST_VERSION(9, 2, 0)
+    d->refreshProjObj();
+    d->demoteFromBoundCRS();
+    const bool isDerivedProjected =
+        d->m_pjType == PJ_TYPE_DERIVED_PROJECTED_CRS;
+    d->undoDemoteFromBoundCRS();
+    return isDerivedProjected ? TRUE : FALSE;
+#else
+    return FALSE;
+#endif
+}
+
+/************************************************************************/
+/*                      OSRIsDerivedProjected()                         */
+/************************************************************************/
+/**
+ * \brief Check if the CRS is a derived projected coordinate system.
+ *
+ * This function is the same as OGRSpatialReference::IsDerivedProjected().
+ *
+ * @since GDAL 3.9.0 (and may only return non-zero starting with PROJ 9.2.0)
+ */
+int OSRIsDerivedProjected(OGRSpatialReferenceH hSRS)
+
+{
+    VALIDATE_POINTER1(hSRS, "OSRIsDerivedProjected", 0);
+
+    return ToPointer(hSRS)->IsDerivedProjected();
 }
 
 /************************************************************************/
@@ -8782,6 +9032,8 @@ int OSRIsVertical(OGRSpatialReferenceH hSRS)
  * @return true if the CRS is dynamic
  *
  * @since OGR 3.4.0
+ *
+ * @see HasPointMotionOperation()
  */
 
 bool OGRSpatialReference::IsDynamic() const
@@ -8871,6 +9123,64 @@ int OSRIsDynamic(OGRSpatialReferenceH hSRS)
     VALIDATE_POINTER1(hSRS, "OSRIsDynamic", 0);
 
     return ToPointer(hSRS)->IsDynamic();
+}
+
+/************************************************************************/
+/*                         HasPointMotionOperation()                    */
+/************************************************************************/
+
+/**
+ * \brief Check if a CRS has at least an associated point motion operation.
+ *
+ * Some CRS are not formally declared as dynamic, but may behave as such
+ * in practice due to the prsence of point motion operation, to perform
+ * coordinate epoch changes within the CRS. Typically NAD83(CSRS)v7
+ *
+ * @return true if the CRS has at least an associated point motion operation.
+ *
+ * @since OGR 3.8.0 and PROJ 9.4.0
+ *
+ * @see IsDynamic()
+ */
+
+bool OGRSpatialReference::HasPointMotionOperation() const
+
+{
+#if PROJ_VERSION_MAJOR > 9 ||                                                  \
+    (PROJ_VERSION_MAJOR == 9 && PROJ_VERSION_MINOR >= 4)
+    d->refreshProjObj();
+    d->demoteFromBoundCRS();
+    auto ctxt = d->getPROJContext();
+    auto res =
+        CPL_TO_BOOL(proj_crs_has_point_motion_operation(ctxt, d->m_pj_crs));
+    d->undoDemoteFromBoundCRS();
+    return res;
+#else
+    return false;
+#endif
+}
+
+/************************************************************************/
+/*                      OSRHasPointMotionOperation()                    */
+/************************************************************************/
+
+/**
+ * \brief Check if a CRS has at least an associated point motion operation.
+ *
+ * Some CRS are not formally declared as dynamic, but may behave as such
+ * in practice due to the prsence of point motion operation, to perform
+ * coordinate epoch changes within the CRS. Typically NAD83(CSRS)v7
+ *
+ * This function is the same as OGRSpatialReference::HasPointMotionOperation().
+ *
+ * @since OGR 3.8.0 and PROJ 9.4.0
+ */
+int OSRHasPointMotionOperation(OGRSpatialReferenceH hSRS)
+
+{
+    VALIDATE_POINTER1(hSRS, "OSRHasPointMotionOperation", 0);
+
+    return ToPointer(hSRS)->HasPointMotionOperation();
 }
 
 /************************************************************************/
@@ -10020,6 +10330,11 @@ static void CleanupSRSWGS84Mutex();
  *
  * This function will attempt to cleanup any cache spatial reference
  * related information, such as cached tables of coordinate systems.
+ *
+ * This function should not be called concurrently with any other GDAL/OGR
+ * function. It is meant at being called once before process termination
+ * (typically from the main thread). CPLCleanupTLS() might be used to clean
+ * thread-specific resources before thread termination.
  */
 void OSRCleanup(void)
 
@@ -11098,12 +11413,11 @@ OGRSpatialReference::FindMatches(char **papszOptions, int *pnEntries,
  *
  * Since GDAL 3.0, this method is identical to importFromEPSG().
  *
- * Before GDAL 3.0.3, this method try to attach a 3-parameter or 7-parameter
- * Helmert transformation to WGS84 when there is one and only one such method
- * available for the CRS.
- * This behavior might not always be desirable, so starting with GDAL 3.0.3,
- * this is no longer done. However the OSR_ADD_TOWGS84_ON_IMPORT_FROM_EPSG
- * configuration option can be set to YES to enable past behavior.
+ * Before GDAL 3.0.3, this method would try to attach a 3-parameter or
+ * 7-parameter Helmert transformation to WGS84 when there is one and only one
+ * such method available for the CRS. This behavior might not always be
+ * desirable, so starting with GDAL 3.0.3, this is no longer done unless
+ * the OSR_ADD_TOWGS84_ON_IMPORT_FROM_EPSG configuration option is set to YES.
  * The AddGuessedTOWGS84() method can also be used for that purpose.
  *
  * The method will also by default substitute a deprecated EPSG code by its
@@ -11122,8 +11436,10 @@ OGRErr OGRSpatialReference::importFromEPSGA(int nCode)
 {
     Clear();
 
+    const char *pszUseNonDeprecated =
+        CPLGetConfigOption("OSR_USE_NON_DEPRECATED", nullptr);
     const bool bUseNonDeprecated =
-        CPLTestBool(CPLGetConfigOption("OSR_USE_NON_DEPRECATED", "YES"));
+        CPLTestBool(pszUseNonDeprecated ? pszUseNonDeprecated : "YES");
     const bool bAddTOWGS84 = CPLTestBool(
         CPLGetConfigOption("OSR_ADD_TOWGS84_ON_IMPORT_FROM_EPSG", "NO"));
     auto tlsCache = OSRGetProjTLSCache();
@@ -11160,6 +11476,22 @@ OGRErr OGRSpatialReference::importFromEPSGA(int nCode)
                     proj_list_get(d->getPROJContext(), list, 0);
                 if (nonDeprecated)
                 {
+                    if (pszUseNonDeprecated == nullptr)
+                    {
+                        const char *pszNewAuth =
+                            proj_get_id_auth_name(nonDeprecated, 0);
+                        const char *pszNewCode =
+                            proj_get_id_code(nonDeprecated, 0);
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "CRS EPSG:%d is deprecated. "
+                                 "Its non-deprecated replacement %s:%s "
+                                 "will be used instead. "
+                                 "To use the original CRS, set the "
+                                 "OSR_USE_NON_DEPRECATED "
+                                 "configuration option to NO.",
+                                 nCode, pszNewAuth ? pszNewAuth : "(null)",
+                                 pszNewCode ? pszNewCode : "(null)");
+                    }
                     proj_destroy(obj);
                     obj = nonDeprecated;
                 }
@@ -11277,11 +11609,11 @@ OGRErr CPL_STDCALL OSRImportFromEPSGA(OGRSpatialReferenceH hSRS, int nCode)
  *
  * This method is the same as the C function OSRImportFromEPSG().
  *
- * This method try to attach a 3-parameter or 7-parameter Helmert transformation
- * to WGS84 when there is one and only one such method available for the CRS.
- * This behavior might not always be desirable, so starting with GDAL 3.0.3,
- * the OSR_ADD_TOWGS84_ON_IMPORT_FROM_EPSG configuration option can be set to
- * NO to disable this behavior.
+ * Before GDAL 3.0.3, this method would try to attach a 3-parameter or
+ * 7-parameter Helmert transformation to WGS84 when there is one and only one
+ * such method available for the CRS. This behavior might not always be
+ * desirable, so starting with GDAL 3.0.3, this is no longer done unless
+ * the OSR_ADD_TOWGS84_ON_IMPORT_FROM_EPSG configuration option is set to YES.
  *
  * @param nCode a GCS or PCS code from the horizontal coordinate system table.
  *
@@ -11678,7 +12010,7 @@ OGRErr OGRSpatialReference::ImportFromESRIWisconsinWKT(const char *prjName,
  * <li>OAMS_CUSTOM means that the data axis are customly defined with
  *     SetDataAxisToSRSAxisMapping()
  * </ul>
- * @return the the data axis to CRS axis mapping strategy.
+ * @return the data axis to CRS axis mapping strategy.
  * @since GDAL 3.0
  */
 OSRAxisMappingStrategy OGRSpatialReference::GetAxisMappingStrategy() const
@@ -11789,10 +12121,38 @@ const int *OSRGetDataAxisToSRSAxisMapping(OGRSpatialReferenceH hSRS,
 
 /** \brief Set a custom data axis to CRS axis mapping.
  *
+ * The number of elements of the mapping vector should be the number of axis
+ * of the CRS (as returned by GetAxesCount()) (although this method does not
+ * check that, beyond checking there are at least 2 elements, so that this
+ * method and setting the CRS can be done in any order).
+ * This is taken into account by OGRCoordinateTransformation to transform the
+ * order of coordinates to the order expected by the CRS before
+ * transformation, and back to the data order after transformation.
+ *
+ * The mapping[i] value (one based) represents the data axis number for the i(th)
+ * axis of the CRS. A negative value can also be used to ask for a sign
+ * reversal during coordinate transformation (to deal with northing vs southing,
+ * easting vs westing, heights vs depths).
+ *
+ * When used with OGRCoordinateTransformation,
+ * - the only valid values for mapping[0] (data axis number for the first axis
+ *   of the CRS) are 1, 2, -1, -2.
+ * - the only valid values for mapping[1] (data axis number for the second axis
+ *   of the CRS) are 1, 2, -1, -2.
+ *  - the only valid values mapping[2] are 3 or -3.
+ * Note: this method does not validate the values of mapping[].
+ *
+ * mapping=[2,1] typically expresses the inversion of axis between the data
+ * axis and the CRS axis for a 2D CRS.
+ *
  * Automatically implies SetAxisMappingStrategy(OAMS_CUSTOM)
  *
- * See OGRSpatialReference::GetAxisMappingStrategy()
+ * This is the same as the C function OSRSetDataAxisToSRSAxisMapping().
+ *
+ * @param mapping The new data axis to CRS axis mapping.
+ *
  * @since GDAL 3.0
+ * @see OGRSpatialReference::GetDataAxisToSRSAxisMapping()
  */
 OGRErr OGRSpatialReference::SetDataAxisToSRSAxisMapping(
     const std::vector<int> &mapping)
@@ -11809,10 +12169,11 @@ OGRErr OGRSpatialReference::SetDataAxisToSRSAxisMapping(
 /************************************************************************/
 
 /** \brief Set a custom data axis to CRS axis mapping.
- *s
+ *
  * Automatically implies SetAxisMappingStrategy(OAMS_CUSTOM)
  *
- * See OGRSpatialReference::SetDataAxisToSRSAxisMapping()
+ * This is the same as the C++ method
+ * OGRSpatialReference::SetDataAxisToSRSAxisMapping()
  *
  * @since GDAL 3.1
  */
@@ -12120,7 +12481,6 @@ void OGRSpatialReference::UpdateCoordinateSystemFromGeogCRS()
  */
 OGRErr OGRSpatialReference::PromoteTo3D(const char *pszName)
 {
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 3
     d->refreshProjObj();
     if (!d->m_pj_crs)
         return OGRERR_FAILURE;
@@ -12130,11 +12490,6 @@ OGRErr OGRSpatialReference::PromoteTo3D(const char *pszName)
         return OGRERR_FAILURE;
     d->setPjCRS(newPj);
     return OGRERR_NONE;
-#else
-    CPL_IGNORE_RET_VAL(pszName);
-    CPLError(CE_Failure, CPLE_NotSupported, "PROJ 6.3 required");
-    return OGRERR_UNSUPPORTED_OPERATION;
-#endif
 }
 
 /************************************************************************/
@@ -12167,7 +12522,6 @@ OGRErr OSRPromoteTo3D(OGRSpatialReferenceH hSRS, const char *pszName)
  */
 OGRErr OGRSpatialReference::DemoteTo2D(const char *pszName)
 {
-#if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 3
     d->refreshProjObj();
     if (!d->m_pj_crs)
         return OGRERR_FAILURE;
@@ -12177,11 +12531,6 @@ OGRErr OGRSpatialReference::DemoteTo2D(const char *pszName)
         return OGRERR_FAILURE;
     d->setPjCRS(newPj);
     return OGRERR_NONE;
-#else
-    CPL_IGNORE_RET_VAL(pszName);
-    CPLError(CE_Failure, CPLE_NotSupported, "PROJ 6.3 required");
-    return OGRERR_UNSUPPORTED_OPERATION;
-#endif
 }
 
 /************************************************************************/

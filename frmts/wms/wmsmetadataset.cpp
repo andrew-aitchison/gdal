@@ -231,13 +231,11 @@ char **GDALWMSMetaDataset::GetMetadata(const char *pszDomain)
 /*                           AddSubDataset()                            */
 /************************************************************************/
 
-void GDALWMSMetaDataset::AddSubDataset(const char *pszLayerName,
-                                       const char *pszTitle,
-                                       CPL_UNUSED const char *pszAbstract,
-                                       const char *pszSRS, const char *pszMinX,
-                                       const char *pszMinY, const char *pszMaxX,
-                                       const char *pszMaxY, CPLString osFormat,
-                                       CPLString osTransparent)
+void GDALWMSMetaDataset::AddSubDataset(
+    const char *pszLayerName, const char *pszTitle,
+    CPL_UNUSED const char *pszAbstract, const char *pszSRS, const char *pszMinX,
+    const char *pszMinY, const char *pszMaxX, const char *pszMaxY,
+    const std::string &osFormat, const std::string &osTransparent)
 {
     CPLString osSubdatasetName = "WMS:";
     osSubdatasetName += osGetURL;
@@ -258,10 +256,11 @@ void GDALWMSMetaDataset::AddSubDataset(const char *pszLayerName,
         osSubdatasetName, "BBOX",
         CPLSPrintf("%s,%s,%s,%s", pszMinX, pszMinY, pszMaxX, pszMaxY));
     if (!osFormat.empty())
-        osSubdatasetName = CPLURLAddKVP(osSubdatasetName, "FORMAT", osFormat);
-    if (!osTransparent.empty())
         osSubdatasetName =
-            CPLURLAddKVP(osSubdatasetName, "TRANSPARENT", osTransparent);
+            CPLURLAddKVP(osSubdatasetName, "FORMAT", osFormat.c_str());
+    if (!osTransparent.empty())
+        osSubdatasetName = CPLURLAddKVP(osSubdatasetName, "TRANSPARENT",
+                                        osTransparent.c_str());
 
     if (pszTitle)
     {
@@ -293,7 +292,7 @@ void GDALWMSMetaDataset::AddSubDataset(const char *pszLayerName,
 
 void GDALWMSMetaDataset::AddWMSCSubDataset(WMSCTileSetDesc &oWMSCTileSetDesc,
                                            const char *pszTitle,
-                                           CPLString osTransparent)
+                                           const CPLString &osTransparent)
 {
     CPLString osSubdatasetName = "WMS:";
     osSubdatasetName += osGetURL;
@@ -362,9 +361,10 @@ void GDALWMSMetaDataset::AddWMSCSubDataset(WMSCTileSetDesc &oWMSCTileSetDesc,
 /*                             ExploreLayer()                           */
 /************************************************************************/
 
-void GDALWMSMetaDataset::ExploreLayer(CPLXMLNode *psXML, CPLString osFormat,
-                                      CPLString osTransparent,
-                                      CPLString osPreferredSRS,
+void GDALWMSMetaDataset::ExploreLayer(CPLXMLNode *psXML,
+                                      const CPLString &osFormat,
+                                      const CPLString &osTransparent,
+                                      const CPLString &osPreferredSRS,
                                       const char *pszSRS, const char *pszMinX,
                                       const char *pszMinY, const char *pszMaxX,
                                       const char *pszMaxY)
@@ -578,7 +578,7 @@ void GDALWMSMetaDataset::ParseWMSCTileSets(CPLXMLNode *psXML)
             oWMSCTileSet.nTileWidth = nTileWidth;
             oWMSCTileSet.nTileHeight = nTileHeight;
 
-            osMapWMSCTileSet[oWMSCKey] = oWMSCTileSet;
+            osMapWMSCTileSet[oWMSCKey] = std::move(oWMSCTileSet);
         }
     }
 }
@@ -588,8 +588,8 @@ void GDALWMSMetaDataset::ParseWMSCTileSets(CPLXMLNode *psXML)
 /************************************************************************/
 
 GDALDataset *GDALWMSMetaDataset::AnalyzeGetCapabilities(
-    CPLXMLNode *psXML, CPLString osFormat, CPLString osTransparent,
-    CPLString osPreferredSRS)
+    CPLXMLNode *psXML, const std::string &osFormat,
+    const std::string &osTransparent, const std::string &osPreferredSRS)
 {
     const char *pszEncoding = nullptr;
     if (psXML->eType == CXT_Element && strcmp(psXML->pszValue, "?xml") == 0)

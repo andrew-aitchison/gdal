@@ -68,6 +68,11 @@ static int OGRSQLiteDriverIdentify(GDALOpenInfo *poOpenInfo)
     }
     if (EQUAL(osExt, "mbtiles") && GDALGetDriverByName("MBTILES") != nullptr)
     {
+        if (CSLCount(poOpenInfo->papszAllowedDrivers) == 1 &&
+            EQUAL(poOpenInfo->papszAllowedDrivers[0], "SQLite"))
+        {
+            return TRUE;
+        }
         return FALSE;
     }
 
@@ -445,6 +450,8 @@ void RegisterOGRSQLite()
                               "RealList StringList");
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
                               "Boolean Int16 Float32");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "WidthPrecision Nullable Default Unique");
     poDriver->SetMetadataItem(
         GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
         "Name Type WidthPrecision Nullable Default Unique");

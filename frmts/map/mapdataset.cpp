@@ -78,7 +78,8 @@ class MAPWrapperRasterBand final : public GDALProxyRasterBand
     GDALRasterBand *poBaseBand;
 
   protected:
-    virtual GDALRasterBand *RefUnderlyingRasterBand() const override
+    virtual GDALRasterBand *
+    RefUnderlyingRasterBand(bool /*bForceOpen*/) const override
     {
         return poBaseBand;
     }
@@ -90,6 +91,7 @@ class MAPWrapperRasterBand final : public GDALProxyRasterBand
         eDataType = poBaseBand->GetRasterDataType();
         poBaseBand->GetBlockSize(&nBlockXSize, &nBlockYSize);
     }
+
     ~MAPWrapperRasterBand()
     {
     }
@@ -263,8 +265,8 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Try and open the file.                                          */
     /* -------------------------------------------------------------------- */
-    poDS->poImageDS = reinterpret_cast<GDALDataset *>(
-        GDALOpen(poDS->osImgFilename, GA_ReadOnly));
+    poDS->poImageDS =
+        GDALDataset::FromHandle(GDALOpen(poDS->osImgFilename, GA_ReadOnly));
     if (poDS->poImageDS == nullptr || poDS->poImageDS->GetRasterCount() == 0)
     {
         CSLDestroy(papszLines);
@@ -279,6 +281,7 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->nRasterYSize = poDS->poImageDS->GetRasterYSize();
     if (!GDALCheckDatasetDimensions(poDS->nRasterXSize, poDS->nRasterYSize))
     {
+        CSLDestroy(papszLines);
         GDALClose(poDS->poImageDS);
         delete poDS;
         return nullptr;

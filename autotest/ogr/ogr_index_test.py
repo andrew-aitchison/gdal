@@ -44,9 +44,6 @@ def startup_and_cleanup():
     for filename in ["join_t.idm", "join_t.ind"]:
         assert not os.path.exists(filename)
 
-    ogr.GetDriverByName("ESRI Shapefile").DeleteDataSource("tmp/ogr_index_10.shp")
-    ogr.GetDriverByName("ESRI Shapefile").DeleteDataSource("tmp/ogr_index_11.dbf")
-
 
 @contextlib.contextmanager
 def create_index_p_test_file():
@@ -103,16 +100,12 @@ def test_ogr_index_can_join_without_index():
     with create_index_p_test_file(), create_join_t_test_file():
         p_ds = ogr.OpenShared("index_p.mif", update=0)
 
-        sql_lyr = p_ds.ExecuteSQL(
+        with p_ds.ExecuteSQL(
             "SELECT * FROM index_p p "
             + 'LEFT JOIN "join_t.dbf".join_t j ON p.PKEY = j.SKEY '
-        )
+        ) as sql_lyr:
 
-        tr = ogrtest.check_features_against_list(sql_lyr, "VALUE", expect)
-
-        p_ds.ReleaseResultSet(sql_lyr)
-
-    assert tr
+            ogrtest.check_features_against_list(sql_lyr, "VALUE", expect)
 
 
 ###############################################################################
@@ -138,8 +131,7 @@ def test_ogr_index_indexed_single_integer_lookup_works():
         s_lyr = s_ds.GetLayerByName("join_t")
         s_lyr.SetAttributeFilter("SKEY = 5")
 
-        tr = ogrtest.check_features_against_list(s_lyr, "VALUE", expect)
-    assert tr
+        ogrtest.check_features_against_list(s_lyr, "VALUE", expect)
 
 
 ###############################################################################
@@ -155,8 +147,7 @@ def test_ogr_index_indexed_single_string_works():
 
         s_lyr.SetAttributeFilter("VALUE='Value 5'")
 
-        tr = ogrtest.check_features_against_list(s_lyr, "SKEY", expect)
-    assert tr
+        ogrtest.check_features_against_list(s_lyr, "SKEY", expect)
 
 
 ###############################################################################
@@ -171,9 +162,7 @@ def test_ogr_index_unimplemented_range_query_works():
         s_lyr = s_ds.GetLayerByName("join_t")
         s_lyr.SetAttributeFilter("SKEY < 3")
 
-        tr = ogrtest.check_features_against_list(s_lyr, "SKEY", expect)
-
-    assert tr
+        ogrtest.check_features_against_list(s_lyr, "SKEY", expect)
 
 
 ###############################################################################
@@ -185,16 +174,12 @@ def test_ogr_index_indexed_join_works():
 
     with create_index_p_test_file(), create_join_t_test_file(create_index=True):
         p_ds = ogr.OpenShared("index_p.mif", update=0)
-        sql_lyr = p_ds.ExecuteSQL(
+        with p_ds.ExecuteSQL(
             "SELECT * FROM index_p p "
             + 'LEFT JOIN "join_t.dbf".join_t j ON p.PKEY = j.SKEY '
-        )
+        ) as sql_lyr:
 
-        tr = ogrtest.check_features_against_list(sql_lyr, "VALUE", expect)
-
-        p_ds.ReleaseResultSet(sql_lyr)
-
-    assert tr
+            ogrtest.check_features_against_list(sql_lyr, "VALUE", expect)
 
 
 ###############################################################################
@@ -232,8 +217,7 @@ def test_ogr_index_attribute_filter_works_after_drop_index():
 
         s_lyr.SetAttributeFilter("SKEY = 5")
 
-        tr = ogrtest.check_features_against_list(s_lyr, "VALUE", expect)
-        assert tr
+        ogrtest.check_features_against_list(s_lyr, "VALUE", expect)
 
 
 ###############################################################################
@@ -326,9 +310,11 @@ def test_ogr_index_creating_index_in_separate_steps_works():
 # Test fix for #4326
 
 
-def test_ogr_index_10():
+def test_ogr_index_10(tmp_path):
 
-    ds = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource("tmp/ogr_index_10.shp")
+    ds = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(
+        tmp_path / "ogr_index_10.shp"
+    )
     lyr = ds.CreateLayer("ogr_index_10")
     lyr.CreateField(ogr.FieldDefn("intfield", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("realfield", ogr.OFTReal))
@@ -443,9 +429,11 @@ def ogr_index_11_check(lyr, expected_fids):
         assert feat.GetFID() == expected_fid
 
 
-def test_ogr_index_11():
+def test_ogr_index_11(tmp_path):
 
-    ds = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource("tmp/ogr_index_11.dbf")
+    ds = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(
+        tmp_path / "ogr_index_11.dbf"
+    )
     lyr = ds.CreateLayer("ogr_index_11", geom_type=ogr.wkbNone)
     lyr.CreateField(ogr.FieldDefn("intfield", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("strfield", ogr.OFTString))

@@ -46,6 +46,10 @@ ogr_optional_driver(jml JML)
 ogr_optional_driver(vdv "VDV-451/VDV-452/INTREST Data Format")
 ogr_optional_driver(flatgeobuf FlatGeobuf)
 ogr_optional_driver(mapml MapML)
+ogr_optional_driver(jsonfg JSONFG)
+if( NOT WORDS_BIGENDIAN )
+    ogr_optional_driver(miramon "MiraMonVector")
+endif()
 
 # ######################################################################################################################
 #
@@ -77,7 +81,9 @@ ogr_dependent_driver(sqlite "SQLite3 / Spatialite RDBMS" "GDAL_USE_SQLITE3")
 ogr_dependent_driver(gpkg "GeoPackage" "GDAL_USE_SQLITE3;OGR_ENABLE_DRIVER_SQLITE")
 ogr_dependent_driver(osm "OpenStreetMap XML and PBF" "GDAL_USE_SQLITE3;OGR_ENABLE_DRIVER_SQLITE")
 ogr_dependent_driver(vfk "Czech Cadastral Exchange Data Format" "GDAL_USE_SQLITE3")
-ogr_dependent_driver(mvt "MVT" "GDAL_USE_SQLITE3;OGR_ENABLE_DRIVER_OSM")
+# Caution: if modifying MVT declaration here, also modify it in gdal.cmake
+ogr_dependent_driver(mvt "MVT" "GDAL_USE_SQLITE3")
+ogr_dependent_driver(pmtiles PMTiles "OGR_ENABLE_DRIVER_MVT")
 
 # ODBC/POSTGRES/MYSQL
 ogr_dependent_driver(amigocloud AMIGOCLOUD "GDAL_USE_CURL;OGR_ENABLE_DRIVER_PGDUMP")
@@ -95,6 +101,8 @@ ogr_dependent_driver(mongodbv3 "MongoDB V3" "GDAL_USE_MONGOCXX")
 ogr_dependent_driver(cad "OpenCAD" "GDAL_USE_OPENCAD OR GDAL_USE_OPENCAD_INTERNAL")
 ogr_dependent_driver(parquet "Parquet" "GDAL_USE_PARQUET")
 ogr_dependent_driver(arrow "Arrow" "GDAL_USE_ARROW")
+
+ogr_dependent_driver(gtfs "GTFS" "OGR_ENABLE_DRIVER_CSV")
 
 # ######################################################################################################################
 # proprietary libraries

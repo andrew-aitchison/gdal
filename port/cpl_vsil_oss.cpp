@@ -66,11 +66,9 @@ class VSIOSSFSHandler final : public IVSIS3LikeFSHandler
 {
     CPL_DISALLOW_COPY_ASSIGN(VSIOSSFSHandler)
 
-    std::map<CPLString, VSIOSSUpdateParams> oMapBucketsToOSSParams{};
-
   protected:
     VSICurlHandle *CreateFileHandle(const char *pszFilename) override;
-    CPLString GetURLFromFilename(const CPLString &osFilename) override;
+    std::string GetURLFromFilename(const std::string &osFilename) override;
 
     const char *GetDebugKey() const override
     {
@@ -80,24 +78,22 @@ class VSIOSSFSHandler final : public IVSIS3LikeFSHandler
     IVSIS3LikeHandleHelper *CreateHandleHelper(const char *pszURI,
                                                bool bAllowNoObject) override;
 
-    CPLString GetFSPrefix() const override
+    std::string GetFSPrefix() const override
     {
         return "/vsioss/";
     }
 
     void ClearCache() override;
 
+    VSIVirtualHandleUniquePtr
+    CreateWriteHandle(const char *pszFilename,
+                      CSLConstList papszOptions) override;
+
   public:
     VSIOSSFSHandler() = default;
     ~VSIOSSFSHandler() override;
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError, CSLConstList papszOptions) override;
-
     const char *GetOptions() override;
-
-    void UpdateMapFromHandle(IVSIS3LikeHandleHelper *poHandleHelper) override;
-    void UpdateHandleFromMap(IVSIS3LikeHandleHelper *poHandleHelper) override;
 
     char *GetSignedURL(const char *pszFilename,
                        CSLConstList papszOptions) override;
@@ -107,14 +103,6 @@ class VSIOSSFSHandler final : public IVSIS3LikeFSHandler
     {
         return osFilename;
     }
-
-    bool SupportsSequentialWrite(const char * /* pszPath */,
-                                 bool /* bAllowLocalTempFile */) override
-    {
-        return true;
-    }
-    bool SupportsRandomWrite(const char * /* pszPath */,
-                             bool /* bAllowLocalTempFile */) override;
 };
 
 /************************************************************************/
@@ -129,7 +117,7 @@ class VSIOSSHandle final : public IVSIS3LikeHandle
 
   protected:
     struct curl_slist *
-    GetCurlHeaders(const CPLString &osVerb,
+    GetCurlHeaders(const std::string &osVerb,
                    const struct curl_slist *psExistingHeaders) override;
     bool CanRestartOnError(const char *, const char *, bool) override;
 
@@ -138,64 +126,6 @@ class VSIOSSHandle final : public IVSIS3LikeHandle
                  VSIOSSHandleHelper *poHandleHelper);
     ~VSIOSSHandle() override;
 };
-
-/************************************************************************/
-/*                                Open()                                */
-/************************************************************************/
-
-VSIVirtualHandle *VSIOSSFSHandler::Open(const char *pszFilename,
-                                        const char *pszAccess, bool bSetError,
-                                        CSLConstList papszOptions)
-{
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
-        return nullptr;
-
-    if (strchr(pszAccess, 'w') != nullptr || strchr(pszAccess, 'a') != nullptr)
-    {
-        if (strchr(pszAccess, '+') != nullptr &&
-            !SupportsRandomWrite(pszFilename, true))
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "w+ not supported for /vsioss, unless "
-                     "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE is set to YES");
-            errno = EACCES;
-            return nullptr;
-        }
-
-        VSIOSSHandleHelper *poHandleHelper = VSIOSSHandleHelper::BuildFromURI(
-            pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str(), false);
-        if (poHandleHelper == nullptr)
-            return nullptr;
-        UpdateHandleFromMap(poHandleHelper);
-        VSIS3WriteHandle *poHandle = new VSIS3WriteHandle(
-            this, pszFilename, poHandleHelper, false, papszOptions);
-        if (!poHandle->IsOK())
-        {
-            delete poHandle;
-            return nullptr;
-        }
-        if (strchr(pszAccess, '+') != nullptr)
-        {
-            return VSICreateUploadOnCloseFile(poHandle);
-        }
-        return poHandle;
-    }
-
-    return VSICurlFilesystemHandlerBase::Open(pszFilename, pszAccess, bSetError,
-                                              papszOptions);
-}
-
-/************************************************************************/
-/*                        SupportsRandomWrite()                         */
-/************************************************************************/
-
-bool VSIOSSFSHandler::SupportsRandomWrite(const char * /* pszPath */,
-                                          bool bAllowLocalTempFile)
-{
-    return bAllowLocalTempFile &&
-           CPLTestBool(CPLGetConfigOption(
-               "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE", "NO"));
-}
 
 /************************************************************************/
 /*                       ~VSIOSSFSHandler()                             */
@@ -207,6 +137,27 @@ VSIOSSFSHandler::~VSIOSSFSHandler()
 }
 
 /************************************************************************/
+/*                          CreateWriteHandle()                         */
+/************************************************************************/
+
+VSIVirtualHandleUniquePtr
+VSIOSSFSHandler::CreateWriteHandle(const char *pszFilename,
+                                   CSLConstList papszOptions)
+{
+    auto poHandleHelper =
+        CreateHandleHelper(pszFilename + GetFSPrefix().size(), false);
+    if (poHandleHelper == nullptr)
+        return nullptr;
+    auto poHandle = std::make_unique<VSIS3WriteHandle>(
+        this, pszFilename, poHandleHelper, false, papszOptions);
+    if (!poHandle->IsOK())
+    {
+        return nullptr;
+    }
+    return VSIVirtualHandleUniquePtr(poHandle.release());
+}
+
+/************************************************************************/
 /*                            ClearCache()                              */
 /************************************************************************/
 
@@ -214,7 +165,7 @@ void VSIOSSFSHandler::ClearCache()
 {
     VSICurlFilesystemHandlerBase::ClearCache();
 
-    oMapBucketsToOSSParams.clear();
+    VSIOSSUpdateParams::ClearCache();
 }
 
 /************************************************************************/
@@ -223,8 +174,8 @@ void VSIOSSFSHandler::ClearCache()
 
 const char *VSIOSSFSHandler::GetOptions()
 {
-    static CPLString osOptions(
-        CPLString("<Options>") +
+    static std::string osOptions(
+        std::string("<Options>") +
         "  <Option name='OSS_SECRET_ACCESS_KEY' type='string' "
         "description='Secret access key. To use with OSS_ACCESS_KEY_ID'/>"
         "  <Option name='OSS_ACCESS_KEY_ID' type='string' "
@@ -246,7 +197,7 @@ const char *VSIOSSFSHandler::GetOptions()
 char *VSIOSSFSHandler::GetSignedURL(const char *pszFilename,
                                     CSLConstList papszOptions)
 {
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
+    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix().c_str()))
         return nullptr;
 
     VSIOSSHandleHelper *poHandleHelper = VSIOSSHandleHelper::BuildFromURI(
@@ -257,10 +208,10 @@ char *VSIOSSFSHandler::GetSignedURL(const char *pszFilename,
         return nullptr;
     }
 
-    CPLString osRet(poHandleHelper->GetSignedURL(papszOptions));
+    std::string osRet(poHandleHelper->GetSignedURL(papszOptions));
 
     delete poHandleHelper;
-    return CPLStrdup(osRet);
+    return CPLStrdup(osRet.c_str());
 }
 
 /************************************************************************/
@@ -273,7 +224,6 @@ VSICurlHandle *VSIOSSFSHandler::CreateFileHandle(const char *pszFilename)
         pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str(), false);
     if (poHandleHelper)
     {
-        UpdateHandleFromMap(poHandleHelper);
         return new VSIOSSHandle(this, pszFilename, poHandleHelper);
     }
     return nullptr;
@@ -283,18 +233,19 @@ VSICurlHandle *VSIOSSFSHandler::CreateFileHandle(const char *pszFilename)
 /*                          GetURLFromFilename()                         */
 /************************************************************************/
 
-CPLString VSIOSSFSHandler::GetURLFromFilename(const CPLString &osFilename)
+std::string VSIOSSFSHandler::GetURLFromFilename(const std::string &osFilename)
 {
-    CPLString osFilenameWithoutPrefix = osFilename.substr(GetFSPrefix().size());
+    std::string osFilenameWithoutPrefix =
+        osFilename.substr(GetFSPrefix().size());
 
     VSIOSSHandleHelper *poHandleHelper = VSIOSSHandleHelper::BuildFromURI(
-        osFilenameWithoutPrefix, GetFSPrefix().c_str(), true);
+        osFilenameWithoutPrefix.c_str(), GetFSPrefix().c_str(), true);
     if (poHandleHelper == nullptr)
     {
         return "";
     }
-    UpdateHandleFromMap(poHandleHelper);
-    CPLString osBaseURL(poHandleHelper->GetURL());
+
+    std::string osBaseURL(poHandleHelper->GetURL());
     if (!osBaseURL.empty() && osBaseURL.back() == '/')
         osBaseURL.resize(osBaseURL.size() - 1);
     delete poHandleHelper;
@@ -314,46 +265,12 @@ IVSIS3LikeHandleHelper *VSIOSSFSHandler::CreateHandleHelper(const char *pszURI,
 }
 
 /************************************************************************/
-/*                         UpdateMapFromHandle()                        */
-/************************************************************************/
-
-void VSIOSSFSHandler::UpdateMapFromHandle(
-    IVSIS3LikeHandleHelper *poHandleHelper)
-{
-    CPLMutexHolder oHolder(&hMutex);
-
-    VSIOSSHandleHelper *poOSSHandleHelper =
-        cpl::down_cast<VSIOSSHandleHelper *>(poHandleHelper);
-    oMapBucketsToOSSParams[poOSSHandleHelper->GetBucket()] =
-        VSIOSSUpdateParams(poOSSHandleHelper);
-}
-
-/************************************************************************/
-/*                         UpdateHandleFromMap()                        */
-/************************************************************************/
-
-void VSIOSSFSHandler::UpdateHandleFromMap(
-    IVSIS3LikeHandleHelper *poHandleHelper)
-{
-    CPLMutexHolder oHolder(&hMutex);
-
-    VSIOSSHandleHelper *poOSSHandleHelper =
-        cpl::down_cast<VSIOSSHandleHelper *>(poHandleHelper);
-    std::map<CPLString, VSIOSSUpdateParams>::iterator oIter =
-        oMapBucketsToOSSParams.find(poOSSHandleHelper->GetBucket());
-    if (oIter != oMapBucketsToOSSParams.end())
-    {
-        oIter->second.UpdateHandlerHelper(poOSSHandleHelper);
-    }
-}
-
-/************************************************************************/
 /*                            VSIOSSHandle()                            */
 /************************************************************************/
 
 VSIOSSHandle::VSIOSSHandle(VSIOSSFSHandler *poFSIn, const char *pszFilename,
                            VSIOSSHandleHelper *poHandleHelper)
-    : IVSIS3LikeHandle(poFSIn, pszFilename, poHandleHelper->GetURL()),
+    : IVSIS3LikeHandle(poFSIn, pszFilename, poHandleHelper->GetURL().c_str()),
       m_poHandleHelper(poHandleHelper)
 {
 }
@@ -372,7 +289,7 @@ VSIOSSHandle::~VSIOSSHandle()
 /************************************************************************/
 
 struct curl_slist *
-VSIOSSHandle::GetCurlHeaders(const CPLString &osVerb,
+VSIOSSHandle::GetCurlHeaders(const std::string &osVerb,
                              const struct curl_slist *psExistingHeaders)
 {
     return m_poHandleHelper->GetCurlHeaders(osVerb, psExistingHeaders);
@@ -385,13 +302,9 @@ VSIOSSHandle::GetCurlHeaders(const CPLString &osVerb,
 bool VSIOSSHandle::CanRestartOnError(const char *pszErrorMsg,
                                      const char *pszHeaders, bool bSetError)
 {
-    if (m_poHandleHelper->CanRestartOnError(pszErrorMsg, pszHeaders, bSetError,
-                                            nullptr))
+    if (m_poHandleHelper->CanRestartOnError(pszErrorMsg, pszHeaders, bSetError))
     {
-        static_cast<VSIOSSFSHandler *>(poFS)->UpdateMapFromHandle(
-            m_poHandleHelper);
-
-        SetURL(m_poHandleHelper->GetURL());
+        SetURL(m_poHandleHelper->GetURL().c_str());
         return true;
     }
     return false;

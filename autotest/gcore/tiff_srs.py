@@ -33,6 +33,14 @@ import pytest
 
 from osgeo import gdal, osr
 
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
 ###############################################################################
 # Test fix for #4677:
 
@@ -89,12 +97,12 @@ def test_srs_write_compd_cs():
     ds.SetProjection(sr.ExportToWkt())
     ds = None
 
-    gdal.SetConfigOption("GTIFF_REPORT_COMPD_CS", "YES")
-    ds = gdal.Open("/vsimem/tiff_srs_compd_cs.tif")
-    gdal.ErrorReset()
-    wkt = ds.GetProjectionRef()
-    assert gdal.GetLastErrorMsg() == ""
-    gdal.SetConfigOption("GTIFF_REPORT_COMPD_CS", None)
+    with gdal.config_option("GTIFF_REPORT_COMPD_CS", "YES"):
+        ds = gdal.Open("/vsimem/tiff_srs_compd_cs.tif")
+        gdal.ErrorReset()
+        wkt = ds.GetProjectionRef()
+        assert gdal.GetLastErrorMsg() == ""
+
     sr2 = osr.SpatialReference()
     sr2.SetFromUserInput(wkt)
     ds = None
@@ -110,10 +118,9 @@ def test_srs_write_compd_cs():
 
 def test_srs_read_compd_cs():
 
-    gdal.SetConfigOption("GTIFF_REPORT_COMPD_CS", "YES")
-    ds = gdal.Open("data/vertcs_user_defined.tif")
-    wkt = ds.GetProjectionRef()
-    gdal.SetConfigOption("GTIFF_REPORT_COMPD_CS", None)
+    with gdal.config_option("GTIFF_REPORT_COMPD_CS", "YES"):
+        ds = gdal.Open("data/vertcs_user_defined.tif")
+        wkt = ds.GetProjectionRef()
 
     assert (
         wkt
@@ -128,9 +135,8 @@ def test_srs_read_compd_cs():
 def test_tiff_srs_weird_mercator_2sp():
 
     ds = gdal.Open("data/weird_mercator_2sp.tif")
-    gdal.PushErrorHandler()
-    wkt = ds.GetProjectionRef()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        wkt = ds.GetProjectionRef()
     assert gdal.GetLastErrorMsg() != "", "warning expected"
     sr2 = osr.SpatialReference()
     sr2.SetFromUserInput(wkt)
@@ -352,22 +358,11 @@ def test_tiff_custom_datum_known_ellipsoid():
 # override to another unit (us-feet) ... (#6210)
 
 
-def test_tiff_srs_epsg_2853_with_us_feet():
+@pytest.mark.parametrize("gtiff_import_from_epsg", ("YES", "NO"))
+def test_tiff_srs_epsg_2853_with_us_feet(gtiff_import_from_epsg):
 
-    old_val = gdal.GetConfigOption("GTIFF_IMPORT_FROM_EPSG")
-    gdal.SetConfigOption("GTIFF_IMPORT_FROM_EPSG", "YES")
-    ds = gdal.Open("data/epsg_2853_with_us_feet.tif")
-    gdal.SetConfigOption("GTIFF_IMPORT_FROM_EPSG", old_val)
-    wkt = ds.GetProjectionRef()
-    assert (
-        'PARAMETER["false_easting",11482916.66' in wkt
-        and 'UNIT["us_survey_feet",0.3048006' in wkt
-        and "2853" not in wkt
-    )
-
-    gdal.SetConfigOption("GTIFF_IMPORT_FROM_EPSG", "NO")
-    ds = gdal.Open("data/epsg_2853_with_us_feet.tif")
-    gdal.SetConfigOption("GTIFF_IMPORT_FROM_EPSG", old_val)
+    with gdal.config_option("GTIFF_IMPORT_FROM_EPSG", gtiff_import_from_epsg):
+        ds = gdal.Open("data/epsg_2853_with_us_feet.tif")
     wkt = ds.GetProjectionRef()
     assert (
         'PARAMETER["false_easting",11482916.66' in wkt
@@ -941,7 +936,7 @@ def test_tiff_srs_read_getspatialref_getgcpspatialref():
 
 def test_tiff_srs_read_VerticalUnitsGeoKey_private_range():
     ds = gdal.Open("data/gtiff/VerticalUnitsGeoKey_private_range.tif")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         sr = ds.GetSpatialRef()
     assert sr.GetName() == "NAD83 / UTM zone 16N"
     assert gdal.GetLastErrorMsg() != ""
@@ -951,7 +946,7 @@ def test_tiff_srs_read_invalid_semimajoraxis_compound():
     ds = gdal.Open("data/gtiff/invalid_semimajoraxis_compound.tif")
     # Check that it doesn't crash. PROJ >= 8.2.0 will return a NULL CRS
     # whereas previous versions will return a non-NULL one
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds.GetSpatialRef()
 
 
@@ -983,7 +978,7 @@ def test_tiff_srs_try_write_derived_geographic():
 
 def test_tiff_srs_read_GeogGeodeticDatumGeoKey_reserved_range():
     ds = gdal.Open("data/gtiff/GeogGeodeticDatumGeoKey_reserved.tif")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         sr = ds.GetSpatialRef()
     assert sr.GetName() == "WGS 84 / Pseudo-Mercator"
     assert gdal.GetLastErrorMsg() != ""
@@ -1002,7 +997,7 @@ def test_tiff_srs_read_invalid_GeogAngularUnitSizeGeoKey():
     # That file has GeogAngularUnitSizeGeoKey = 0
     ds = gdal.Open("data/gtiff/invalid_GeogAngularUnitSizeGeoKey.tif")
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds.GetSpatialRef()
     assert gdal.GetLastErrorMsg() != ""
 
@@ -1012,7 +1007,7 @@ def test_tiff_srs_read_inconsistent_invflattening():
     # which are inconsistent with the ones from the ellipsoid of the datum
     ds = gdal.Open("data/gtiff/inconsistent_invflattening.tif")
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         srs = ds.GetSpatialRef()
     assert gdal.GetLastErrorMsg() != ""
     assert srs.GetAuthorityCode(None) == "28992"
@@ -1158,10 +1153,8 @@ def test_tiff_srs_read_esri_pcs_gcs_ellipsoid_names():
     assert 'ELLIPSOID["Bessel 1841"' in wkt
 
 
+@pytest.mark.require_proj(9, 0)
 def test_tiff_srs_write_projected_3d():
-
-    if osr.GetPROJVersionMajor() < 9:
-        pytest.skip()
 
     filename = "/vsimem/test_tiff_srs_write_projected_3d.tif"
     srs = osr.SpatialReference()
@@ -1173,6 +1166,30 @@ def test_tiff_srs_write_projected_3d():
     gdal.ErrorReset()
     ds = None
     assert gdal.GetLastErrorMsg() == ""
+    assert gdal.VSIStatL(filename + ".aux.xml") is not None
+
+    ds = gdal.Open(filename)
+    gdal.ErrorReset()
+    got_srs = ds.GetSpatialRef()
+    assert got_srs.IsSame(srs)
+    ds = None
+
+    gdal.Unlink(filename)
+
+
+@pytest.mark.require_proj(9, 0)
+def test_tiff_srs_write_projected_3d_built_as_pseudo_compound():
+
+    filename = "/vsimem/test_tiff_srs_write_projected_3d_built_as_pseudo_compound.tif"
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput("EPSG:6340+6319")
+
+    ds = gdal.GetDriverByName("GTiff").Create(filename, 1, 1)
+    ds.SetSpatialRef(srs)
+    gdal.ErrorReset()
+    ds = None
+    assert gdal.GetLastErrorMsg() == ""
+    assert gdal.VSIStatL(filename + ".aux.xml") is not None
 
     ds = gdal.Open(filename)
     gdal.ErrorReset()
@@ -1215,3 +1232,195 @@ def test_tiff_srs_epsg_2193_override():
     srs = ds.GetSpatialRef()
     assert gdal.GetLastErrorMsg() == "", srs.ExportToWkt(["FORMAT=WKT2_2019"])
     assert srs.GetAuthorityCode(None) == "2193"
+
+
+def test_tiff_srs_projected_GTCitationGeoKey_with_underscore_and_GeogTOWGS84GeoKey():
+
+    """Test bugfix for https://lists.osgeo.org/pipermail/gdal-dev/2023-March/057011.html"""
+
+    ds = gdal.Open(
+        "data/gtiff/projected_GTCitationGeoKey_with_underscore_and_GeogTOWGS84GeoKey.tif"
+    )
+    gdal.ErrorReset()
+    srs = ds.GetSpatialRef()
+    assert srs.GetAuthorityCode(None) == "2039"
+    assert "+proj=tmerc" in srs.ExportToProj4()
+    if osr.GetPROJVersionMajor() >= 9:  # not necessarily the minimum version
+        assert srs.GetName() == "Israel 1993 / Israeli TM Grid"
+
+
+def test_tiff_srs_write_compound_with_non_epsg_vert_crs():
+
+    """Test bugfix for https://github.com/OSGeo/gdal/issues/7833"""
+
+    filename = "/vsimem/test_tiff_srs_write_compound_with_non_epsg_vert_crs.tif"
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        """COMPD_CS["TestMS",
+    GEOGCS["NAD83(2011)",
+        DATUM["NAD83_National_Spatial_Reference_System_2011",
+            SPHEROID["GRS 1980",6378137,298.257222101,
+                AUTHORITY["EPSG","7019"]],
+            AUTHORITY["EPSG","1116"]],
+        PRIMEM["Greenwich",0,
+            AUTHORITY["EPSG","8901"]],
+        UNIT["degree",0.0174532925199433,
+            AUTHORITY["EPSG","9122"]],
+        AXIS["Latitude",NORTH],
+        AXIS["Longitude",EAST],
+        AUTHORITY["EPSG","6318"]],
+    VERT_CS["Mississippi_River_ERTDM_TCARI_MLLW_Riley2023",
+        VERT_DATUM["MLLW_Riley2023",2005,
+            AUTHORITY["NOAA","799"]],
+        UNIT["metre",1,
+            AUTHORITY["EPSG","9001"]],
+        AXIS["Gravity-related height",UP],
+        AUTHORITY["NOAA","800"]],
+    AUTHORITY["NOAA","2000"]]"""
+    )
+
+    ds = gdal.GetDriverByName("GTiff").Create(filename, 1, 1)
+    ds.SetSpatialRef(srs)
+    gdal.ErrorReset()
+    ds = None
+    assert gdal.GetLastErrorMsg() == ""
+
+    ds = gdal.Open(filename)
+    srs = ds.GetSpatialRef()
+    wkt = srs.ExportToWkt()
+    assert gdal.GetLastErrorMsg() == ""
+
+    gdal.Unlink(filename)
+
+    assert (
+        wkt
+        == """COMPD_CS["TestMS",GEOGCS["NAD83(2011)",DATUM["NAD83_National_Spatial_Reference_System_2011",SPHEROID["GRS 1980",6378137,298.257222101004,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","1116"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","6318"]],VERT_CS["Mississippi_River_ERTDM_TCARI_MLLW_Riley2023",VERT_DATUM["unknown",2005],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Up",UP]]]"""
+    )
+
+
+def test_tiff_srs_read_compound_with_VerticalCitationGeoKey_only():
+
+    """Test bugfix for https://github.com/OSGeo/gdal/issues/7833"""
+
+    ds = gdal.Open("data/gtiff/compound_with_VerticalCitationGeoKey_only.tif")
+    srs = ds.GetSpatialRef()
+    wkt = srs.ExportToWkt()
+    assert gdal.GetLastErrorMsg() == ""
+
+    assert (
+        wkt
+        == """COMPD_CS["TestMS",GEOGCS["NAD83(2011)",DATUM["NAD83_National_Spatial_Reference_System_2011",SPHEROID["GRS 1980",6378137,298.257222101004,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","1116"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","6318"]],VERT_CS["NAVD88 height",VERT_DATUM["North American Vertical Datum 1988",2005,AUTHORITY["EPSG","5103"]],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Up",UP]]]"""
+    )
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        7415,  # Amersfoort / RD New + NAP height
+        9707,  # WGS 84 + EGM96 height
+    ],
+)
+@pytest.mark.require_proj(
+    7, 2
+)  # not necessarily the minimum version, but 9707 doesn't exist in PROJ 6.x
+def test_tiff_srs_read_compound_with_EPSG_code(code):
+
+    """Test bugfix for https://github.com/OSGeo/gdal/issues/7982"""
+
+    filename = "/vsimem/test_tiff_srs_read_compound_with_EPSG_code.tif"
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(code)
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    ds = gdal.GetDriverByName("GTiff").Create(filename, 1, 1)
+    ds.SetSpatialRef(srs)
+    ds = None
+    ds = gdal.Open(filename)
+    gdal.ErrorReset()
+    got_srs = ds.GetSpatialRef()
+    assert gdal.GetLastErrorMsg() == "", srs.ExportToWkt(["FORMAT=WKT2_2019"])
+    assert got_srs.GetAuthorityCode(None) == str(code)
+    assert got_srs.IsSame(srs)
+    ds = None
+    gdal.Unlink(filename)
+
+
+def test_tiff_srs_read_compound_without_EPSG_code():
+
+    """Test case where identification of code for CompoundCRS (added for
+    bugfix of https://github.com/OSGeo/gdal/issues/7982) doesn't trigger"""
+
+    filename = "/vsimem/test_tiff_srs_read_compound_without_EPSG_code.tif"
+    srs = osr.SpatialReference()
+    # WGS 84 + NAP height, unlikely to have a EPSG code ever
+    srs.SetFromUserInput("EPSG:4326+5709")
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    ds = gdal.GetDriverByName("GTiff").Create(filename, 1, 1)
+    ds.SetSpatialRef(srs)
+    ds = None
+    ds = gdal.Open(filename)
+    gdal.ErrorReset()
+    got_srs = ds.GetSpatialRef()
+    assert gdal.GetLastErrorMsg() == "", srs.ExportToWkt(["FORMAT=WKT2_2019"])
+    assert got_srs.GetAuthorityCode(None) is None
+    assert got_srs.GetAuthorityCode("GEOGCS") == "4326"
+    assert got_srs.GetAuthorityCode("VERT_CS") == "5709"
+    assert got_srs.IsSame(srs)
+    ds = None
+    gdal.Unlink(filename)
+
+
+def test_tiff_srs_projection_method_unknown_of_geotiff_with_crs_code():
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(8857)  # "WGS 84 / Equal Earth Greenwich"
+    filename = (
+        "/vsimem/test_tiff_srs_projection_method_unknown_of_geotiff_with_crs_code.tif"
+    )
+    ds = gdal.GetDriverByName("GTiff").Create(filename, 1, 1)
+    ds.SetSpatialRef(srs)
+    ds = None
+    assert gdal.VSIStatL(filename + ".aux.xml") is None
+    ds = gdal.Open(filename)
+    gdal.ErrorReset()
+    srs = ds.GetSpatialRef()
+    assert srs.GetAuthorityCode(None) == "8857"
+    ds = None
+    gdal.Unlink(filename)
+
+
+@pytest.mark.require_proj(9, 0)
+def test_tiff_srs_projection_method_unknown_of_geotiff_without_crs_code():
+
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        """PROJCS["WGS_1984_Equal_Earth_Greenwich",
+    GEOGCS["GCS_WGS_1984",
+        DATUM["D_WGS_1984",
+            SPHEROID["WGS_1984",6378137.0,298.257223563]],
+        PRIMEM["Greenwich",0.0],
+        UNIT["Degree",0.0174532925199433]],
+    PROJECTION["Equal_Earth"],
+    PARAMETER["False_Easting",0.0],
+    PARAMETER["False_Northing",0.0],
+    PARAMETER["Central_Meridian",0.0],
+    UNIT["Meter",1.0]]"""
+    )
+    filename = "/vsimem/test_tiff_srs_projection_method_unknown_of_geotiff_without_crs_code.tif"
+    ds = gdal.GetDriverByName("GTiff").Create(
+        filename, 1, 1, options=["GEOTIFF_KEYS_FLAVOR=ESRI_PE"]
+    )
+    ds.SetSpatialRef(srs)
+    ds = None
+    assert gdal.VSIStatL(filename + ".aux.xml") is None
+    ds = gdal.Open(filename)
+    gdal.ErrorReset()
+    got_srs = ds.GetSpatialRef()
+    assert got_srs.IsSame(srs), got_srs.ExportToWkt()
+    ds = None
+    gdal.Unlink(filename)
+
+
+def test_tiff_srs_build_compd_crs_name_without_citation():
+
+    ds = gdal.Open("data/gtiff/compdcrs_no_citation.tif")
+    assert ds.GetSpatialRef().GetName() == "WGS 84 / UTM zone 17N + EGM2008 height"

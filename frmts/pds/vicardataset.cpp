@@ -29,9 +29,9 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-constexpr int NULL1 = 0;
-constexpr int NULL2 = -32768;
-constexpr double NULL3 = -32768.0;
+constexpr int VICAR_NULL1 = 0;
+constexpr int VICAR_NULL2 = -32768;
+constexpr double VICAR_NULL3 = -32768.0;
 
 #include "cpl_port.h"
 
@@ -41,6 +41,8 @@ constexpr double NULL3 = -32768.0;
 #include "vicardataset.h"
 #include "nasakeywordhandler.h"
 #include "vicarkeywordhandler.h"
+#include "pdsdrivercore.h"
+#include "json_utils.h"
 
 #include "gtiff.h"
 #include "geotiff.h"
@@ -110,6 +112,7 @@ class OGRVICARBinaryPrefixesLayer final : public OGRLayer
         FIELD_FLOAT,
         FIELD_DOUBLE,
     };
+
     static Type GetTypeFromString(const char *pszStr);
 
     struct Field
@@ -117,6 +120,7 @@ class OGRVICARBinaryPrefixesLayer final : public OGRLayer
         int nOffset;
         Type eType;
     };
+
     std::vector<Field> m_aoFields;
     std::vector<GByte> m_abyRecord;
 
@@ -139,11 +143,14 @@ class OGRVICARBinaryPrefixesLayer final : public OGRLayer
     {
         m_iRecord = 0;
     }
+
     OGRFeatureDefn *GetLayerDefn() override
     {
         return m_poFeatureDefn;
     }
+
     OGRFeature *GetNextFeature() override;
+
     int TestCapability(const char *) override
     {
         return false;
@@ -1155,12 +1162,32 @@ VICARDataset::VICARDataset()
 VICARDataset::~VICARDataset()
 
 {
-    if (!m_bIsLabelWritten)
-        WriteLabel();
-    VICARDataset::FlushCache(true);
-    PatchLabel();
-    if (fpImage != nullptr)
-        VSIFCloseL(fpImage);
+    VICARDataset::Close();
+}
+
+/************************************************************************/
+/*                              Close()                                 */
+/************************************************************************/
+
+CPLErr VICARDataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (!m_bIsLabelWritten)
+            WriteLabel();
+
+        if (VICARDataset::FlushCache(true) != CE_None)
+            eErr = CE_Failure;
+
+        PatchLabel();
+        if (fpImage)
+            VSIFCloseL(fpImage);
+
+        if (GDALPamDataset::Close() != CE_None)
+            eErr = CE_Failure;
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -1228,65 +1255,6 @@ CPLErr VICARDataset::SetGeoTransform(double *padfTransform)
     memcpy(&m_adfGeoTransform[0], padfTransform, sizeof(double) * 6);
     InvalidateLabel();
     return CE_None;
-}
-
-/************************************************************************/
-/*                         GetLabelOffset()                             */
-/************************************************************************/
-
-int VICARDataset::GetLabelOffset(GDALOpenInfo *poOpenInfo)
-
-{
-    if (poOpenInfo->pabyHeader == nullptr || poOpenInfo->fpL == nullptr)
-        return -1;
-
-    std::string osHeader;
-    const char *pszHeader =
-        reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
-    // Some PDS3 images include a VICAR header pointed by ^IMAGE_HEADER.
-    // If the user sets GDAL_TRY_PDS3_WITH_VICAR=YES, then we will gracefully
-    // hand over the file to the VICAR dataset.
-    vsi_l_offset nOffset = 0;
-    if (CPLTestBool(CPLGetConfigOption("GDAL_TRY_PDS3_WITH_VICAR", "NO")) &&
-        !STARTS_WITH(poOpenInfo->pszFilename, "/vsisubfile/") &&
-        (nOffset = VICARDataset::GetVICARLabelOffsetFromPDS3(
-             pszHeader, poOpenInfo->fpL, osHeader)) > 0)
-    {
-        pszHeader = osHeader.c_str();
-    }
-
-    if ((poOpenInfo->nOpenFlags & GDAL_OF_RASTER) == 0 &&
-        (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR) != 0)
-    {
-        // If opening in vector-only mode, then check when have NBB != 0
-        const char *pszNBB = strstr(pszHeader, "NBB");
-        if (pszNBB == nullptr)
-            return -1;
-        const char *pszEqualSign = strchr(pszNBB, '=');
-        if (pszEqualSign == nullptr)
-            return -1;
-        if (atoi(pszEqualSign + 1) == 0)
-            return -1;
-    }
-    if (strstr(pszHeader, "LBLSIZE") != nullptr &&
-        strstr(pszHeader, "FORMAT") != nullptr &&
-        strstr(pszHeader, "NL") != nullptr &&
-        strstr(pszHeader, "NS") != nullptr &&
-        strstr(pszHeader, "NB") != nullptr)
-    {
-        return static_cast<int>(nOffset);
-    }
-    return -1;
-}
-
-/************************************************************************/
-/*                              Identify()                              */
-/************************************************************************/
-
-int VICARDataset::Identify(GDALOpenInfo *poOpenInfo)
-
-{
-    return GetLabelOffset(poOpenInfo) >= 0;
 }
 
 /************************************************************************/
@@ -1663,30 +1631,6 @@ void VICARDataset::PatchLabel()
     VSIFWriteL(&osBuffer[0], 1, nRead, fpImage);
 }
 
-/**
- * Get or create CPLJSONObject.
- * @param  oParent Parent CPLJSONObject.
- * @param  osKey  Key name.
- * @return         CPLJSONObject class instance.
- */
-static CPLJSONObject GetOrCreateJSONObject(CPLJSONObject &oParent,
-                                           const std::string &osKey)
-{
-    CPLJSONObject oChild = oParent[osKey];
-    if (oChild.IsValid() && oChild.GetType() != CPLJSONObject::Type::Object)
-    {
-        oParent.Delete(osKey);
-        oChild.Deinit();
-    }
-
-    if (!oChild.IsValid())
-    {
-        oChild = CPLJSONObject();
-        oParent.Add(osKey, oChild);
-    }
-    return oChild;
-}
-
 /************************************************************************/
 /*                           BuildLabel()                               */
 /************************************************************************/
@@ -1811,7 +1755,7 @@ void VICARDataset::BuildLabel()
         }
     }
 
-    m_oJSonLabel = oLabel;
+    m_oJSonLabel = std::move(oLabel);
 }
 
 /************************************************************************/
@@ -2339,7 +2283,7 @@ void VICARDataset::ReadProjectionFromMapGroup()
             }
         }
 
-        m_oSRS = oSRS;
+        m_oSRS = std::move(oSRS);
         m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     if (bProjectionSet)
@@ -2526,7 +2470,7 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Does this look like a VICAR dataset?                            */
     /* -------------------------------------------------------------------- */
-    const int nLabelOffset = GetLabelOffset(poOpenInfo);
+    const int nLabelOffset = VICARGetLabelOffset(poOpenInfo);
     if (nLabelOffset < 0)
         return nullptr;
     if (nLabelOffset > 0)
@@ -2538,12 +2482,11 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         return Open(&oOpenInfo);
     }
 
-    VICARDataset *poDS = new VICARDataset();
+    auto poDS = std::make_unique<VICARDataset>();
     poDS->fpImage = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
     if (!poDS->oKeywords.Ingest(poDS->fpImage, poOpenInfo->pabyHeader))
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -2577,7 +2520,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
                  "File %s appears to be a VICAR file, but failed to find some "
                  "required keywords.",
                  poOpenInfo->pszFilename);
-        delete poDS;
         return nullptr;
     }
 
@@ -2587,21 +2529,20 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Could not find known VICAR label entries!\n");
-        delete poDS;
         return nullptr;
     }
     double dfNoData = 0.0;
     if (eDataType == GDT_Byte)
     {
-        dfNoData = NULL1;
+        dfNoData = VICAR_NULL1;
     }
     else if (eDataType == GDT_Int16)
     {
-        dfNoData = NULL2;
+        dfNoData = VICAR_NULL2;
     }
     else if (eDataType == GDT_Float32)
     {
-        dfNoData = NULL3;
+        dfNoData = VICAR_NULL3;
     }
 
     /***** CHECK ENDIANNESS **************/
@@ -2623,7 +2564,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "INTFMT=%s layout not supported.", value);
-            delete poDS;
             return nullptr;
         }
     }
@@ -2646,7 +2586,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "REALFMT=%s layout not supported.", value);
-            delete poDS;
             return nullptr;
         }
     }
@@ -2690,7 +2629,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
                                      (nNBB + nBandOffset * (nBands - 1)))
     {
         CPLDebug("VICAR", "Invalid spacings found");
-        delete poDS;
         return nullptr;
     }
 
@@ -2781,7 +2719,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Update of compressed VICAR file not supported");
-            delete poDS;
             return nullptr;
         }
         poDS->SetMetadataItem("COMPRESS", osCompress, "IMAGE_STRUCTURE");
@@ -2791,14 +2728,12 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Too many records for compressed dataset");
-            delete poDS;
             return nullptr;
         }
         if (!GDALDataTypeIsInteger(eDataType))
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Data type incompatible of compression");
-            delete poDS;
             return nullptr;
         }
         // To avoid potential issues in basic_decode()
@@ -2806,7 +2741,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         if (nDTSize == 0 || poDS->nRasterXSize > INT_MAX / nDTSize)
         {
             CPLError(CE_Failure, CPLE_NotSupported, "Too large scanline");
-            delete poDS;
             return nullptr;
         }
         const int nRecords = poDS->nRasterYSize * nBands;
@@ -2818,7 +2752,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
         catch (const std::exception &e)
         {
             CPLError(CE_Failure, CPLE_OutOfMemory, "%s", e.what());
-            delete poDS;
             return nullptr;
         }
         if (poDS->m_eCompress == COMPRESS_BASIC)
@@ -2836,7 +2769,6 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         CPLError(CE_Failure, CPLE_NotSupported, "COMPRESS=%s not supported",
                  osCompress.c_str());
-        delete poDS;
         return nullptr;
     }
 
@@ -2845,24 +2777,29 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     for (int i = 0; i < nBands; i++)
     {
-        GDALRasterBand *poBand;
+        std::unique_ptr<GDALRasterBand> poBand;
 
         if (poDS->m_eCompress == COMPRESS_BASIC ||
             poDS->m_eCompress == COMPRESS_BASIC2)
         {
-            poBand = new VICARBASICRasterBand(poDS, i + 1, eDataType);
+            poBand = std::make_unique<VICARBASICRasterBand>(poDS.get(), i + 1,
+                                                            eDataType);
         }
         else
         {
-            poBand = new VICARRawRasterBand(
-                poDS, i + 1, poDS->fpImage,
+            auto poRawBand = std::make_unique<VICARRawRasterBand>(
+                poDS.get(), i + 1, poDS->fpImage,
                 static_cast<vsi_l_offset>(nImageOffsetWithoutNBB + nNBB +
                                           nBandOffset * i),
                 static_cast<int>(nPixelOffset), static_cast<int>(nLineOffset),
                 eDataType, eByteOrder);
+            if (!poRawBand->IsValid())
+            {
+                return nullptr;
+            }
+            poBand = std::move(poRawBand);
         }
 
-        poDS->SetBand(i + 1, poBand);
         // only set NoData if instrument is supported
         if (bInstKnown)
             poBand->SetNoDataValue(dfNoData);
@@ -2911,6 +2848,8 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
             pszStdDev != nullptr)
             poBand->SetStatistics(CPLAtofM(pszMin), CPLAtofM(pszMax),
                                   CPLAtofM(pszMean), CPLAtofM(pszStdDev));
+
+        poDS->SetBand(i + 1, std::move(poBand));
     }
 
     /* -------------------------------------------------------------------- */
@@ -3064,9 +3003,9 @@ GDALDataset *VICARDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
@@ -3336,7 +3275,7 @@ VICARDataset *VICARDataset::CreateInternal(const char *pszFilename, int nXSize,
     poDS->m_osTargetName =
         CSLFetchNameValueDef(papszOptions, "TARGET_NAME", "");
     poDS->m_bInitToNodata = true;
-    poDS->m_oSrcJSonLabel = oSrcJSonLabel;
+    poDS->m_oSrcJSonLabel = std::move(oSrcJSonLabel);
     poDS->m_eCompress = eCompress;
     poDS->m_anRecordOffsets = std::move(anRecordOffsets);
     poDS->eAccess = GA_Update;
@@ -3388,8 +3327,8 @@ GDALDataset *VICARDataset::CreateCopy(const char *pszFilename,
     const int nYSize = poSrcDS->GetRasterYSize();
     const int nBands = poSrcDS->GetRasterCount();
     GDALDataType eType = poSrcDS->GetRasterBand(1)->GetRasterDataType();
-    auto poDS = CreateInternal(pszFilename, nXSize, nYSize, nBands, eType,
-                               papszOptions);
+    auto poDS = std::unique_ptr<VICARDataset>(CreateInternal(
+        pszFilename, nXSize, nYSize, nBands, eType, papszOptions));
     if (poDS == nullptr)
         return nullptr;
 
@@ -3418,55 +3357,15 @@ GDALDataset *VICARDataset::CreateCopy(const char *pszFilename,
     }
 
     poDS->m_bInitToNodata = false;
-    CPLErr eErr = GDALDatasetCopyWholeRaster(poSrcDS, poDS, nullptr,
+    CPLErr eErr = GDALDatasetCopyWholeRaster(poSrcDS, poDS.get(), nullptr,
                                              pfnProgress, pProgressData);
     poDS->FlushCache(false);
     if (eErr != CE_None)
     {
-        delete poDS;
         return nullptr;
     }
 
-    return poDS;
-}
-
-/************************************************************************/
-/*                     GetVICARLabelOffsetFromPDS3()                    */
-/************************************************************************/
-
-vsi_l_offset
-VICARDataset::GetVICARLabelOffsetFromPDS3(const char *pszHdr, VSILFILE *fp,
-                                          std::string &osVICARHeader)
-{
-    const char *pszPDSVersionID = strstr(pszHdr, "PDS_VERSION_ID");
-    int nOffset = 0;
-    if (pszPDSVersionID)
-        nOffset = static_cast<int>(pszPDSVersionID - pszHdr);
-
-    NASAKeywordHandler oKeywords;
-    if (oKeywords.Ingest(fp, nOffset))
-    {
-        const int nRecordBytes =
-            atoi(oKeywords.GetKeyword("RECORD_BYTES", "0"));
-        const int nImageHeader =
-            atoi(oKeywords.GetKeyword("^IMAGE_HEADER", "0"));
-        if (nRecordBytes > 0 && nImageHeader > 0)
-        {
-            const auto nImgHeaderOffset =
-                static_cast<vsi_l_offset>(nImageHeader - 1) * nRecordBytes;
-            osVICARHeader.resize(1024);
-            size_t nMemb;
-            if (VSIFSeekL(fp, nImgHeaderOffset, SEEK_SET) == 0 &&
-                (nMemb = VSIFReadL(&osVICARHeader[0], 1, osVICARHeader.size(),
-                                   fp)) != 0 &&
-                osVICARHeader.find("LBLSIZE") != std::string::npos)
-            {
-                osVICARHeader.resize(nMemb);
-                return nImgHeaderOffset;
-            }
-        }
-    }
-    return 0;
+    return poDS.release();
 }
 
 /************************************************************************/
@@ -3476,63 +3375,13 @@ VICARDataset::GetVICARLabelOffsetFromPDS3(const char *pszHdr, VSILFILE *fp,
 void GDALRegister_VICAR()
 
 {
-    if (GDALGetDriverByName("VICAR") != nullptr)
+    if (GDALGetDriverByName(VICAR_DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("VICAR");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_VECTOR, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "MIPL VICAR file");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/vicar.html");
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES,
-                              "Byte Int16 Int32 Float32 Float64 CFloat32");
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONOPTIONLIST,
-        "<CreationOptionList>"
-        "  <Option name='GEOREF_FORMAT' type='string-select' "
-        "description='How to encode georeferencing information' "
-        "default='MIPL'>"
-        "     <Value>MIPL</Value>"
-        "     <Value>GEOTIFF</Value>"
-        "  </Option>"
-        "  <Option name='COORDINATE_SYSTEM_NAME' type='string-select' "
-        "description='Value of MAP.COORDINATE_SYSTEM_NAME' "
-        "default='PLANETOCENTRIC'>"
-        "     <Value>PLANETOCENTRIC</Value>"
-        "     <Value>PLANETOGRAPHIC</Value>"
-        "  </Option>"
-        "  <Option name='POSITIVE_LONGITUDE_DIRECTION' type='string-select' "
-        "description='Value of MAP.POSITIVE_LONGITUDE_DIRECTION' "
-        "default='EAST'>"
-        "     <Value>EAST</Value>"
-        "     <Value>WEST</Value>"
-        "  </Option>"
-        "  <Option name='TARGET_NAME' type='string' description='Value of "
-        "MAP.TARGET_NAME'/>"
-        "  <Option name='USE_SRC_LABEL' type='boolean' "
-        "description='Whether to use source label in VICAR to VICAR "
-        "conversions' "
-        "default='YES'/>"
-        "  <Option name='USE_SRC_MAP' type='boolean' "
-        "description='Whether to use MAP property from source label in "
-        "VICAR to VICAR conversions' "
-        "default='NO'/>"
-        "  <Option name='LABEL' type='string' "
-        "description='Label to use, either as a JSON string or a filename "
-        "containing one'/>"
-        "  <Option name='COMPRESS' type='string-select' "
-        "description='Compression method' default='NONE'>"
-        "     <Value>NONE</Value>"
-        "     <Value>BASIC</Value>"
-        "     <Value>BASIC2</Value>"
-        "  </Option>"
-        "</CreationOptionList>");
+    VICARDriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = VICARDataset::Open;
-    poDriver->pfnIdentify = VICARDataset::Identify;
     poDriver->pfnCreate = VICARDataset::Create;
     poDriver->pfnCreateCopy = VICARDataset::CreateCopy;
 

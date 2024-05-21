@@ -27,9 +27,6 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-# from osgeo import osr
-
-import gdaltest
 import pytest
 
 from osgeo import gdal
@@ -40,22 +37,22 @@ pytestmark = pytest.mark.require_driver("ESRIC")
 # Open the dataset
 
 
-def test_esric_1():
+@pytest.fixture()
+def esric_ds():
 
-    gdaltest.esric_ds = gdal.Open("data/esric/Layers/conf.xml")
-    assert gdaltest.esric_ds is not None, "open failed"
+    ds = gdal.Open("data/esric/Layers/conf.xml")
+    assert ds is not None, "open failed"
+
+    return ds
 
 
 ###############################################################################
 # Check that the configuration was read as expected
 
 
-def test_esric_2():
+def test_esric_2(esric_ds):
 
-    if gdaltest.esric_ds is None:
-        pytest.skip()
-
-    ds = gdaltest.esric_ds
+    ds = esric_ds
     b1 = ds.GetRasterBand(1)
 
     assert (
@@ -79,12 +76,9 @@ def test_esric_2():
 # Check that the read a missing level generates black
 
 
-def test_esric_3():
+def test_esric_3(esric_ds):
 
-    if gdaltest.esric_ds is None:
-        pytest.skip()
-
-    ds = gdaltest.esric_ds
+    ds = esric_ds
     # There are no tiles at this level, driver will return black
     b1 = ds.GetRasterBand(1)
     cs = b1.Checksum()
@@ -95,16 +89,10 @@ def test_esric_3():
 # Check that the read of PNG tiles returns the right checksum
 
 
-def test_esric_4():
+@pytest.mark.require_driver("PNG")
+def test_esric_4(esric_ds):
 
-    if gdaltest.esric_ds is None:
-        pytest.skip()
-
-    # Check that the PNG driver is available
-    if not gdal.GetDriverByName("PNG"):
-        pytest.skip()
-
-    ds = gdaltest.esric_ds
+    ds = esric_ds
 
     # Read from level 1, band 2, where we have data
     # Overviews are counted from zero, in reverse order from levels
@@ -119,6 +107,77 @@ def test_esric_4():
     assert cs == expectedcs, "wrong data checksum"
 
 
-def test_esric_cleanup():
+###############################################################################
+# Open the tpkx dataset
 
-    gdaltest.esric_ds = None
+
+@pytest.fixture
+def tpkx_ds():
+    return gdal.Open("data/esric/Usa.tpkx")
+
+
+###############################################################################
+# Check that the configuration was read as expected
+
+
+def test_tpkx_2(tpkx_ds):
+    ds = tpkx_ds
+    b1 = ds.GetRasterBand(1)
+
+    assert (
+        ds.RasterCount == 4 and ds.RasterXSize == 8192 and ds.RasterYSize == 8192
+    ), "wrong size or band count"
+
+    assert b1.GetOverviewCount() == 5, "Wrong number of overviews"
+
+    wkt = ds.GetProjectionRef()
+    assert 'AUTHORITY["EPSG","3857"]' in wkt, "wrong SRS"
+
+    gt = ds.GetGeoTransform()
+    assert gt[0] == pytest.approx(-20037508, abs=1), "wrong geolocation"
+    assert gt[1] == pytest.approx(20037508 / 4096, abs=1), "wrong geolocation"
+    assert gt[2] == 0 and gt[4] == 0, "wrong geolocation"
+    assert gt[3] == pytest.approx(20037508, abs=1), "wrong geolocation"
+    assert gt[5] == pytest.approx(-20037508 / 4096, abs=1), "wrong geolocation"
+
+
+###############################################################################
+# Check that the raster returns right checksums
+
+
+def test_tpkx_3(tpkx_ds):
+    ds = tpkx_ds
+    # There are no tiles at this level, driver will return black
+    b1 = ds.GetRasterBand(1)
+    b2 = ds.GetRasterBand(2)
+    b3 = ds.GetRasterBand(3)
+    b4 = ds.GetRasterBand(4)
+    cs1 = b1.Checksum()
+    cs2 = b2.Checksum()
+    cs3 = b3.Checksum()
+    cs4 = b4.Checksum()
+    assert cs1 == 61275, "wrong checksum at band 1"
+    assert cs2 == 57672, "wrong checksum at band 2"
+    assert cs3 == 61542, "wrong checksum at band 3"
+    assert cs4 == 19476, "wrong checksum at band 4"
+
+
+###############################################################################
+# Check that the read of PNG tiles returns the right checksum
+
+
+@pytest.mark.require_driver("PNG")
+def test_tpkx_4(tpkx_ds):
+    ds = tpkx_ds
+
+    # Read from level 1, band 2, where we have data
+    # Overviews are counted from zero, in reverse order from levels
+
+    l1b2 = ds.GetRasterBand(2).GetOverview(1)
+    assert l1b2.XSize == 2048 and l1b2.YSize == 2048
+
+    # There are four PNG tiles at this level, one is grayscale
+
+    cs = l1b2.Checksum()
+    expectedcs = 53503
+    assert cs == expectedcs, "wrong data checksum"

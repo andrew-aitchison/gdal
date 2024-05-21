@@ -45,51 +45,42 @@ from osgeo import gdal
 def test_vrtwarp_1():
 
     tst = gdaltest.GDALTest("VRT", "vrt/rgb_warp.vrt", 2, 21504)
-    return tst.testOpen(check_filelist=False)
+    tst.testOpen(check_filelist=False)
 
 
 ###############################################################################
 # Create a new VRT warp in the temp directory.
 
 
-def test_vrtwarp_2():
+def test_vrtwarp_2(tmp_path):
 
-    try:
-        os.remove("tmp/warp.vrt")
-    except OSError:
-        pass
+    warp_vrt = str(tmp_path / "warp.vrt")
 
     gcp_ds = gdal.OpenShared("data/rgb_gcp.vrt", gdal.GA_ReadOnly)
 
-    gdaltest.vrtwarp_ds = gdal.AutoCreateWarpedVRT(gcp_ds)
+    vrtwarp_ds = gdal.AutoCreateWarpedVRT(gcp_ds)
 
     gcp_ds = None
 
-    checksum = gdaltest.vrtwarp_ds.GetRasterBand(2).Checksum()
+    checksum = vrtwarp_ds.GetRasterBand(2).Checksum()
     expected = 21504
     assert checksum == expected, "Got checksum of %d instead of expected %d." % (
         checksum,
         expected,
     )
 
+    # Force the VRT warp file to be written to disk and close it.  Reopen, and
+    # verify checksum.
 
-###############################################################################
-# Force the VRT warp file to be written to disk and close it.  Reopen, and
-# verify checksum.
+    vrtwarp_ds.SetDescription(warp_vrt)
+    vrtwarp_ds = None
 
+    vrtwarp_ds = gdal.Open(warp_vrt, gdal.GA_ReadOnly)
 
-def test_vrtwarp_3():
-
-    gdaltest.vrtwarp_ds.SetDescription("tmp/warp.vrt")
-    gdaltest.vrtwarp_ds = None
-
-    gdaltest.vrtwarp_ds = gdal.Open("tmp/warp.vrt", gdal.GA_ReadOnly)
-
-    checksum = gdaltest.vrtwarp_ds.GetRasterBand(2).Checksum()
+    checksum = vrtwarp_ds.GetRasterBand(2).Checksum()
     expected = 21504
 
     gdaltest.vrtwarp_ds = None
-    gdal.GetDriverByName("VRT").Delete("tmp/warp.vrt")
 
     assert checksum == expected, "Got checksum of %d instead of expected %d." % (
         checksum,
@@ -235,6 +226,7 @@ def test_vrtwarp_6():
     assert vrtwarp_ds.GetRasterBand(1).Checksum() == cs_main
     assert vrtwarp_ds.GetRasterBand(1).GetOverview(0).Checksum() == cs_ov0
     assert vrtwarp_ds.GetRasterBand(1).GetOverview(1).Checksum() == cs_ov1
+    vrtwarp_ds = None
 
     gdal.Unlink("tmp/vrtwarp_6.vrt")
     gdal.Unlink("tmp/vrtwarp_6.tif")
@@ -446,10 +438,9 @@ def test_vrtwarp_read_vrt_of_warped_vrt():
 # Test reading a warped VRT with blocks > 2 gigapixels
 
 
+@pytest.mark.slow()
 def test_vrtwarp_read_blocks_larger_than_2_gigapixels():
 
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
     if sys.maxsize < 2**32:
         pytest.skip("Test not available on 32 bit")
 
@@ -494,14 +485,11 @@ def test_vrtwarp_read_blocks_in_space():
 )
 def test_vrtwarp_read_inconsistent_blocksize(filename):
 
-    gdal.ErrorReset()
-    with gdaltest.error_handler():
-        ds = gdal.Open(filename)
-    assert ds is None
-    assert (
-        gdal.GetLastErrorMsg()
-        == "Block size specified on band 1 not consistent with dataset block size"
-    )
+    with pytest.raises(
+        Exception,
+        match=r".*Block size specified on band 1 not consistent with dataset block size.*",
+    ):
+        gdal.Open(filename)
 
 
 ###############################################################################
@@ -549,6 +537,7 @@ def test_vrtwarp_sourcedataset_all_relatives():
         src_ds = gdal.Open(os.path.join("tmp", "byte.tif"))
         ds = gdal.AutoCreateWarpedVRT(src_ds)
         ds.SetDescription(os.path.join("tmp", "byte.vrt"))
+        src_ds = None
         ds = None
         assert (
             '<SourceDataset relativeToVRT="1">byte.tif<'
@@ -574,6 +563,7 @@ def test_vrtwarp_sourcedataset_source_relative_dest_absolute():
         if sys.platform == "win32":
             path = path.replace("/", "\\")
         ds.SetDescription(path)
+        src_ds = None
         ds = None
         assert (
             '<SourceDataset relativeToVRT="1">byte.tif<'
@@ -596,6 +586,7 @@ def test_vrtwarp_sourcedataset_source_absolute_dest_absolute():
         src_ds = gdal.Open(os.path.join(os.getcwd(), "tmp", "byte.tif"))
         ds = gdal.AutoCreateWarpedVRT(src_ds)
         ds.SetDescription(os.path.join(os.getcwd(), "tmp", "byte.vrt"))
+        src_ds = None
         ds = None
         assert (
             '<SourceDataset relativeToVRT="1">byte.tif<'
@@ -621,6 +612,7 @@ def test_vrtwarp_sourcedataset_source_absolute_dest_relative():
         src_ds = gdal.Open(path)
         ds = gdal.AutoCreateWarpedVRT(src_ds)
         ds.SetDescription(os.path.join("tmp", "byte.vrt"))
+        src_ds = None
         ds = None
         assert (
             '<SourceDataset relativeToVRT="1">byte.tif<'
@@ -678,3 +670,65 @@ def test_vrtwarp_float32_max_nodata(nodata):
     finally:
         gdal.Unlink(in_filename)
         gdal.Unlink(out_filename)
+
+
+###############################################################################
+# Test VRTWarpedDataset::IRasterIO() code path
+
+
+def test_vrtwarp_irasterio_optim_single_band():
+
+    src_ds = gdal.Translate("", "data/byte.tif", format="MEM", width=1000)
+    warped_vrt_ds = gdal.Warp("", src_ds, format="VRT")
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster()
+
+    assert warped_vrt_ds.ReadRaster() == expected_data
+    assert warped_vrt_ds.GetRasterBand(1).ReadRaster() == expected_data
+
+
+###############################################################################
+# Test VRTWarpedDataset::IRasterIO() code path
+
+
+def test_vrtwarp_irasterio_optim_three_band():
+
+    src_ds = gdal.Translate("", "data/rgbsmall.tif", format="MEM", width=1000)
+    warped_vrt_ds = gdal.Warp("", src_ds, format="VRT")
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster()
+    assert warped_vrt_ds.ReadRaster() == expected_data
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster(band_list=[3, 2, 1])
+    assert warped_vrt_ds.ReadRaster(band_list=[3, 2, 1]) == expected_data
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster(band_list=[1, 2, 1])
+    assert warped_vrt_ds.ReadRaster(band_list=[1, 2, 1]) == expected_data
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster(buf_type=gdal.GDT_UInt16)
+    assert warped_vrt_ds.ReadRaster(buf_type=gdal.GDT_UInt16) == expected_data
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster(buf_xsize=20, buf_ysize=20)
+    assert warped_vrt_ds.ReadRaster(buf_xsize=20, buf_ysize=20) == expected_data
+
+
+###############################################################################
+# Test VRTWarpedDataset::IRasterIO() code path
+
+
+def test_vrtwarp_irasterio_optim_window_splitting():
+
+    src_ds = gdal.Translate(
+        "", "data/rgbsmall.tif", format="MEM", width=1000, height=2000
+    )
+    warped_vrt_ds = gdal.Warp("", src_ds, format="VRT", warpMemoryLimit=1)  # 1 MB
+
+    with gdaltest.config_option("GDAL_VRT_WARP_USE_DATASET_RASTERIO", "NO"):
+        expected_data = warped_vrt_ds.ReadRaster()
+    assert warped_vrt_ds.ReadRaster() == expected_data

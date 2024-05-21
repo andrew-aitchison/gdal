@@ -42,6 +42,8 @@
 #include "cpl_multiproc.h"
 #include "gdal_csv.h"
 
+#include <algorithm>
+
 /* ==================================================================== */
 /*      The CSVTable is a persistent set of info about an open CSV      */
 /*      table.  While it doesn't currently maintain a record index,     */
@@ -312,7 +314,13 @@ static char **CSVSplitLine(const char *pszString, const char *pszDelimiter,
 
             if (*pszIter == '"')
             {
-                if (!bInString || pszIter[1] != '"')
+                if (!bInString && nTokenLen > 0)
+                {
+                    // do not treat in a special way double quotes that appear
+                    // in the middle of a field (similarly to OpenOffice)
+                    // Like in records: 1,50°46'06.6"N 116°42'04.4,foo
+                }
+                else if (!bInString || pszIter[1] != '"')
                 {
                     bInString = !bInString;
                     if (!bKeepLeadingAndClosingQuotes)
@@ -523,36 +531,38 @@ static void CSVIngest(const char *pszFilename)
 /** Detect which field separator is used.
  *
  * Currently, it can detect comma, semicolon, space, tabulation or pipe.
- * In case of ambiguity or no separator found, comma will be considered as the
- * separator.
+ * In case of ambiguity, starting with GDAL 3.7.1, the separator with the
+ * most occurrences will be selected (and a warning emitted).
+ * If no separator found, comma will be considered as the separator.
  *
  * @return ',', ';', ' ', tabulation character or '|'.
  */
 char CSVDetectSeperator(const char *pszLine)
 {
     bool bInString = false;
-    char chDelimiter = '\0';
+    int nCountComma = 0;
+    int nCountSemicolon = 0;
+    int nCountTab = 0;
+    int nCountPipe = 0;
     int nCountSpace = 0;
 
     for (; *pszLine != '\0'; pszLine++)
     {
-        if (!bInString && (*pszLine == ',' || *pszLine == ';' ||
-                           *pszLine == '\t' || *pszLine == '|'))
+        if (!bInString && *pszLine == ',')
         {
-            if (chDelimiter == '\0')
-            {
-                chDelimiter = *pszLine;
-            }
-            else if (chDelimiter != *pszLine)
-            {
-                // The separator is not consistent on the line.
-                CPLDebug("CSV",
-                         "Inconsistent separator. '%c' and '%c' found. "
-                         "Using ',' as default",
-                         chDelimiter, *pszLine);
-                chDelimiter = ',';
-                break;
-            }
+            nCountComma++;
+        }
+        else if (!bInString && *pszLine == ';')
+        {
+            nCountSemicolon++;
+        }
+        else if (!bInString && *pszLine == '\t')
+        {
+            nCountTab++;
+        }
+        else if (!bInString && *pszLine == '|')
+        {
+            nCountPipe++;
         }
         else if (!bInString && *pszLine == ' ')
         {
@@ -572,12 +582,45 @@ char CSVDetectSeperator(const char *pszLine)
         }
     }
 
-    if (chDelimiter == '\0')
+    const int nMaxCountExceptSpace =
+        std::max(std::max(nCountComma, nCountSemicolon),
+                 std::max(nCountTab, nCountPipe));
+    char chDelimiter = ',';
+    if (nMaxCountExceptSpace == 0)
     {
         if (nCountSpace > 0)
             chDelimiter = ' ';
-        else
+    }
+    else
+    {
+        bool bWarn = false;
+        if (nCountComma == nMaxCountExceptSpace)
+        {
             chDelimiter = ',';
+            bWarn = (nCountSemicolon > 0 || nCountTab > 0 || nCountPipe > 0);
+        }
+        else if (nCountSemicolon == nMaxCountExceptSpace)
+        {
+            chDelimiter = ';';
+            bWarn = (nCountComma > 0 || nCountTab > 0 || nCountPipe > 0);
+        }
+        else if (nCountTab == nMaxCountExceptSpace)
+        {
+            chDelimiter = '\t';
+            bWarn = (nCountComma > 0 || nCountSemicolon > 0 || nCountPipe > 0);
+        }
+        else /* if( nCountPipe == nMaxCountExceptSpace ) */
+        {
+            chDelimiter = '|';
+            bWarn = (nCountComma > 0 || nCountSemicolon > 0 || nCountTab > 0);
+        }
+        if (bWarn)
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "Selecting '%c' as CSV field separator, but "
+                     "other candidate separator(s) have been found.",
+                     chDelimiter);
+        }
     }
 
     return chDelimiter;
@@ -1480,4 +1523,5 @@ void SetCSVFilenameHook(const char *(*pfnNewHook)(const char *))
 {
     pfnCSVFilenameHook = pfnNewHook;
 }
+
 CPL_C_END

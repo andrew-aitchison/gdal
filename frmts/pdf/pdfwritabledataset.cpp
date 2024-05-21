@@ -98,18 +98,22 @@ GDALDataset *PDFWritableVectorDataset::Create(const char *pszName, int nXSize,
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *PDFWritableVectorDataset::ICreateLayer(const char *pszLayerName,
-                                                 OGRSpatialReference *poSRS,
-                                                 OGRwkbGeometryType eType,
-                                                 char **)
+OGRLayer *
+PDFWritableVectorDataset::ICreateLayer(const char *pszLayerName,
+                                       const OGRGeomFieldDefn *poGeomFieldDefn,
+                                       CSLConstList /*papszOptions*/)
 {
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+
     /* -------------------------------------------------------------------- */
     /*      Create the layer object.                                        */
     /* -------------------------------------------------------------------- */
-    auto poSRSClone = poSRS;
-    if (poSRSClone)
+    OGRSpatialReference *poSRSClone = nullptr;
+    if (poSRS)
     {
-        poSRSClone = poSRSClone->Clone();
+        poSRSClone = poSRS->Clone();
         poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     OGRLayer *poLayer =

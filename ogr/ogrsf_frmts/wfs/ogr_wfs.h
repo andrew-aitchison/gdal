@@ -99,6 +99,8 @@ class OGRWFSLayer final : public OGRLayer
     CPLString osGeometryColumnName;
     OGRwkbGeometryType eGeomType;
     GIntBig nFeatures;
+    GIntBig m_nNumberMatched = -1;
+    bool m_bHasReadAtLeastOneFeatureInThisPage = false;
     bool bCountFeaturesInGetNextFeature;
 
     int CanRunGetFeatureCountAndGetExtentTogether();
@@ -133,7 +135,6 @@ class OGRWFSLayer final : public OGRLayer
     bool bPagingActive;
     int nPagingStartIndex;
     int nFeatureRead;
-    int nFeatureCountRequested;
 
     OGRFeatureDefn *BuildLayerDefnFromFeatureClass(GMLFeatureClass *poClass);
 
@@ -167,6 +168,7 @@ class OGRWFSLayer final : public OGRLayer
     virtual int TestCapability(const char *) override;
 
     virtual void SetSpatialFilter(OGRGeometry *) override;
+
     virtual void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override
     {
         OGRLayer::SetSpatialFilter(iGeomField, poGeom);
@@ -180,6 +182,7 @@ class OGRWFSLayer final : public OGRLayer
     void SetWGS84Extents(double dfMinX, double dfMinY, double dfMaxX,
                          double dfMaxY);
     virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
+
     virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
                              int bForce) override
     {
@@ -194,7 +197,7 @@ class OGRWFSLayer final : public OGRLayer
     virtual OGRErr CommitTransaction() override;
     virtual OGRErr RollbackTransaction() override;
 
-    virtual OGRErr SetIgnoredFields(const char **papszFields) override;
+    virtual OGRErr SetIgnoredFields(CSLConstList papszFields) override;
 
     int HasLayerDefn()
     {
@@ -204,7 +207,7 @@ class OGRWFSLayer final : public OGRLayer
     OGRFeatureDefn *ParseSchema(const CPLXMLNode *psSchema);
     OGRFeatureDefn *BuildLayerDefn(OGRFeatureDefn *poSrcFDefn = nullptr);
 
-    OGRErr DeleteFromFilter(CPLString osOGCFilter);
+    OGRErr DeleteFromFilter(const std::string &osOGCFilter);
 
     const std::vector<CPLString> &GetLastInsertedFIDList()
     {
@@ -221,6 +224,7 @@ class OGRWFSLayer final : public OGRLayer
     }
 
     void SetOrderBy(const std::vector<OGRWFSSortDesc> &aoSortColumnsIn);
+
     bool HasGotApproximateLayerDefn()
     {
         GetLayerDefn();
@@ -231,6 +235,7 @@ class OGRWFSLayer final : public OGRLayer
     {
         return pszNS;
     }
+
     const char *GetNamespaceName()
     {
         return pszNSVal;
@@ -243,11 +248,13 @@ class OGRWFSLayer final : public OGRLayer
         m_aosSupportedCRSList = std::move(aosSupportedCRSList);
         m_apoSupportedCRSList = std::move(apoSupportedCRSList);
     }
+
     const OGRLayer::GetSupportedSRSListRetType &
     GetSupportedSRSList(int /*iGeomField*/) override
     {
         return m_apoSupportedCRSList;
     }
+
     OGRErr SetActiveSRS(int iGeomField,
                         const OGRSpatialReference *poSRS) override;
 };
@@ -304,6 +311,7 @@ class OGRWFSJoinLayer final : public OGRLayer
     virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
 
     virtual void SetSpatialFilter(OGRGeometry *) override;
+
     virtual void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override
     {
         OGRLayer::SetSpatialFilter(iGeomField, poGeom);
@@ -402,6 +410,7 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return nLayers;
     }
+
     virtual OGRLayer *GetLayer(int) override;
     virtual OGRLayer *GetLayerByName(const char *pszLayerName) override;
 
@@ -416,48 +425,59 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bUpdate;
     }
+
     bool SupportTransactions() const
     {
         return bTransactionSupport;
     }
+
     void DisableSupportHits()
     {
         bGetFeatureSupportHits = false;
     }
+
     bool GetFeatureSupportHits() const
     {
         return bGetFeatureSupportHits;
     }
+
     const char *GetVersion()
     {
         return osVersion.c_str();
     }
 
     bool IsOldDeegree(const char *pszErrorString);
+
     bool GetNeedNAMESPACE() const
     {
         return bNeedNAMESPACE;
     }
+
     bool HasMinOperators() const
     {
         return bHasMinOperators;
     }
+
     bool HasNullCheck() const
     {
         return bHasNullCheck;
     }
+
     bool UseFeatureId() const
     {
         return bUseFeatureId;
     }
+
     bool RequiresEnvelopeSpatialFilter() const
     {
         return bRequiresEnvelopeSpatialFilter;
     }
+
     void SetGmlObjectIdNeedsGMLPrefix()
     {
         bGmlObjectIdNeedsGMLPrefix = true;
     }
+
     int DoesGmlObjectIdNeedGMLPrefix() const
     {
         return bGmlObjectIdNeedsGMLPrefix;
@@ -467,6 +487,7 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         bPropertyIsNotEqualToSupported = false;
     }
+
     bool PropertyIsNotEqualToSupported() const
     {
         return bPropertyIsNotEqualToSupported;
@@ -482,10 +503,12 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bPagingAllowed;
     }
+
     int GetPageSize() const
     {
         return nPageSize;
     }
+
     int GetBaseStartIndex() const
     {
         return nBaseStartIndex;
@@ -498,6 +521,7 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bKeepLayerNamePrefix;
     }
+
     const CPLString &GetBaseURL()
     {
         return osBaseURL;
@@ -507,10 +531,12 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bEmptyAsNull;
     }
+
     bool InvertAxisOrderIfLatLong() const
     {
         return bInvertAxisOrderIfLatLong;
     }
+
     const CPLString &GetConsiderEPSGAsURN() const
     {
         return osConsiderEPSGAsURN;

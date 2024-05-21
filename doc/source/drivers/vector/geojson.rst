@@ -82,8 +82,8 @@ If a top-level member of GeoJSON data is of any other type than
 *FeatureCollection*, the driver will produce a layer with only one
 feature. Otherwise, a layer will consists of a set of features.
 
-If the NATIVE_DATA open option is set to YES, members at the level of
-the FeatureCollection will be stored as a serialized JSon object in the
+If the :oo:`NATIVE_DATA` open option is set to YES, members at the level of
+the FeatureCollection will be stored as a serialized JSON object in the
 NATIVE_DATA item of the NATIVE_DATA metadata domain of the layer object
 (and "application/vnd.geo+json" in the NATIVE_MEDIA_TYPE of the
 NATIVE_DATA metadata domain).
@@ -111,20 +111,20 @@ Schema detection will recognized fields of type String, Integer, Real,
 StringList, IntegerList and RealList, Integer(Boolean), Date, Time and DateTime.
 
 It is possible to tell the driver to not to process attributes by
-setting configuration option :decl_configoption:`ATTRIBUTES_SKIP` =YES.
+setting configuration option :config:`ATTRIBUTES_SKIP=YES`.
 Default behavior is to preserve all attributes (as an union, see
 previous paragraph), what is equal to setting
-:decl_configoption:`ATTRIBUTES_SKIP` =NO.
+:config:`ATTRIBUTES_SKIP=NO`.
 
-If the NATIVE_DATA open option is set to YES, the Feature JSon object
-will be stored as a serialized JSon object in the NativeData property of
+If the :oo:`NATIVE_DATA` open option is set to YES, the Feature JSON object
+will be stored as a serialized JSON object in the NativeData property of
 the OGRFeature object (and "application/vnd.geo+json" in the
 NativeMediaType property). On write, if a OGRFeature to be written has
 its NativeMediaType property set to "application/vnd.geo+json" and its
-NativeData property set to a string that is a serialized JSon object,
+NativeData property set to a string that is a serialized JSON object,
 then extra members of this object (i.e. not the "property" dictionary,
 nor the first 3 dimensions of geometry coordinates) will be used to
-enhance the created JSon object from the OGRFeature. See :ref:`rfc-60`
+enhance the created JSON object from the OGRFeature. See :ref:`rfc-60`
 for more details.
 
 Geometry
@@ -141,51 +141,101 @@ However, sometimes there is a need to generate a homogeneous layer from
 a set of heterogeneous features. For this purpose, it is possible to
 tell the driver to wrap all geometries with OGRGeometryCollection type
 as a common denominator. This behavior may be controlled by setting
-the :decl_configoption:`GEOMETRY_AS_COLLECTION` configuration option to YES
-(default is NO).
+the :config:`GEOMETRY_AS_COLLECTION` configuration option to YES.
 
 Configuration options
 ---------------------
 
-The following :ref:`configuration options <configoptions>` are
-available:
+|about-config-options|
+The following configuration options are available:
 
--  :decl_configoption:`GEOMETRY_AS_COLLECTION`: used to control translation of
-   geometries: YES: wrap geometries with OGRGeometryCollection type
--  :decl_configoption:`ATTRIBUTES_SKIP` - controls translation of attributes:
-   YES - skip all attributes
--  :decl_configoption:`OGR_GEOJSON_MAX_OBJ_SIZE` (GDAL >= 3.0.2): size in
-   MBytes of the maximum accepted single feature, default value is 200MB.
-   Or 0 to allow for a unlimited size (GDAL >= 3.5.2).
+-  .. config:: GEOMETRY_AS_COLLECTION
+      :choices: YES, NO
+      :default: NO
+
+      used to control translation of
+      geometries: YES: wrap geometries with OGRGeometryCollection type
+
+-  .. config:: ATTRIBUTES_SKIP
+      :choices: YES, NO
+
+      Controls translation of attributes. If ``YES``, skip all attributes.
+
+-  .. config:: OGR_GEOJSON_ARRAY_AS_STRING
+
+      Equivalent of :oo:`ARRAY_AS_STRING` open option.
+
+-  .. config:: OGR_GEOJSON_DATE_AS_STRING
+
+      Equivalent of :oo:`DATE_AS_STRING` open option.
+
+-  .. config:: OGR_GEOJSON_MAX_OBJ_SIZE
+      :choices: <MBytes>
+      :default: 200
+      :since: 3.0.2
+
+      size in MBytes of the maximum accepted single feature,
+      or 0 to allow for a unlimited size (GDAL >= 3.5.2).
 
 Open options
 ------------
 
--  **FLATTEN_NESTED_ATTRIBUTES** = YES/NO: Whether to recursively
-   explore nested objects and produce flatten OGR attributes. Defaults
-   to NO.
--  **NESTED_ATTRIBUTE_SEPARATOR** = character: Separator between
-   components of nested attributes. Defaults to '_'
--  **FEATURE_SERVER_PAGING** = YES/NO: Whether to automatically scroll
-   through results with a ArcGIS Feature Service endpoint.
--  **NATIVE_DATA** = YES/NO: (GDAL >= 2.1) Whether to store the native
-   JSon representation at FeatureCollection and Feature level. Defaults
-   to NO. This option can be used to improve round-tripping from GeoJSON
-   to GeoJSON by preserving some extra JSon objects that would otherwise
-   be ignored by the OGR abstraction. Note that ogr2ogr by default
-   enable this option, unless you specify its -noNativeData switch.
--  **ARRAY_AS_STRING** = YES/NO: (GDAL >= 2.1) Whether to expose JSon
-   arrays of strings, integers or reals as a OGR String. Default is NO.
-   Can also be set with the :decl_configoption:`OGR_GEOJSON_ARRAY_AS_STRING`
-   configuration option.
--  **DATE_AS_STRING** = YES/NO: (GDAL >= 3.0.3) Whether to expose
-   date/time/date-time content using dedicated OGR date/time/date-time types
-   or as a OGR String. Default is NO (that is date/time/date-time are
-   detected as such).
-   Can also be set with the :decl_configoption:`OGR_GEOJSON_DATE_AS_STRING`
-   configuration option.
+|about-open-options|
+This driver supports the following open options:
 
-To explain FLATTEN_NESTED_ATTRIBUTES, consider the following GeoJSON
+-  .. oo:: FLATTEN_NESTED_ATTRIBUTES
+      :choices: YES, NO
+      :default: NO
+
+      Whether to recursively
+      explore nested objects and produce flatten OGR attributes.
+
+-  .. oo:: NESTED_ATTRIBUTE_SEPARATOR
+      :choices: <character>
+      :default: _
+
+      Separator between components of nested attributes.
+
+-  .. oo:: FEATURE_SERVER_PAGING
+      :choices: YES, NO
+
+      Whether to automatically scroll
+      through results with a ArcGIS Feature Service endpoint.
+
+-  .. oo:: NATIVE_DATA
+      :choices: YES, NO
+      :default: NO
+      :since: 2.1
+
+      Whether to store the native
+      JSON representation at FeatureCollection and Feature level.
+      This option can be used to improve round-tripping from GeoJSON
+      to GeoJSON by preserving some extra JSON objects that would otherwise
+      be ignored by the OGR abstraction. Note that ogr2ogr by default
+      enable this option, unless you specify its -noNativeData switch.
+
+-  .. oo:: ARRAY_AS_STRING
+      :choices: YES, NO
+      :since: 2.1
+
+      Whether to expose JSON
+      arrays of strings, integers or reals as a OGR String. Default is NO.
+      Can also be set with the :config:`OGR_GEOJSON_ARRAY_AS_STRING`
+      configuration option.
+
+-  .. oo:: DATE_AS_STRING
+      :choices: YES, NO
+      :default: NO
+      :since: 3.0.3
+
+      Whether to expose
+      date/time/date-time content using dedicated OGR date/time/date-time types
+      or as a OGR String. Default is NO (that is date/time/date-time are
+      detected as such).
+      Can also be set with the :config:`OGR_GEOJSON_DATE_AS_STRING`
+      configuration option.
+
+To explain :oo:`FLATTEN_NESTED_ATTRIBUTES`, consider the following GeoJSON
 fragment:
 
 ::
@@ -224,45 +274,138 @@ fragment:
 Layer creation options
 ----------------------
 
--  **WRITE_BBOX** = YES/NO: Set to YES to write a bbox
-   property with the bounding box of the geometries at the feature and
-   feature collection level. Defaults to NO.
--  **COORDINATE_PRECISION** = int_number: Maximum number
-   of figures after decimal separator to write in coordinates. Default
-   to 15 for GeoJSON 2008, and 7 for RFC 7946. "Smart" truncation will
-   occur to remove trailing zeros.
--  **SIGNIFICANT_FIGURES** = int_number: (OGR >= 2.1) Maximum number of
-   significant figures when writing floating-point numbers. Default to
-   17. If explicitly specified, and COORDINATE_PRECISION is not, this
-   will also apply to coordinates.
--  **NATIVE_DATA**\ =string. (OGR >= 2.1) Serialized JSon object that
-   contains extra properties to store at FeatureCollection level.
--  **NATIVE_MEDIA_TYPE**\ =string. (OGR >= 2.1) Format of NATIVE_DATA.
-   Must be "application/vnd.geo+json", otherwise NATIVE_DATA will be
-   ignored.
--  **RFC7946**\ =YES/NO. (OGR >= 2.2) Whether to use `RFC
-   7946 <https://tools.ietf.org/html/rfc7946>`__ standard. Otherwise
-   `GeoJSON 2008 <http://geojson.org/geojson-spec.html>`__ initial
-   version will be used. Default is NO (thus GeoJSON 2008)
--  **WRAPDATELINE** \=YES/NO (OGR >= 3.5.2) Whether to apply heuristics
-   to split geometries that cross dateline. Only used when coordinate
-   transformation occurs or when RFC7946=YES. Default is YES (and also the
-   behavior for OGR < 3.5.2).
--  **WRITE_NAME**\ =YES/NO. (OGR >= 2.2) Whether to write a "name"
-   property at feature collection level with layer name. Defaults to
-   YES.
--  **DESCRIPTION**\ =string. (OGR >= 2.2) (Long) description to write in
-   a "description" property at feature collection level. On reading,
-   this will be reported in the DESCRIPTION metadata item of the layer.
--  **ID_FIELD**\ =string. (OGR >= 2.3) Name of the source field that
-   must be written as the 'id' member of Feature objects.
--  **ID_TYPE**\ =AUTO/String/Integer. (OGR >= 2.3) Type of the 'id'
-   member of Feature objects.
--  **ID_GENERATE**\ =YES/NO. (OGR >= 3.1) Auto-generate feature ids
--  **WRITE_NON_FINITE_VALUES**\ =YES/NO. (OGR >= 2.4) Whether to write
-   NaN / Infinity values. Such values are not allowed in strict JSon
-   mode, but some JSon parsers (libjson-c >= 0.12 for exampl) can
-   understand them as they are allowed by ECMAScript. Defaults to NO
+|about-layer-creation-options|
+This driver supports the following layer creation options:
+
+-  .. lco:: WRITE_BBOX
+      :choices: YES, NO
+      :default: NO
+
+      Set to YES to write a bbox
+      property with the bounding box of the geometries at the feature and
+      feature collection level.
+
+-  .. lco:: COORDINATE_PRECISION
+      :choices: <integer>
+
+      Maximum number
+      of figures after decimal separator to write in coordinates. Default
+      to 15 for GeoJSON 2008, and 7 for RFC 7946. "Smart" truncation will
+      occur to remove trailing zeros.
+
+-  .. lco:: SIGNIFICANT_FIGURES
+      :choices: <integer>
+      :default: 17
+      :since: 2.1
+
+      Maximum number of
+      significant figures when writing floating-point numbers.
+      If explicitly specified, and :lco:`COORDINATE_PRECISION` is not, this
+      will also apply to coordinates.
+
+-  .. lco:: NATIVE_DATA
+      :since: 2.1
+
+      Serialized JSON object that
+      contains extra properties to store at FeatureCollection level.
+
+-  .. lco:: NATIVE_MEDIA_TYPE
+      :since: 2.1
+
+      Format of :lco:`NATIVE_DATA`.
+      Must be "application/vnd.geo+json", otherwise :lco:`NATIVE_DATA` will be
+      ignored.
+
+-  .. lco:: RFC7946
+      :choices: YES, NO
+      :default: NO
+      :since: 2.2
+
+      Whether to use `RFC
+      7946 <https://tools.ietf.org/html/rfc7946>`__ standard. Otherwise
+      `GeoJSON 2008 <http://geojson.org/geojson-spec.html>`__ initial
+      version will be used. Default is NO (thus GeoJSON 2008)
+
+-  .. lco:: WRAPDATELINE
+      :choices: YES, NO
+      :default: YES
+      :since: 3.5.2
+
+      Whether to apply heuristics
+      to split geometries that cross dateline. Only used when coordinate
+      transformation occurs or when :lco:`RFC7946=YES`. Default is YES (and also the
+      behavior for OGR < 3.5.2).
+
+-  .. lco:: WRITE_NAME
+      :choices: YES, NO
+      :default: YES
+      :since: 2.2
+
+      Whether to write a "name"
+      property at feature collection level with layer name.
+
+-  .. lco:: DESCRIPTION
+      :since: 2.2
+
+      (Long) description to write in
+      a "description" property at feature collection level. On reading,
+      this will be reported in the DESCRIPTION metadata item of the layer.
+
+-  .. lco:: ID_FIELD
+      :since: 2.3
+
+      Name of the source field that
+      must be written as the 'id' member of Feature objects.
+
+-  .. lco:: ID_TYPE
+      :choices: AUTO, String, Integer
+      :since: 2.3
+
+      Type of the 'id' member of Feature objects.
+
+-  .. lco:: ID_GENERATE
+      :choices: YES, NO
+      :since: 3.1
+
+      Auto-generate feature ids
+
+-  .. lco:: WRITE_NON_FINITE_VALUES
+      :choices: YES, NO
+      :default: NO
+      :since: 2.4
+
+      Whether to write
+      NaN / Infinity values. Such values are not allowed in strict JSON
+      mode, but some JSON parsers (libjson-c >= 0.12 for example) can
+      understand them as they are allowed by ECMAScript.
+
+-  .. lco:: AUTODETECT_JSON_STRINGS
+      :choices: YES, NO
+      :default: YES
+      :since: 3.8
+
+      Whether to try to interpret string fields as JSON arrays or objects
+      if they start and end with brackets and braces, even if they do
+      not have their subtype set to JSON.
+
+-  .. lco:: FOREIGN_MEMBERS_FEATURE
+      :since: 3.9
+
+      JSON serialized object whose content must be merged into each Feature
+      object. The string should start with { and end with }. Those characters
+      will be striped off in the output stream. It is the responsibility of the
+      user to ensure that the added foreign members are different from the other
+      members of the Feature, such as "type", "id", "properties", "geometry".
+
+-  .. lco:: FOREIGN_MEMBERS_COLLECTION
+      :since: 3.9
+
+      JSON serialized object whose content must be merged into the FeatureCollection
+      object. The string should start with { and end with }. Those characters
+      will be striped off in the output stream. It is the responsibility of the
+      user to ensure that the added foreign members are different from the other
+      members of the FeatureCollection, such as "type", "name", "crs", "features".
+
 
 VSI Virtual File System API support
 -----------------------------------
@@ -274,12 +417,12 @@ domains.
 
 Writing to /dev/stdout or /vsistdout/ is also supported.
 
-Round-tripping of extra JSon members
+Round-tripping of extra JSON members
 ------------------------------------
 
 See :ref:`rfc-60` for more details.
 
-Starting with GDAL 2.1, extra JSon members at the FeatureCollection,
+Starting with GDAL 2.1, extra JSON members at the FeatureCollection,
 Feature or geometry levels that are not normally reflected in the OGR
 abstraction, such as the ones called "extra_XXXXX_member" in the below
 snippet, are by default preserved when executing ogr2ogr with GeoJSON
@@ -318,7 +461,7 @@ RFC 7946 write support
 ----------------------
 
 By default, the driver will write GeoJSON files following GeoJSON 2008
-specification. When specifying the RFC7946=YES creation option, the RFC
+specification. When specifying the :lco:`RFC7946=YES` creation option, the RFC
 7946 standard will be used instead.
 
 The differences between the 2 versions are mentioned in `Appendix B of
@@ -339,6 +482,37 @@ recalled here for what matters to the driver:
    Geometry objects.
 -  The default coordinate precision is 7 decimal digits after decimal
    separator.
+
+Geometry coordinate precision
+-----------------------------
+
+.. versionadded:: GDAL 3.9
+
+The GeoJSON driver supports reading and writing the geometry coordinate
+precision, using the :cpp:class:`OGRGeomCoordinatePrecision` settings of the
+:cpp:class:`OGRGeomFieldDefn` Those settings are used to round the coordinates
+of the geometry of the features to an appropriate decimal precision.
+
+.. note::
+
+    The :lco:`COORDINATE_PRECISION` layer creation option has precedence over
+    the values set on the :cpp:class:`OGRGeomFieldDefn`.
+
+Implementation details: the coordinate precision is stored as
+``xy_coordinate_resolution`` and ``z_coordinate_resolution`` members at the
+FeatureCollection level. Their numeric value is expressed in the units of the
+SRS.
+
+Example:
+
+.. code-block:: JSON
+
+    {
+        "type": "FeatureCollection",
+        "xy_coordinate_resolution": 8.9e-6,
+        "z_coordinate_resolution": 1e-1,
+        "features": []
+    }
 
 Examples
 --------
@@ -378,5 +552,6 @@ See Also
    (obsoleted by RFC 7946).
 -  `JSON <http://json.org/>`__ - JavaScript Object Notation
 -  :ref:`GeoJSON sequence driver <vector.geojsonseq>`
--  :ref:`ESRI JSon / FeatureService driver <vector.esrijson>`
+-  :ref:`OGC Features and Geometries JSON (JSON-FG) driver <vector.jsonfg>`
+-  :ref:`ESRI JSON / FeatureService driver <vector.esrijson>`
 -  :ref:`TopoJSON driver <vector.topojson>`

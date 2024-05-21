@@ -17,10 +17,6 @@
 #
 # Select a FGDB API to use, or disable driver.
 
-if(CMAKE_VERSION VERSION_LESS 3.13)
-    set(FileGDB_ROOT CACHE PATH "")
-endif()
-
 find_path(FileGDB_INCLUDE_DIR NAMES FileGDBAPI.h
           PATHS /usr/local/filegdb/include "${FileGDB_ROOT}/include")
 mark_as_advanced(FileGDB_INCLUDE_DIR)
@@ -48,6 +44,7 @@ if(FileGDB_INCLUDE_DIR)
 
         find_library(FileGDB_LIBRARY NAMES FileGDBAPI PATHS "${FileGDB_ROOT}/lib" "${FileGDB_ROOT}/lib64")
         include(CheckCXXSourceCompiles)
+        include(CMakePushCheckState)
         cmake_push_check_state(RESET)
         check_cxx_source_compiles("#include <FileGDBAPI.h>\nusing namespace FileGDBAPI;\n
                 int main() { Geodatabase oDB; std::wstring osStr; ::OpenGeodatabase(osStr, oDB); return 0; }" TEST_FileGDB_COMPILE)

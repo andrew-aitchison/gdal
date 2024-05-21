@@ -39,6 +39,13 @@ numpy = pytest.importorskip("numpy")
 gdal_array = pytest.importorskip("osgeo.gdal_array")
 
 ###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+###############################################################################
 # verify that we can load the deprecated gdalnumeric module
 
 
@@ -652,19 +659,24 @@ def test_numpy_rw_16():
 
     # 1D
     array = numpy.empty([1], numpy.uint8)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal_array.OpenArray(array)
     assert ds is None
 
+    with gdaltest.enable_exceptions(), pytest.raises(
+        Exception, match="Illegal numpy array rank 1"
+    ):
+        gdal_array.OpenArray(array)
+
     # 4D
     array = numpy.empty([1, 1, 1, 1], numpy.uint8)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal_array.OpenArray(array)
     assert ds is None
 
     # Unsupported data type
     array = numpy.empty([1, 1], numpy.float16)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal_array.OpenArray(array)
     assert ds is None
 
@@ -677,17 +689,16 @@ def test_numpy_rw_17():
 
     # Disabled by default
     array = numpy.empty([1, 1], numpy.uint8)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(gdal_array.GetArrayFilename(array))
     assert ds is None
 
-    gdal.SetConfigOption("GDAL_ARRAY_OPEN_BY_FILENAME", "TRUE")
-    ds = gdal.Open(gdal_array.GetArrayFilename(array))
-    gdal.SetConfigOption("GDAL_ARRAY_OPEN_BY_FILENAME", None)
+    with gdal.config_option("GDAL_ARRAY_OPEN_BY_FILENAME", "TRUE"):
+        ds = gdal.Open(gdal_array.GetArrayFilename(array))
     assert ds is not None
 
     # Invalid value
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("NUMPY:::invalid")
     assert ds is None
 
@@ -727,7 +738,7 @@ def test_numpy_rw_failure_in_readasarray():
     assert ds is not None
 
     exception_raised = False
-    with gdaltest.enable_exceptions():
+    with gdal.ExceptionMgr():
         try:
             ds.ReadAsArray()
         except RuntimeError:
@@ -735,7 +746,7 @@ def test_numpy_rw_failure_in_readasarray():
     assert exception_raised
 
     exception_raised = False
-    with gdaltest.enable_exceptions():
+    with gdal.ExceptionMgr():
         try:
             ds.GetRasterBand(1).ReadAsArray()
         except RuntimeError:
@@ -759,12 +770,12 @@ def test_numpy_rw_gdal_array_openarray_permissions():
     ar = numpy.zeros([1, 1], dtype=numpy.uint8)
     ar.setflags(write=False)
     ds = gdal_array.OpenArray(ar)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetRasterBand(1).Fill(1) != 0
     assert ds.GetRasterBand(1).Checksum() == 0
 
     # Cannot read in non-writeable array
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.ReadAsArray(buf_obj=ar) is None
         assert ds.GetRasterBand(1).ReadAsArray(buf_obj=ar) is None
 
@@ -969,6 +980,38 @@ def test_numpy_rw_band_read_as_array_getlasterrormsg():
 </VRTDataset>"""
     )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetRasterBand(1).ReadAsArray() is None
     assert gdal.GetLastErrorMsg() != ""
+
+
+###############################################################################
+# Test a band read into a masked array
+
+
+def test_numpy_rw_masked_array_1():
+
+    ds = gdal.Open("data/byte.tif")
+
+    band = ds.GetRasterBand(1)
+
+    masked_arr = band.ReadAsMaskedArray()
+
+    assert not numpy.any(masked_arr.mask)
+
+
+def test_numpy_rw_masked_array_2():
+
+    ds = gdal.Open("data/test3_with_mask_8bit.tif")
+
+    band = ds.GetRasterBand(1)
+
+    arr = band.ReadAsArray()
+    mask = band.GetMaskBand().ReadAsArray()
+
+    masked_arr = band.ReadAsMaskedArray()
+
+    assert not numpy.any(masked_arr.mask[mask == 255])
+    assert numpy.all(masked_arr.mask[mask != 255])
+
+    assert masked_arr.sum() == arr[mask == 255].sum()

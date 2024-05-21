@@ -16,27 +16,28 @@ Synopsis
 .. code-block::
 
 
-    gdal_translate [--help-general]
-        [-ot {Byte/Int8/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/
-                CInt16/CInt32/CFloat32/CFloat64}] [-strict]
-        [-if format]* [-of format]
-        [-b band]* [-mask band] [-expand {gray|rgb|rgba}]
-        [-outsize xsize[%]|0 ysize[%]|0] [-tr xres yres]
-        [-ovr level|AUTO|AUTO-n|NONE]
-        [-r {nearest,bilinear,cubic,cubicspline,lanczos,average,rms,mode}]
-        [-unscale] [-scale[_bn] [src_min src_max [dst_min dst_max]]]* [-exponent[_bn] exp_val]*
-        [-srcwin xoff yoff xsize ysize] [-epo] [-eco]
-        [-projwin ulx uly lrx lry] [-projwin_srs srs_def]
-        [-a_srs srs_def] [-a_coord_epoch <epoch>]
-        [-a_ullr ulx uly lrx lry] [-a_nodata value]
-        [-a_scale value] [-a_offset value]
-        [-nogcp] [-gcp pixel line easting northing [elevation]]*
-        |-colorinterp{_bn} {red|green|blue|alpha|gray|undefined}]
-        |-colorinterp {red|green|blue|alpha|gray|undefined},...]
-        [-mo "META-TAG=VALUE"]* [-q] [-sds]
-        [-co "NAME=VALUE"]* [-stats] [-norat] [-noxmp]
-        [-oo NAME=VALUE]*
-        src_dataset dst_dataset
+    gdal_translate [--help] [--help-general] [--long-usage]
+       [-ot {Byte/Int8/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/
+             CInt16/CInt32/CFloat32/CFloat64}] [-strict]
+       [-if <format>]... [-of <format>]
+       [-b <band>] [-mask <band>] [-expand {gray|rgb|rgba}]
+       [-outsize <xsize>[%]|0 <ysize>[%]|0] [-tr <xres> <yres>]
+       [-ovr <level>|AUTO|AUTO-<n>|NONE]
+       [-r {nearest,bilinear,cubic,cubicspline,lanczos,average,mode}]
+       [-unscale] [-scale[_bn] [<src_min> <src_max> [<dst_min> <dst_max>]]]... [-exponent[_bn] <exp_val>]...
+       [-srcwin <xoff> <yoff> <xsize> <ysize>] [-epo] [-eco]
+       [-projwin <ulx> <uly> <lrx> <lry>] [-projwin_srs <srs_def>]
+       [-a_srs <srs_def>] [-a_coord_epoch <epoch>]
+       [-a_ullr <ulx> <uly> <lrx> <lry>] [-a_nodata <value>]
+       [-a_gt <gt0> <gt1> <gt2> <gt3> <gt4> <gt5>]
+       [-a_scale <value>] [-a_offset <value>]
+       [-nogcp] [-gcp <pixel> <line> <easting> <northing> [<elevation>]]...
+       |-colorinterp{_bn} {red|green|blue|alpha|gray|undefined}]
+       |-colorinterp {red|green|blue|alpha|gray|undefined},...]
+       [-mo <META-TAG>=<VALUE>]... [-dmo "DOMAIN:META-TAG=VALUE"]... [-q] [-sds]
+       [-co <NAME>=<VALUE>]... [-stats] [-norat] [-noxmp]
+       [-oo <NAME>=<VALUE>]...
+       <src_dataset> <dst_dataset>
 
 Description
 -----------
@@ -46,6 +47,8 @@ different formats, potentially performing some operations like subsettings,
 resampling, and rescaling pixels in the process.
 
 .. program:: gdal_translate
+
+.. include:: options/help_and_help_general.rst
 
 .. include:: options/ot.rst
 
@@ -95,9 +98,9 @@ resampling, and rescaling pixels in the process.
 
     set target resolution. The values must be expressed in georeferenced units.
     Both must be positive values. This is mutually exclusive with
-    :option:`-outsize` and :option:`-a_ullr`.
+    :option:`-outsize`, :option:`-a_ullr`, and :option:`-a_gt`.
 
-.. option:: -ovr <level|AUTO|AUTO-n|NONE>
+.. option:: -ovr {<level>|AUTO|AUTO-<n>|NONE}
 
     .. versionadded:: 3.6
 
@@ -119,11 +122,11 @@ resampling, and rescaling pixels in the process.
     Similarly when using :option:`-outsize` with percentage values, they refer to the size
     of the full resolution source dataset.
 
-.. option:: -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,rms,mode}
+.. option:: -r {nearest|bilinear|cubic|cubicspline|lanczos|average|rms|mode}
 
     Select a resampling algorithm.
 
-    ``nearest`` applies a nearest neighbour (simple sampling) resampler
+    ``nearest`` (default) applies a nearest neighbour (simple sampling) resampler
 
     ``average`` computes the average of all non-NODATA contributing pixels. Starting with GDAL 3.1, this is a weighted average taking into account properly the weight of source pixels not contributing fully to the target pixel.
 
@@ -139,7 +142,7 @@ resampling, and rescaling pixels in the process.
 
     ``mode`` selects the value which appears most often of all the sampled points.
 
-.. option:: -scale [src_min src_max [dst_min dst_max]]
+.. option:: -scale [<src_min> <src_max> [<dst_min> <dst_max>]]
 
     Rescale the input pixels values from the range **src_min** to **src_max**
     to the range **dst_min** to **dst_max**.
@@ -224,7 +227,8 @@ resampling, and rescaling pixels in the process.
 
 .. option:: -a_srs <srs_def>
 
-    Override the projection for the output file.
+    Override the projection for the output file. Can be used with
+    :option:`-a_ullr` or :option:`-a_gt` to specify the extent in this projection.
 
     .. include:: options/srs_def.rst
 
@@ -239,13 +243,23 @@ resampling, and rescaling pixels in the process.
 
 .. option:: -a_scale <value>
 
-    Set band scaling value (no modification of pixel values is done)
+    Set band scaling value. No modification of pixel values is done.
+    Note that the :option:`-unscale` does not take into account :option:`-a_scale`.
+    You may for example specify ``-scale 0 1 <offset> <offset+scale>`` to
+    apply a (offset, scale) tuple, for the equivalent of the 2 steps:
+    ``gdal_translate input.tif tmp.vrt -a_scale scale -a_offset offset`` followed by
+    ``gdal_translate tmp.vrt output.tif -unscale``
 
     .. versionadded:: 2.3
 
-.. option:: -a_offset<value>
+.. option:: -a_offset <value>
 
-    Set band offset value (no modification of pixel values is done)
+    Set band offset value. No modification of pixel values is done.
+    Note that the :option:`-unscale` does not take into account :option:`-a_offset`.
+    You may for example specify ``-scale 0 1 <offset> <offset+scale>`` to
+    apply a (offset, scale) tuple, for the equivalent of the 2 steps:
+    ``gdal_translate input.tif tmp.vrt -a_scale scale -a_offset offset`` followed by
+    ``gdal_translate tmp.vrt output.tif -unscale``
 
     .. versionadded:: 2.3
 
@@ -255,6 +269,17 @@ resampling, and rescaling pixels in the process.
     georeferenced bounds to the output file, ignoring what would have been
     derived from the source file. So this does not cause reprojection to the
     specified SRS.
+    This is mutually exclusive with :option:`-a_gt`
+
+.. option:: -a_gt <gt(0)> <gt(1)> <gt(2)> <gt(3)> <gt(4)> <gt(5)>
+
+    Assign/override the geotransform of the output file.
+    This assigns the geotransform to the output file, ignoring what would have been
+    derived from the source file. So this does not cause reprojection to the
+    specified SRS. See :ref:`geotransforms_tut`.
+    This is mutually exclusive with :option:`-a_ullr`
+
+    .. versionadded:: 3.8
 
 .. option:: -a_nodata <value>
 
@@ -271,24 +296,84 @@ resampling, and rescaling pixels in the process.
 
     .. versionadded:: 2.3
 
-.. option:: -colorinterp <red|green|blue|alpha|gray|undefined[,red|green|blue|alpha|gray|undefined]*>
+.. option:: -colorinterp {red|green|blue|alpha|gray|undefined},...
 
     Override the color interpretation of all specified bands. For
     example -colorinterp red,green,blue,alpha for a 4 band output dataset.
 
     .. versionadded:: 2.3
 
-.. option:: -mo META-TAG=VALUE
+.. option:: -mo <META-TAG>=<VALUE>
 
     Passes a metadata key and value to set on the output dataset if possible.
 
-.. include:: options/co.rst
+.. option:: -dmo DOMAIN:META-TAG=VALUE
+
+    Passes a metadata key and value in specified domain to set on the output dataset if possible.
+
+    .. versionadded:: 3.9
+
+.. option:: -co <NAME>=<VALUE>
+
+    .. WARNING: if modifying the 2 below paragraphs, please edit options/co.rst too
+
+    Many formats have one or more optional creation options that can be
+    used to control particulars about the file created. For instance,
+    the GeoTIFF driver supports creation options to control compression,
+    and whether the file should be tiled.
+
+    The creation options available vary by format driver, and some
+    simple formats have no creation options at all. A list of options
+    supported for a format can be listed with the
+    :ref:`--formats <raster_common_options_formats>`
+    command line option but the documentation for the format is the
+    definitive source of information on driver creation options.
+    See :ref:`raster_drivers` format
+    specific documentation for legal creation options for each format.
+
+    In addition to the driver-specific creation options, gdal_translate
+    (and :cpp:func:`GDALTranslate` and :cpp:func:`GDALCreateCopy`) recognize
+    the following options:
+
+    - .. co:: APPEND_SUBDATASET
+         :choices: YES, NO
+         :default: NO
+
+      Can be specified to YES to avoid prior destruction of existing dataset,
+      for drivers that support adding several subdatasets (e.g. GTIFF, NITF)
+
+    - .. co:: COPY_SRC_MDD
+         :choices: AUTO, YES, NO
+         :default: AUTO
+         :since: 3.8
+
+      Defines if metadata domains of the source dataset should be copied to the
+      destination dataset.
+      In the default AUTO mode, only "safe" domains will be copied, which
+      include the default metadata domain (some drivers may include other
+      domains such as IMD, RPC, GEOLOCATION).
+      When setting YES, all domains will be copied (but a few reserved ones like
+      IMAGE_STRUCTURE or DERIVED_SUBDATASETS).
+      Currently only recognized by the GTiff, COG, VRT, PNG and JPEG drivers.
+
+      When setting NO, no source metadata will be copied.
+
+    - .. co:: SRC_MDD
+         :choices: <domain_name>
+         :since: 3.8
+
+      Defines which source metadata domain should be copied.
+      This option restricts the list of source metadata domains to be copied
+      (it implies COPY_SRC_MDD=YES if it is not set). This option may be specified
+      as many times as they are source domains. The default metadata domain is the
+      empty string "" ("_DEFAULT_") may also be used when empty string is not practical).
+      Currently only recognized by the GTiff, COG, VRT, PNG and JPEG drivers.
 
 .. option:: -nogcp
 
     Do not copy the GCPs in the source dataset to the output dataset.
 
-.. option:: -gcp <pixel> <line> <easting> <northing> <elevation>
+.. option:: -gcp <pixel> <line> <easting> <northing> [<elevation>]
 
     Add the indicated ground control point to the output dataset.  This option
     may be provided multiple times to provide a set of GCPs.
@@ -316,7 +401,7 @@ resampling, and rescaling pixels in the process.
 
     .. versionadded:: 3.2
 
-.. option:: -oo NAME=VALUE
+.. option:: -oo <NAME>=<VALUE>
 
     Dataset open option (format specific)
 
@@ -328,6 +413,16 @@ resampling, and rescaling pixels in the process.
 .. option:: <dst_dataset>
 
     The destination file name.
+
+
+Nodata / source validity mask handling during resampling
+--------------------------------------------------------
+
+Masked values, either identified through a nodata value metadata set on the
+source band, a mask band, an alpha band will not be used during resampling
+(when using :option:`-outsize` or :option:`-tr`).
+
+.. include:: nodata_handling_gdaladdo_gdal_translate.rst
 
 C API
 -----
@@ -348,7 +443,8 @@ To create a JPEG-compressed TIFF with internal mask from a RGBA dataset
 
 ::
 
-    gdal_translate rgba.tif withmask.tif -b 1 -b 2 -b 3 -mask 4 -co COMPRESS=JPEG -co PHOTOMETRIC=YCBCR --config GDAL_TIFF_INTERNAL_MASK YES
+    gdal_translate rgba.tif withmask.tif -b 1 -b 2 -b 3 -mask 4 -co COMPRESS=JPEG \
+      -co PHOTOMETRIC=YCBCR --config GDAL_TIFF_INTERNAL_MASK YES
 
 
 To create a RGBA dataset from a RGB dataset with a mask
@@ -357,3 +453,9 @@ To create a RGBA dataset from a RGB dataset with a mask
 
     gdal_translate withmask.tif rgba.tif -b 1 -b 2 -b 3 -b mask
 
+
+Subsetting using :option:`-projwin` and :option:`-outsize`:
+
+.. code-block:: bash
+
+   gdal_translate -projwin -20037500 10037500 0 0 -outsize 100 100 frmt_wms_googlemaps_tms.xml junk.png

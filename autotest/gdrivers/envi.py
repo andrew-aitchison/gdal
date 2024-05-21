@@ -32,6 +32,7 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
+import os
 import struct
 
 import gdaltest
@@ -64,7 +65,7 @@ def test_envi_1():
     PARAMETER["false_northing",0],
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=prj, check_gt=(-936408.178, 28.5, 0.0, 2423902.344, 0.0, -28.5)
     )
 
@@ -76,7 +77,7 @@ def test_envi_1():
 def test_envi_2():
 
     tst = gdaltest.GDALTest("envi", "envi/aea.dat", 1, 14823)
-    return tst.testCreateCopy(check_gt=1)
+    tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -86,7 +87,7 @@ def test_envi_2():
 def test_envi_3():
 
     tst = gdaltest.GDALTest("envi", "rgbsmall.tif", 2, 21053)
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -113,7 +114,7 @@ def test_envi_4():
     PARAMETER["false_northing",30000],
     UNIT["Meter",1]]"""
 
-    return tst.testSetProjection(prj=prj)
+    tst.testSetProjection(prj=prj)
 
 
 ###############################################################################
@@ -141,7 +142,7 @@ def test_envi_5():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
 
-    return tst.testSetProjection(prj=prj)
+    tst.testSetProjection(prj=prj)
 
 
 ###############################################################################
@@ -168,7 +169,7 @@ def test_envi_6():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
 
-    return gdaltest.envi_tst.testSetProjection(prj=prj)
+    gdaltest.envi_tst.testSetProjection(prj=prj)
 
 
 ###############################################################################
@@ -178,7 +179,7 @@ def test_envi_6():
 def test_envi_7():
 
     tst = gdaltest.GDALTest("envi", "envi/aea.dat", 1, 14823)
-    return tst.testCreateCopy(check_gt=1, vsimem=1)
+    tst.testCreateCopy(check_gt=1, vsimem=1)
 
 
 ###############################################################################
@@ -204,7 +205,7 @@ def test_envi_8():
 def test_envi_9():
 
     tst = gdaltest.GDALTest("envi", "envi/aea_compressed.dat", 1, 14823)
-    return tst.testCreateCopy(check_gt=1)
+    tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -300,7 +301,8 @@ def test_envi_14():
 
     gdal.GetDriverByName("ENVI").Create("/vsimem/envi_14.dat", 3, 4, 5, gdal.GDT_Int16)
 
-    gdal.Unlink("/vsimem/envi_14.dat.aux.xml")
+    if os.path.exists("/vsimem/envi_14.dat.aux.xml"):
+        gdal.Unlink("/vsimem/envi_14.dat.aux.xml")
 
     assert gdal.VSIStatL("/vsimem/envi_14.dat").size == 3 * 4 * 5 * 2
 
@@ -473,7 +475,8 @@ def test_envi_rotation_180():
     ds.SetGeoTransform([0, 10, 0, 0, 0, 10])
     ds = None
 
-    gdal.Unlink(filename + ".aux.xml")
+    if os.path.exists(filename + ".aux.xml"):
+        gdal.Unlink(filename + ".aux.xml")
 
     ds = gdal.Open(filename)
     got_gt = ds.GetGeoTransform()
@@ -959,3 +962,97 @@ def test_envi_read_direct_access(byte_order):
     ds = None
 
     gdal.GetDriverByName("ENVI").Delete(filename)
+
+
+###############################################################################
+# Test direct access to BIP scanlines in GA_Update mode
+
+
+def test_envi_read_direct_access_update_scenario():
+
+    src_ds = gdal.Open("data/rgbsmall.tif")
+    filename = "/vsimem/test.bin"
+    ds = gdal.GetDriverByName("ENVI").Create(
+        filename,
+        src_ds.RasterXSize,
+        src_ds.RasterYSize,
+        src_ds.RasterCount,
+        options=["INTERLEAVE=BIP"],
+    )
+    ds.WriteRaster(0, 0, ds.RasterXSize, ds.RasterYSize, src_ds.ReadRaster())
+
+    # Using optimization
+    assert ds.ReadRaster(
+        0,
+        0,
+        ds.RasterXSize,
+        ds.RasterYSize,
+        buf_type=gdal.GDT_Byte,
+        buf_pixel_space=ds.RasterCount,
+        buf_band_space=1,
+    ) == src_ds.ReadRaster(
+        0,
+        0,
+        ds.RasterXSize,
+        ds.RasterYSize,
+        buf_type=gdal.GDT_Byte,
+        buf_pixel_space=ds.RasterCount,
+        buf_band_space=1,
+    )
+
+    ds = None
+
+    gdal.GetDriverByName("ENVI").Delete(filename)
+
+
+###############################################################################
+# Test setting different nodata values
+
+
+@pytest.mark.parametrize(
+    "nd1,nd2,expected_warning",
+    [
+        (1, 1, False),
+        (float("nan"), float("nan"), False),
+        (float("nan"), 1, True),
+        (1, float("nan"), True),
+    ],
+)
+def test_envi_write_warn_different_nodata(tmp_vsimem, nd1, nd2, expected_warning):
+    filename = str(tmp_vsimem / "test_envi_write_warn_different_nodata.img")
+    ds = gdal.GetDriverByName("ENVI").Create(filename, 1, 1, 2)
+    assert ds.GetRasterBand(1).SetNoDataValue(nd1) == gdal.CE_None
+    gdal.ErrorReset()
+    with gdal.quiet_errors():
+        assert ds.GetRasterBand(2).SetNoDataValue(nd2) == gdal.CE_None
+        assert gdal.GetLastErrorType() == (
+            gdal.CE_Warning if expected_warning else gdal.CE_None
+        )
+
+
+###############################################################################
+# Test reading "default bands" in RGB mode
+
+
+def test_envi_read_metadata_with_leading_space():
+
+    gdal.FileFromMemBuffer(
+        "/vsimem/test.hdr",
+        """ENVI
+samples = 1
+lines = 1
+bands = 3
+header offset = 0
+file type = ENVI Standard
+data type = 1
+interleave = bip
+sensor type = Unknown
+byte order = 0
+ wavelength = {3, 2, 1}""",
+    )
+    gdal.FileFromMemBuffer("/vsimem/test.bin", "xyz")
+
+    ds = gdal.Open("/vsimem/test.bin")
+    assert ds.GetRasterBand(1).GetMetadataItem("wavelength") == "3"
+    ds = None
+    gdal.GetDriverByName("ENVI").Delete("/vsimem/test.bin")

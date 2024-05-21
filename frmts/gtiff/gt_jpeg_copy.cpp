@@ -50,10 +50,8 @@
 static GDALDataset *GetUnderlyingDataset(GDALDataset *poSrcDS)
 {
     // Test if we can directly copy original JPEG content if available.
-    if (poSrcDS->GetDriver() != nullptr &&
-        poSrcDS->GetDriver() == GDALGetDriverByName("VRT"))
+    if (auto poVRTDS = dynamic_cast<VRTDataset *>(poSrcDS))
     {
-        VRTDataset *poVRTDS = cpl::down_cast<VRTDataset *>(poSrcDS);
         poSrcDS = poVRTDS->GetSingleSimpleSource();
     }
 
@@ -240,7 +238,10 @@ CPLErr GTIFF_DirectCopyFromJPEG(GDALDataset *poDS, GDALDataset *poSrcDS,
 
 #ifdef HAVE_LIBJPEG
 
-#include "vsidataio.h"
+#define jpeg_vsiio_src GTIFF_jpeg_vsiio_src
+#define jpeg_vsiio_dest GTIFF_jpeg_vsiio_dest
+#include "../jpeg/vsidataio.h"
+#include "../jpeg/vsidataio.cpp"
 
 #include <setjmp.h>
 
@@ -330,6 +331,12 @@ int GTIFF_CanCopyFromJPEG(GDALDataset *poSrcDS, char **&papszCreateOptions)
         pszInterleave == nullptr ||
         (nBands > 1 && EQUAL(pszInterleave, "PIXEL")) || nBands == 1;
     if (!bCompatibleInterleave)
+        return FALSE;
+
+    // We don't want to apply lossy JPEG on a source using lossless JPEG !
+    const char *pszReversibility = poSrcDS->GetMetadataItem(
+        "COMPRESSION_REVERSIBILITY", "IMAGE_STRUCTURE");
+    if (pszReversibility && EQUAL(pszReversibility, "LOSSLESS"))
         return FALSE;
 
     if ((nBlockXSize == nXSize || (nBlockXSize % nMCUSize) == 0) &&
@@ -430,8 +437,24 @@ CPLErr GTIFF_CopyFromJPEG_WriteAdditionalTags(TIFF *hTIFF, GDALDataset *poSrcDS)
     struct jpeg_error_mgr sJErr;
     struct jpeg_decompress_struct sDInfo;
     jmp_buf setjmp_buffer;
+
+    volatile bool bCallDestroyDecompress = false;
+    volatile bool bCallDestroyCompress = false;
+
+    struct jpeg_compress_struct sCInfo;
+
     if (setjmp(setjmp_buffer))
     {
+        if (bCallDestroyCompress)
+        {
+            jpeg_abort_compress(&sCInfo);
+            jpeg_destroy_compress(&sCInfo);
+        }
+        if (bCallDestroyDecompress)
+        {
+            jpeg_abort_decompress(&sDInfo);
+            jpeg_destroy_decompress(&sDInfo);
+        }
         CPL_IGNORE_RET_VAL(VSIFCloseL(fpJPEG));
         return CE_Failure;
     }
@@ -440,22 +463,24 @@ CPLErr GTIFF_CopyFromJPEG_WriteAdditionalTags(TIFF *hTIFF, GDALDataset *poSrcDS)
     sJErr.error_exit = GTIFF_ErrorExitJPEG;
     sDInfo.client_data = &setjmp_buffer;
 
-    jpeg_create_decompress(&sDInfo);
+    bCallDestroyDecompress = true;
+    jpeg_CreateDecompress(&sDInfo, JPEG_LIB_VERSION, sizeof(sDInfo));
 
     jpeg_vsiio_src(&sDInfo, fpJPEG);
     jpeg_read_header(&sDInfo, TRUE);
-
-    struct jpeg_compress_struct sCInfo;
 
     sCInfo.err = jpeg_std_error(&sJErr);
     sJErr.error_exit = GTIFF_ErrorExitJPEG;
     sCInfo.client_data = &setjmp_buffer;
 
-    jpeg_create_compress(&sCInfo);
+    jpeg_CreateCompress(&sCInfo, JPEG_LIB_VERSION, sizeof(sCInfo));
+    bCallDestroyCompress = true;
     jpeg_copy_critical_parameters(&sDInfo, &sCInfo);
     GTIFF_Set_TIFFTAG_JPEGTABLES(hTIFF, sDInfo, sCInfo);
+    bCallDestroyCompress = false;
     jpeg_abort_compress(&sCInfo);
     jpeg_destroy_compress(&sCInfo);
+    CPL_IGNORE_RET_VAL(bCallDestroyCompress);
 
     /* -------------------------------------------------------------------- */
     /*      Write TIFFTAG_REFERENCEBLACKWHITE if needed.                    */
@@ -520,8 +545,10 @@ CPLErr GTIFF_CopyFromJPEG_WriteAdditionalTags(TIFF *hTIFF, GDALDataset *poSrcDS)
     /*      Cleanup.                                                        */
     /* -------------------------------------------------------------------- */
 
+    bCallDestroyDecompress = false;
     jpeg_abort_decompress(&sDInfo);
     jpeg_destroy_decompress(&sDInfo);
+    CPL_IGNORE_RET_VAL(bCallDestroyDecompress);
 
     if (VSIFCloseL(fpJPEG) != 0)
         return CE_Failure;
@@ -585,7 +612,7 @@ static CPLErr GTIFF_CopyBlockFromJPEG(GTIFF_CopyBlockFromJPEGArgs *psArgs)
     sCInfo.client_data = &setjmp_buffer;
 
     // Initialize destination compression parameters from source values.
-    jpeg_create_compress(&sCInfo);
+    jpeg_CreateCompress(&sCInfo, JPEG_LIB_VERSION, sizeof(sCInfo));
     jpeg_copy_critical_parameters(psDInfo, &sCInfo);
 
     // Ensure libjpeg won't write any extraneous markers.
@@ -810,7 +837,7 @@ CPLErr GTIFF_CopyFromJPEG(GDALDataset *poDS, GDALDataset *poSrcDS,
     sJErr.error_exit = GTIFF_ErrorExitJPEG;
     sDInfo.client_data = &setjmp_buffer;
 
-    jpeg_create_decompress(&sDInfo);
+    jpeg_CreateDecompress(&sDInfo, JPEG_LIB_VERSION, sizeof(sDInfo));
 
     // This is to address bug related in ticket #1795.
     if (CPLGetConfigOption("JPEGMEM", nullptr) == nullptr)

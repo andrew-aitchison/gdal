@@ -32,6 +32,12 @@
 
 #include "header_generated.h"
 
+// For users not using CMake...
+#ifndef flatbuffers
+#error                                                                         \
+    "Make sure to build with -Dflatbuffers=gdal_flatbuffers (for example) to avoid potential conflict of flatbuffers"
+#endif
+
 using namespace flatbuffers;
 using namespace FlatGeobuf;
 
@@ -145,6 +151,9 @@ void RegisterOGRFlatGeobuf()
         "Integer Integer64 Real String Date DateTime Binary");
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
                               "Boolean Int16 Float32");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "WidthPrecision Comment AlternativeName");
+
     poDriver->SetMetadataItem(
         GDAL_DS_LAYER_CREATIONOPTIONLIST,
         "<LayerCreationOptionList>"
@@ -152,6 +161,9 @@ void RegisterOGRFlatGeobuf()
         "create a spatial index' default='YES'/>"
         "  <Option name='TEMPORARY_DIR' type='string' description='Directory "
         "where temporary file should be created'/>"
+        "  <Option name='TITLE' type='string' description='Layer title'/>"
+        "  <Option name='DESCRIPTION' type='string' "
+        "description='Layer description'/>"
         "</LayerCreationOptionList>");
     poDriver->SetMetadataItem(
         GDAL_DMD_OPENOPTIONLIST,
@@ -162,6 +174,8 @@ void RegisterOGRFlatGeobuf()
 
     poDriver->SetMetadataItem(GDAL_DCAP_COORDINATE_EPOCH, "YES");
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
+    poDriver->SetMetadataItem(GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
+                              "Name WidthPrecision AlternativeName Comment");
 
     poDriver->pfnOpen = OGRFlatGeobufDataset::Open;
     poDriver->pfnCreate = OGRFlatGeobufDataset::Create;
@@ -188,6 +202,31 @@ OGRFlatGeobufDataset::OGRFlatGeobufDataset(const char *pszName, bool bIsDir,
 
 OGRFlatGeobufDataset::~OGRFlatGeobufDataset()
 {
+    OGRFlatGeobufDataset::Close();
+}
+
+/************************************************************************/
+/*                              Close()                                 */
+/************************************************************************/
+
+CPLErr OGRFlatGeobufDataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (OGRFlatGeobufDataset::FlushCache(true) != CE_None)
+            eErr = CE_Failure;
+
+        for (auto &poLayer : m_apoLayers)
+        {
+            if (poLayer->Close() != CE_None)
+                eErr = CE_Failure;
+        }
+
+        if (GDALDataset::Close() != CE_None)
+            eErr = CE_Failure;
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -366,10 +405,10 @@ static CPLString LaunderLayerName(const char *pszLayerName)
     return osRet;
 }
 
-OGRLayer *OGRFlatGeobufDataset::ICreateLayer(const char *pszLayerName,
-                                             OGRSpatialReference *poSpatialRef,
-                                             OGRwkbGeometryType eGType,
-                                             char **papszOptions)
+OGRLayer *
+OGRFlatGeobufDataset::ICreateLayer(const char *pszLayerName,
+                                   const OGRGeomFieldDefn *poGeomFieldDefn,
+                                   CSLConstList papszOptions)
 {
     // Verify we are in update mode.
     if (!m_bCreate)
@@ -389,6 +428,10 @@ OGRLayer *OGRFlatGeobufDataset::ICreateLayer(const char *pszLayerName,
 
         return nullptr;
     }
+
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSpatialRef =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     // Verify that the datasource is a directory.
     VSIStatBufL sStatBuf;
@@ -416,7 +459,7 @@ OGRLayer *OGRFlatGeobufDataset::ICreateLayer(const char *pszLayerName,
 
     auto poLayer =
         std::unique_ptr<OGRFlatGeobufLayer>(OGRFlatGeobufLayer::Create(
-            pszLayerName, osFilename, poSpatialRef, eGType,
+            this, pszLayerName, osFilename, poSpatialRef, eGType,
             bCreateSpatialIndexAtClose, papszOptions));
     if (poLayer == nullptr)
         return nullptr;

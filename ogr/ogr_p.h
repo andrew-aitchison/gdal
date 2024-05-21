@@ -41,8 +41,11 @@
 #include "cpl_minixml.h"
 
 #include "ogr_core.h"
-#include "ogr_geometry.h"
-#include "ogr_feature.h"
+
+#include <limits>
+
+class OGRGeometry;
+class OGRFieldDefn;
 
 /* A default name for the default geometry column, instead of '' */
 #define OGR_GEOMETRY_DEFAULT_NON_EMPTY_NAME "_ogr_geometry_"
@@ -85,19 +88,23 @@ OGRWktReadPointsM(const char *pszInput, OGRRawPoint **ppaoPoints,
 
 void CPL_DLL OGRMakeWktCoordinate(char *, double, double, double, int);
 std::string CPL_DLL OGRMakeWktCoordinate(double, double, double, int,
-                                         OGRWktOptions opts);
+                                         const OGRWktOptions &opts);
 void CPL_DLL OGRMakeWktCoordinateM(char *, double, double, double, double,
                                    OGRBoolean, OGRBoolean);
 std::string CPL_DLL OGRMakeWktCoordinateM(double, double, double, double,
                                           OGRBoolean, OGRBoolean,
-                                          OGRWktOptions opts);
+                                          const OGRWktOptions &opts);
 
 #endif
 
 void CPL_DLL OGRFormatDouble(char *pszBuffer, int nBufferLen, double dfVal,
                              char chDecimalSep, int nPrecision = 15,
                              char chConversionSpecifier = 'f');
-std::string CPL_DLL OGRFormatDouble(double val, const OGRWktOptions &opts);
+
+#ifdef OGR_GEOMETRY_H_INCLUDED
+std::string CPL_DLL OGRFormatDouble(double val, const OGRWktOptions &opts,
+                                    int nDimIdx);
+#endif
 
 int OGRFormatFloat(char *pszBuffer, int nBufferLen, float fVal, int nPrecision,
                    char chConversionSpecifier);
@@ -108,6 +115,12 @@ int OGRFormatFloat(char *pszBuffer, int nBufferLen, float fVal, int nPrecision,
 
 /* Internal use by OGR drivers only, CPL_DLL is just there in case */
 /* they are compiled as plugins  */
+
+int CPL_DLL OGRTimezoneToTZFlag(const char *pszTZ,
+                                bool bEmitErrorIfUnhandledFormat);
+std::string CPL_DLL OGRTZFlagToTimezone(int nTZFlag,
+                                        const char *pszUTCRepresentation);
+
 int CPL_DLL OGRGetDayOfWeek(int day, int month, int year);
 int CPL_DLL OGRParseXMLDateTime(const char *pszXMLDateTime, OGRField *psField);
 int CPL_DLL OGRParseRFC822DateTime(const char *pszRFC822DateTime,
@@ -121,7 +134,33 @@ char CPL_DLL *OGRGetXMLDateTime(const OGRField *psField,
 int CPL_DLL
 OGRGetISO8601DateTime(const OGRField *psField, bool bAlwaysMillisecond,
                       char szBuffer[OGR_SIZEOF_ISO8601_DATETIME_BUFFER]);
+
+/** Precision of formatting */
+enum class OGRISO8601Precision
+{
+    /** Automated mode: millisecond included if non zero, otherwise truncated at second */
+    AUTO,
+    /** Always include millisecond */
+    MILLISECOND,
+    /** Always include second, but no millisecond */
+    SECOND,
+    /** Always include minute, but no second */
+    MINUTE
+};
+
+/** Configuration of the ISO8601 formatting output */
+struct OGRISO8601Format
+{
+    /** Precision of formatting */
+    OGRISO8601Precision ePrecision;
+};
+
+int CPL_DLL
+OGRGetISO8601DateTime(const OGRField *psField, const OGRISO8601Format &sFormat,
+                      char szBuffer[OGR_SIZEOF_ISO8601_DATETIME_BUFFER]);
 char CPL_DLL *OGRGetXML_UTF8_EscapedString(const char *pszString);
+bool CPL_DLL OGRParseDateTimeYYYYMMDDTHHMMZ(const char *pszInput, size_t nLen,
+                                            OGRField *psField);
 bool CPL_DLL OGRParseDateTimeYYYYMMDDTHHMMSSZ(const char *pszInput, size_t nLen,
                                               OGRField *psField);
 bool CPL_DLL OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(const char *pszInput,
@@ -147,10 +186,6 @@ int CPL_DLL OGRGeneralCmdLineProcessor(int nArgc, char ***ppapszArgv,
 #define SPECIAL_FIELD_COUNT 5
 
 extern const char *const SpecialFieldNames[SPECIAL_FIELD_COUNT];
-
-#ifdef SWQ_H_INCLUDED_
-extern const swq_field_type SpecialFieldTypes[SPECIAL_FIELD_COUNT];
-#endif
 
 /************************************************************************/
 /*     Some SRS related stuff, search in SRS data files.                */
@@ -204,5 +239,103 @@ OGRErr CPL_DLL OGRReadWKTGeometryType(const char *pszWKT,
 
 void CPL_DLL OGRUpdateFieldType(OGRFieldDefn *poFDefn, OGRFieldType eNewType,
                                 OGRFieldSubType eNewSubType);
+
+/************************************************************************/
+/*                         OGRRoundValueIEEE754()                       */
+/************************************************************************/
+
+/** Set to zero least significants bits of a double precision floating-point
+ * number (passed as an integer), taking into account a desired bit precision.
+ *
+ * @param nVal Integer representation of a IEEE754 double-precision number.
+ * @param nBitsPrecision Desired precision (number of bits after integral part)
+ * @return quantized nVal.
+ * @since GDAL 3.9
+ */
+inline uint64_t OGRRoundValueIEEE754(uint64_t nVal,
+                                     int nBitsPrecision) CPL_WARN_UNUSED_RESULT;
+
+inline uint64_t OGRRoundValueIEEE754(uint64_t nVal, int nBitsPrecision)
+{
+    constexpr int MANTISSA_SIZE = std::numeric_limits<double>::digits - 1;
+    constexpr int MAX_EXPONENT = std::numeric_limits<double>::max_exponent;
+#if __cplusplus >= 201703L
+    static_assert(MANTISSA_SIZE == 52);
+    static_assert(MAX_EXPONENT == 1024);
+#endif
+    // Extract the binary exponent from the IEEE754 representation
+    const int nExponent =
+        ((nVal >> MANTISSA_SIZE) & (2 * MAX_EXPONENT - 1)) - (MAX_EXPONENT - 1);
+    // Add 1 to round-up and the desired precision
+    const int nBitsRequired = 1 + nExponent + nBitsPrecision;
+    // Compute number of nullified bits
+    int nNullifiedBits = MANTISSA_SIZE - nBitsRequired;
+    // this will also capture NaN and Inf since nExponent = 1023,
+    // and thus nNullifiedBits < 0
+    if (nNullifiedBits <= 0)
+        return nVal;
+    if (nNullifiedBits >= MANTISSA_SIZE)
+        nNullifiedBits = MANTISSA_SIZE;
+    nVal &= std::numeric_limits<uint64_t>::max() << nNullifiedBits;
+    return nVal;
+}
+
+/************************************************************************/
+/*                   OGRRoundCoordinatesIEEE754XYValues()               */
+/************************************************************************/
+
+/** Quantize XY values.
+ *
+ * @since GDAL 3.9
+ */
+template <int SPACING>
+inline void OGRRoundCoordinatesIEEE754XYValues(int nBitsPrecision,
+                                               GByte *pabyBase, size_t nPoints)
+{
+    // Note: we use SPACING as template for improved code generation.
+
+    if (nBitsPrecision != INT_MIN)
+    {
+        for (size_t i = 0; i < nPoints; i++)
+        {
+            uint64_t nVal;
+
+            memcpy(&nVal, pabyBase + SPACING * i, sizeof(uint64_t));
+            nVal = OGRRoundValueIEEE754(nVal, nBitsPrecision);
+            memcpy(pabyBase + SPACING * i, &nVal, sizeof(uint64_t));
+
+            memcpy(&nVal, pabyBase + sizeof(uint64_t) + SPACING * i,
+                   sizeof(uint64_t));
+            nVal = OGRRoundValueIEEE754(nVal, nBitsPrecision);
+            memcpy(pabyBase + sizeof(uint64_t) + SPACING * i, &nVal,
+                   sizeof(uint64_t));
+        }
+    }
+}
+
+/************************************************************************/
+/*                     OGRRoundCoordinatesIEEE754()                     */
+/************************************************************************/
+
+/** Quantize Z or M values.
+ *
+ * @since GDAL 3.9
+ */
+template <int SPACING>
+inline void OGRRoundCoordinatesIEEE754(int nBitsPrecision, GByte *pabyBase,
+                                       size_t nPoints)
+{
+    if (nBitsPrecision != INT_MIN)
+    {
+        for (size_t i = 0; i < nPoints; i++)
+        {
+            uint64_t nVal;
+
+            memcpy(&nVal, pabyBase + SPACING * i, sizeof(uint64_t));
+            nVal = OGRRoundValueIEEE754(nVal, nBitsPrecision);
+            memcpy(pabyBase + SPACING * i, &nVal, sizeof(uint64_t));
+        }
+    }
+}
 
 #endif /* ndef OGR_P_H_INCLUDED */

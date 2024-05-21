@@ -604,6 +604,7 @@ std::unique_ptr<CPLJobQueue> CPLWorkerThreadPool::CreateJobQueue()
 CPLJobQueue::CPLJobQueue(CPLWorkerThreadPool *poPool) : m_poPool(poPool)
 {
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -690,6 +691,7 @@ bool CPLJobQueue::SubmitJob(CPLThreadFunc pfnFunc, void *pData)
 void CPLJobQueue::WaitCompletion(int nMaxRemainingJobs)
 {
     std::unique_lock<std::mutex> oGuard(m_mutex);
+    // coverity[missing_lock:FALSE]
     while (m_nPendingJobs > nMaxRemainingJobs)
     {
         m_cv.wait(oGuard);

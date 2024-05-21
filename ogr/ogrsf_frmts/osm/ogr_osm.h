@@ -71,6 +71,7 @@ class OGROSMComputedAttribute
         : nIndex(-1), eType(OFTString), hStmt(nullptr), bHardcodedZOrder(false)
     {
     }
+
     explicit OGROSMComputedAttribute(const char *pszName)
         : osName(pszName), nIndex(-1), eType(OFTString), hStmt(nullptr),
           bHardcodedZOrder(false)
@@ -123,8 +124,7 @@ class OGROSMLayer final : public OGRLayer
 
     bool m_bHasWarnedTooManyFeatures = false;
 
-    char *m_pszAllTags = nullptr;
-    bool m_bHasWarnedAllTagsTruncated = false;
+    std::string m_osAllTagsBuffer{};
 
     bool m_bUserInterested = true;
 
@@ -166,6 +166,7 @@ class OGROSMLayer final : public OGRLayer
     virtual OGRErr SetAttributeFilter(const char *pszAttrQuery) override;
 
     virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
+
     virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
                              int bForce) override
     {
@@ -179,13 +180,15 @@ class OGROSMLayer final : public OGRLayer
                    int bCheckFeatureThreshold = TRUE);
     void ForceResetReading();
 
-    void AddField(const char *pszName, OGRFieldType eFieldType);
+    void AddField(const char *pszName, OGRFieldType eFieldType,
+                  OGRFieldSubType eSubType = OFSTNone);
     int GetFieldIndex(const char *pszName);
 
     bool HasOSMId() const
     {
         return m_bHasOSMId;
     }
+
     void SetHasOSMId(bool bIn)
     {
         m_bHasOSMId = bIn;
@@ -195,6 +198,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasVersion;
     }
+
     void SetHasVersion(bool bIn)
     {
         m_bHasVersion = bIn;
@@ -204,6 +208,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasTimestamp;
     }
+
     void SetHasTimestamp(bool bIn)
     {
         m_bHasTimestamp = bIn;
@@ -213,6 +218,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasUID;
     }
+
     void SetHasUID(bool bIn)
     {
         m_bHasUID = bIn;
@@ -222,6 +228,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasUser;
     }
+
     void SetHasUser(bool bIn)
     {
         m_bHasUser = bIn;
@@ -231,6 +238,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasChangeset;
     }
+
     void SetHasChangeset(bool bIn)
     {
         m_bHasChangeset = bIn;
@@ -240,6 +248,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasOtherTags;
     }
+
     void SetHasOtherTags(bool bIn)
     {
         m_bHasOtherTags = bIn;
@@ -249,6 +258,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasAllTags;
     }
+
     void SetHasAllTags(bool bIn)
     {
         m_bHasAllTags = bIn;
@@ -262,6 +272,7 @@ class OGROSMLayer final : public OGRLayer
     {
         m_bUserInterested = bIn;
     }
+
     bool IsUserInterested() const
     {
         return m_bUserInterested;
@@ -271,9 +282,11 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_poAttrQuery != nullptr;
     }
+
     int EvaluateAttributeFilter(OGRFeature *poFeature);
 
     void AddInsignificantKey(const char *pszK);
+
     int IsSignificantKey(const char *pszK) const
     {
         return aoSetInsignificantKeys.find(pszK) ==
@@ -307,6 +320,7 @@ typedef struct
                         nOffsetInpabyNonRedundantKeys */
     short bVIsIndex; /* whether we should use nValueIndex or
                         nOffsetInpabyNonRedundantValues */
+
     union
     {
         int nKeyIndex; /* index of OGROSMDataSource.asKeys */
@@ -314,6 +328,7 @@ typedef struct
                                               OGROSMDataSource.pabyNonRedundantKeys
                                             */
     } uKey;
+
     union
     {
         int nValueIndex;                     /* index of KeyDesc.asValues */
@@ -326,6 +341,7 @@ typedef struct
 typedef struct
 {
     GIntBig nOff;
+
     /* Note: only one of nth bucket pabyBitmap or panSectorSize must be free'd
      */
     union
@@ -391,7 +407,6 @@ class OGROSMDataSource final : public OGRDataSource
     sqlite3 *m_hDB = nullptr;
     sqlite3_stmt *m_hInsertNodeStmt = nullptr;
     sqlite3_stmt *m_hInsertWayStmt = nullptr;
-    sqlite3_stmt *m_hSelectNodeBetweenStmt = nullptr;
     sqlite3_stmt **m_pahSelectNodeStmt = nullptr;
     sqlite3_stmt **m_pahSelectWayStmt = nullptr;
     sqlite3_stmt *m_hInsertPolygonsStandaloneStmt = nullptr;
@@ -406,8 +421,6 @@ class OGROSMDataSource final : public OGRDataSource
     bool m_bMustUnlink = true;
     CPLString m_osTmpDBName{};
 
-    int m_nNodesInTransaction = 0;
-
     std::unordered_set<std::string> aoSetClosedWaysArePolygons{};
     int m_nMinSizeKeysInSetClosedWaysArePolygons = 0;
     int m_nMaxSizeKeysInSetClosedWaysArePolygons = 0;
@@ -420,6 +433,7 @@ class OGROSMDataSource final : public OGRDataSource
 
     bool m_bReportAllNodes = false;
     bool m_bReportAllWays = false;
+    bool m_bTagsAsHSTORE = true;  // if false, as JSON
 
     bool m_bFeatureAdded = false;
 
@@ -514,7 +528,7 @@ class OGROSMDataSource final : public OGRDataSource
     bool ParseConf(char **papszOpenOptions);
     bool CreateTempDB();
     bool SetDBOptions();
-    bool SetCacheSize();
+    void SetCacheSize();
     bool CreatePreparedStatements();
     void CloseDB();
 
@@ -568,10 +582,12 @@ class OGROSMDataSource final : public OGRDataSource
     {
         return m_pszName;
     }
+
     virtual int GetLayerCount() override
     {
         return m_nLayers;
     }
+
     virtual OGRLayer *GetLayer(int) override;
 
     virtual int TestCapability(const char *) override;
@@ -605,6 +621,7 @@ class OGROSMDataSource final : public OGRDataSource
     {
         return m_poCurrentLayer;
     }
+
     void SetCurrentLayer(OGROSMLayer *poLyr)
     {
         m_poCurrentLayer = poLyr;

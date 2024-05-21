@@ -585,6 +585,9 @@ OGRErr GMLHandler::startElement(const char *pszName, int nLenName, void *attr)
         case STATE_BOUNDED_BY:
             eRet = startElementBoundedBy(pszName, nLenName, attr);
             break;
+        case STATE_BOUNDED_BY_IN_FEATURE:
+            eRet = startElementGeometry(pszName, nLenName, attr);
+            break;
         case STATE_CITYGML_ATTRIBUTE:
             eRet = startElementCityGMLGenericAttr(pszName, nLenName, attr);
             break;
@@ -648,6 +651,9 @@ OGRErr GMLHandler::endElement()
         case STATE_BOUNDED_BY:
             return endElementBoundedBy();
             break;
+        case STATE_BOUNDED_BY_IN_FEATURE:
+            return endElementBoundedByInFeature();
+            break;
         case STATE_CITYGML_ATTRIBUTE:
             return endElementCityGMLGenericAttr();
             break;
@@ -688,6 +694,9 @@ OGRErr GMLHandler::dataHandler(const char *data, int nLen)
             break;
         case STATE_BOUNDED_BY:
             return OGRERR_NONE;
+            break;
+        case STATE_BOUNDED_BY_IN_FEATURE:
+            return dataHandlerGeometry(data, nLen);
             break;
         case STATE_CITYGML_ATTRIBUTE:
             return dataHandlerAttribute(data, nLen);
@@ -740,13 +749,11 @@ OGRErr GMLHandler::startElementBoundedBy(const char *pszName, int /*nLenName*/,
 OGRErr GMLHandler::startElementGeometry(const char *pszName, int nLenName,
                                         void *attr)
 {
-    if (nLenName == 9 && strcmp(pszName, "boundedBy") == 0)
+    if (stateStack[nStackDepth] == STATE_BOUNDED_BY_IN_FEATURE &&
+        apsXMLNode.empty())
     {
-        m_inBoundedByDepth = m_nDepth;
-
-        PUSH_STATE(STATE_BOUNDED_BY);
-
-        return OGRERR_NONE;
+        CPLError(CE_Failure, CPLE_AppDefined, "Invalid <boundedBy> construct");
+        return OGRERR_FAILURE;
     }
 
     /* Create new XML Element */
@@ -773,6 +780,17 @@ OGRErr GMLHandler::startElementGeometry(const char *pszName, int nLenName,
 
     /* Add attributes to the element */
     CPLXMLNode *psLastChildCurNode = AddAttributes(psCurNode, attr);
+    for (CPLXMLNode *psIter = psCurNode->psChild; psIter;
+         psIter = psIter->psNext)
+    {
+        if (psIter->eType == CXT_Attribute &&
+            strcmp(psIter->pszValue, "xlink:href") == 0 &&
+            psIter->psChild->pszValue && psIter->psChild->pszValue[0] == '#')
+        {
+            m_oMapElementToSubstitute[psIter->psChild->pszValue + 1] =
+                psCurNode;
+        }
+    }
 
     /* Some CityGML lack a srsDimension="3" in posList, such as in */
     /* http://www.citygml.org/fileadmin/count.php?f=fileadmin%2Fcitygml%2Fdocs%2FFrankfurt_Street_Setting_LOD3.zip
@@ -1223,18 +1241,19 @@ OGRErr GMLHandler::startElementFeatureAttribute(const char *pszName,
 
             else
             {
-                if (m_poReader->IsConsistentSingleGeomElemPath())
+                if (!poClass->IsSchemaLocked() &&
+                    poClass->IsConsistentSingleGeomElemPath())
                 {
                     const std::string &osGeomElemPath =
-                        m_poReader->GetSingleGeomElemPath();
+                        poClass->GetSingleGeomElemPath();
                     if (osGeomElemPath.empty())
                     {
-                        m_poReader->SetSingleGeomElemPath(poState->osPath);
+                        poClass->SetSingleGeomElemPath(poState->osPath);
                     }
                     else if (poState->osPath != osGeomElemPath)
                     {
-                        m_poReader->SetConsistentSingleGeomElemPath(false);
-                        m_poReader->SetSingleGeomElemPath(std::string());
+                        poClass->SetConsistentSingleGeomElemPath(false);
+                        poClass->SetSingleGeomElemPath(std::string());
                     }
                 }
                 bReadGeometry = true;
@@ -1256,11 +1275,24 @@ OGRErr GMLHandler::startElementFeatureAttribute(const char *pszName,
             return startElementGeometry(pszName, nLenName, attr);
         }
     }
-    else if (nLenName == 9 && strcmp(pszName, "boundedBy") == 0)
+    else if (nLenName == 9 && strcmp(pszName, "boundedBy") == 0 &&
+             // We ignore the UseBBOX() flag for CityGML, since CityGML
+             // has elements like bldg:boundedBy, which are not a simple
+             // rectangular bbox. This is needed to read properly
+             // autotest/ogr/data/gml/citygml_lod2_713_5322.xml
+             // (this is a workaround of not being namespace aware)
+             (eAppSchemaType == APPSCHEMA_CITYGML || m_poReader->UseBBOX()))
     {
         m_inBoundedByDepth = m_nDepth;
 
-        PUSH_STATE(STATE_BOUNDED_BY);
+        CPLAssert(apsXMLNode.empty());
+
+        NodeLastChild sNodeLastChild;
+        sNodeLastChild.psNode = nullptr;
+        sNodeLastChild.psLastChild = nullptr;
+        apsXMLNode.push_back(sNodeLastChild);
+
+        PUSH_STATE(STATE_BOUNDED_BY_IN_FEATURE);
 
         return OGRERR_NONE;
     }
@@ -1526,6 +1558,30 @@ OGRErr GMLHandler::endElementBoundedBy()
 }
 
 /************************************************************************/
+/*                     endElementBoundedByInFeature()                   */
+/************************************************************************/
+OGRErr GMLHandler::endElementBoundedByInFeature()
+
+{
+    if (m_nDepth > m_inBoundedByDepth)
+    {
+        if (m_nDepth == m_inBoundedByDepth + 1)
+        {
+            m_nGeometryDepth = m_nDepth;
+        }
+        return endElementGeometry();
+    }
+    else
+    {
+        POP_STATE();
+        if (apsXMLNode.size() >= 2 && apsXMLNode[1].psNode != nullptr)
+            CPLDestroyXMLNode(apsXMLNode[1].psNode);
+        apsXMLNode.clear();
+        return OGRERR_NONE;
+    }
+}
+
+/************************************************************************/
 /*                       ParseAIXMElevationPoint()                      */
 /************************************************************************/
 
@@ -1605,8 +1661,54 @@ OGRErr GMLHandler::endElementGeometry()
         m_nGeomLen = 0;
     }
 
+    CPLXMLNode *psThisNode = apsXMLNode.back().psNode;
+    CPLXMLNode *psThisNodeChild = psThisNode->psChild;
+    if (!m_oMapElementToSubstitute.empty() && psThisNodeChild &&
+        psThisNodeChild->eType == CXT_Attribute &&
+        strcmp(psThisNodeChild->pszValue, "gml:id") == 0 &&
+        psThisNodeChild->psChild->pszValue)
+    {
+        auto oIter =
+            m_oMapElementToSubstitute.find(psThisNodeChild->psChild->pszValue);
+        if (oIter != m_oMapElementToSubstitute.end())
+        {
+            auto psLastChild = oIter->second->psChild;
+            if (psLastChild)
+            {
+                // CPLDebug("GML", "Substitution of xlink:href=\"#%s\" with actual content", psThisNodeChild->psChild->pszValue);
+                CPLXMLNode *psAfter = psThisNode->psNext;
+                psThisNode->psNext = nullptr;
+                // We can patch oIter->second as it stored as it in the current
+                // GMLFeature.
+                // Of course that would no longer be the case in case of
+                // cross-references between different GMLFeature, hence we clear
+                // m_oMapElementToSubstitute at the end of the current feature.
+                while (psLastChild->psNext)
+                    psLastChild = psLastChild->psNext;
+                if (psLastChild == psThisNode)
+                {
+                    /* Can happen in situations like:
+                     <foo xlink:href="#X">
+                        <bar gml:id="X"/>
+                     </foo>
+                     Do not attempt substitution as that would cause a memory
+                     leak.
+                    */
+                }
+                else
+                {
+                    psLastChild->psNext = CPLCloneXMLTree(psThisNode);
+                }
+                psThisNode->psNext = psAfter;
+            }
+        }
+    }
+
     if (m_nDepth == m_nGeometryDepth)
     {
+        m_nGeometryDepth = 0;
+
+        CPLAssert(apsXMLNode.size() == 2);
         CPLXMLNode *psInterestNode = apsXMLNode.back().psNode;
 
         /*char* pszXML = CPLSerializeXMLTree(psInterestNode);
@@ -1662,23 +1764,47 @@ OGRErr GMLHandler::endElementGeometry()
         }
 
         GMLFeature *poGMLFeature = m_poReader->GetState()->m_poFeature;
-        if (m_poReader->FetchAllGeometries())
-            poGMLFeature->AddGeometry(psInterestNode);
+        if (stateStack[nStackDepth] == STATE_BOUNDED_BY_IN_FEATURE)
+        {
+            if (eAppSchemaType == APPSCHEMA_CITYGML)
+                CPLDestroyXMLNode(psInterestNode);
+            else
+                poGMLFeature->SetBoundedByGeometry(psInterestNode);
+        }
         else
         {
-            GMLFeatureClass *poClass = poGMLFeature->GetClass();
-            if (poClass->GetGeometryPropertyCount() > 1)
-            {
-                poGMLFeature->SetGeometryDirectly(m_nGeometryPropertyIndex,
-                                                  psInterestNode);
-            }
+            if (m_poReader->FetchAllGeometries())
+                poGMLFeature->AddGeometry(psInterestNode);
             else
             {
-                poGMLFeature->SetGeometryDirectly(psInterestNode);
+                GMLFeatureClass *poClass = poGMLFeature->GetClass();
+                if (poClass->GetGeometryPropertyCount() > 1)
+                {
+                    if (poGMLFeature->GetGeometryRef(m_nGeometryPropertyIndex))
+                    {
+                        // If we have already a geometry, setting a new one
+                        // will invalidate nodes potentially stored in
+                        // m_oMapElementToSubstitute, so clear it
+                        m_oMapElementToSubstitute.clear();
+                    }
+                    poGMLFeature->SetGeometryDirectly(m_nGeometryPropertyIndex,
+                                                      psInterestNode);
+                }
+                else
+                {
+                    if (poGMLFeature->GetGeometryRef(0))
+                    {
+                        // If we have already a geometry, setting a new one
+                        // will invalidate nodes potentially stored in
+                        // m_oMapElementToSubstitute, so clear it
+                        m_oMapElementToSubstitute.clear();
+                    }
+                    poGMLFeature->SetGeometryDirectly(psInterestNode);
+                }
             }
-        }
 
-        POP_STATE();
+            POP_STATE();
+        }
     }
 
     apsXMLNode.pop_back();
@@ -1835,6 +1961,7 @@ OGRErr GMLHandler::endElementFeature()
     /* -------------------------------------------------------------------- */
     if (m_nDepth == m_nDepthFeature)
     {
+        m_oMapElementToSubstitute.clear();
         m_poReader->PopState();
 
         POP_STATE();

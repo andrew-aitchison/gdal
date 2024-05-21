@@ -49,22 +49,21 @@ def osr_url_test(url, expected_wkt):
     srs = osr.SpatialReference()
     from osgeo import gdal
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    try:
-        srs.ImportFromUrl(url)
-    except AttributeError:  # old-gen bindings don't have this method yet
-        pytest.skip()
-    except Exception:
-        gdal.PopErrorHandler()
-        if (
-            gdal.GetLastErrorMsg()
-            == "GDAL/OGR not compiled with libcurl support, remote requests not supported."
-            or gdal.GetLastErrorMsg().find("timed out") != -1
-        ):
+    with gdal.quiet_errors():
+        try:
+            srs.ImportFromUrl(url)
+        except AttributeError:  # old-gen bindings don't have this method yet
             pytest.skip()
-        pytest.fail("exception: " + gdal.GetLastErrorMsg())
+        except Exception:
+            gdal.PopErrorHandler()
+            if (
+                gdal.GetLastErrorMsg()
+                == "GDAL/OGR not compiled with libcurl support, remote requests not supported."
+                or gdal.GetLastErrorMsg().find("timed out") != -1
+            ):
+                pytest.skip()
+            pytest.fail("exception: " + gdal.GetLastErrorMsg())
 
-    gdal.PopErrorHandler()
     if (
         gdal.GetLastErrorMsg()
         == "GDAL/OGR not compiled with libcurl support, remote requests not supported."
@@ -109,3 +108,12 @@ def test_osr_opengis_https_4326():
     srs = osr.SpatialReference()
     assert srs.SetFromUserInput("https://opengis.net/def/crs/EPSG/0/4326") == 0
     assert gdaltest.equal_srs_from_wkt(expected_wkt, srs.ExportToWkt())
+
+
+def test_osr_SetFromUserInput_http_disabled():
+    srs = osr.SpatialReference()
+    with pytest.raises(Exception, match="due to ALLOW_NETWORK_ACCESS=NO"):
+        srs.SetFromUserInput(
+            "https://spatialreference.org/ref/epsg/4326/",
+            options=["ALLOW_NETWORK_ACCESS=NO"],
+        )

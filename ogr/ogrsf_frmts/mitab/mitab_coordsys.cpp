@@ -364,7 +364,7 @@ int MITABCoordSys2TABProjInfo(const char *pszCoordSys, TABProjInfo *psProj)
     // Fetch the units string.
     if (CSLCount(papszNextField) > 0)
     {
-        if (isdigit(papszNextField[0][0]))
+        if (isdigit(static_cast<unsigned char>(papszNextField[0][0])))
         {
             psProj->nUnitsId = static_cast<GByte>(atoi(papszNextField[0]));
         }
@@ -377,7 +377,7 @@ int MITABCoordSys2TABProjInfo(const char *pszCoordSys, TABProjInfo *psProj)
     }
 
     // Finally the projection parameters.
-    for (int iParam = 0; iParam < 6 && CSLCount(papszNextField) > 0; iParam++)
+    for (int iParam = 0; iParam < 7 && CSLCount(papszNextField) > 0; iParam++)
     {
         psProj->adProjParams[iParam] = CPLAtof(papszNextField[0]);
         papszNextField++;

@@ -370,9 +370,10 @@ int OGRAmigoCloudDataSource::FetchSRSId(OGRSpatialReference *poSRS)
 /*                          ICreateLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRAmigoCloudDataSource::ICreateLayer(
-    const char *pszNameIn, OGRSpatialReference *poSpatialRef,
-    OGRwkbGeometryType eGType, char **papszOptions)
+OGRLayer *
+OGRAmigoCloudDataSource::ICreateLayer(const char *pszNameIn,
+                                      const OGRGeomFieldDefn *poGeomFieldDefn,
+                                      CSLConstList papszOptions)
 {
     if (!bReadWrite)
     {
@@ -381,15 +382,19 @@ OGRLayer *OGRAmigoCloudDataSource::ICreateLayer(
         return nullptr;
     }
 
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSpatialRef =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+
     CPLString osName(pszNameIn);
     OGRAmigoCloudTableLayer *poLayer =
         new OGRAmigoCloudTableLayer(this, osName);
     const bool bGeomNullable =
         CPLFetchBool(papszOptions, "GEOMETRY_NULLABLE", true);
-    OGRSpatialReference *poSRSClone = poSpatialRef;
-    if (poSRSClone)
+    OGRSpatialReference *poSRSClone = nullptr;
+    if (poSpatialRef)
     {
-        poSRSClone = poSRSClone->Clone();
+        poSRSClone = poSpatialRef->Clone();
         poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     poLayer->SetDeferredCreation(eGType, poSRSClone, bGeomNullable);

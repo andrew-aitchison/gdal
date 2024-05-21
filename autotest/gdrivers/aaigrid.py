@@ -41,6 +41,16 @@ from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("AAIGRID")
 
+
+###############################################################################
+
+
+def test_aaigrid_read_byte_tif_grd():
+
+    ds = gdal.Open("data/aaigrid/byte.tif.grd")
+    assert ds.GetRasterBand(1).Checksum() == 4672
+
+
 ###############################################################################
 # Perform simple read test.
 
@@ -48,7 +58,31 @@ pytestmark = pytest.mark.require_driver("AAIGRID")
 def test_aaigrid_1():
 
     tst = gdaltest.GDALTest("aaigrid", "aaigrid/pixel_per_line.asc", 1, 1123)
-    return tst.testOpen()
+    tst.testOpen()
+
+
+###############################################################################
+# CreateCopy tests
+
+init_list = [
+    ("byte.tif", 4672),
+    ("int16.tif", 4672),
+    ("uint16.tif", 4672),
+    ("float32.tif", 4672),
+    ("utmsmall.tif", 50054),
+]
+
+
+@pytest.mark.parametrize(
+    "filename,checksum",
+    init_list,
+    ids=[tup[0].split(".")[0] for tup in init_list],
+)
+def test_aaigrid_createcopy(filename, checksum):
+    ut = gdaltest.GDALTest(
+        "AAIGrid", "../gcore/data/" + filename, 1, checksum, filename_absolute=True
+    )
+    ut.testCreateCopy()
 
 
 ###############################################################################
@@ -119,7 +153,7 @@ def test_aaigrid_3():
 
     prj = 'PROJCS["NAD27 / UTM zone 11N",GEOGCS["NAD27",DATUM["North_American_Datum_1927",SPHEROID["Clarke_1866",6378206.4,294.9786982138982]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["Meter",1]]'
 
-    return tst.testCreateCopy(check_gt=1, check_srs=prj)
+    tst.testCreateCopy(check_gt=1, check_srs=prj)
 
 
 ###############################################################################
@@ -129,7 +163,7 @@ def test_aaigrid_3():
 def test_aaigrid_4():
 
     tst = gdaltest.GDALTest("aaigrid", "aaigrid/pixel_per_line.asc", 1, 187, 5, 5, 5, 5)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -166,7 +200,7 @@ def test_aaigrid_5():
     UNIT["METERS",1]]
     """
 
-    return tst.testOpen(check_prj=prj)
+    tst.testOpen(check_prj=prj)
 
 
 ###############################################################################
@@ -205,7 +239,7 @@ def test_aaigrid_7():
 
     tst = gdaltest.GDALTest("AAIGRID", "aaigrid/nonsquare.vrt", 1, 12481)
 
-    return tst.testCreateCopy(check_gt=1)
+    tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -216,7 +250,7 @@ def test_aaigrid_8():
 
     tst = gdaltest.GDALTest("AAIGRID", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -257,9 +291,8 @@ def test_aaigrid_10():
             pass
 
         if i == 0:
-            gdal.SetConfigOption("AAIGRID_DATATYPE", "Float64")
-            ds = gdal.Open("data/aaigrid/float64.asc")
-            gdal.SetConfigOption("AAIGRID_DATATYPE", None)
+            with gdal.config_option("AAIGRID_DATATYPE", "Float64"):
+                ds = gdal.Open("data/aaigrid/float64.asc")
         else:
             ds = gdal.OpenEx(
                 "data/aaigrid/float64.asc", open_options=["DATATYPE=Float64"]
@@ -479,3 +512,14 @@ def test_aaigrid_write_south_up_raster():
     gdal.GetDriverByName("AAIGRID").Delete(
         "/vsimem/test_aaigrid_write_south_up_raster.asc"
     )
+
+
+###############################################################################
+# Test reading a file starting with nan (https://github.com/OSGeo/gdal/issues/9666)
+
+
+def test_aaigrid_starting_with_nan():
+
+    ds = gdal.Open("data/aaigrid/starting_with_nan.asc")
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_Float32
+    assert ds.GetRasterBand(1).Checksum() == 65300

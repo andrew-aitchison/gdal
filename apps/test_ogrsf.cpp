@@ -34,8 +34,10 @@
 #include "ogr_p.h"
 #include "ogrsf_frmts.h"
 #include "ogr_swq.h"
+#include "ogr_recordbatch.h"
 #include "commonutils.h"
 
+#include <cinttypes>
 #include <algorithm>
 #include <limits>
 
@@ -159,8 +161,7 @@ MAIN_START(nArgc, papszArgv)
         {
             pszSQLStatement = papszArgv[++iArg];
         }
-        else if (EQUAL(papszArgv[iArg], "-dialect") &&
-                 papszArgv[iArg + 1] != nullptr)
+        else if (EQUAL(papszArgv[iArg], "-dialect") && iArg + 1 < nArgc)
         {
             pszDialect = papszArgv[++iArg];
         }
@@ -262,6 +263,7 @@ MAIN_START(nArgc, papszArgv)
 
     return (bRet) ? 0 : 1;
 }
+
 MAIN_END
 
 /************************************************************************/
@@ -661,6 +663,22 @@ static int TestCreateLayer(GDALDriver *poDriver, OGRwkbGeometryType eGeomType)
             bRet = FALSE;
         }
 
+        auto poLyrDS = LOG_ACTION(poLayer->GetDataset());
+        if (!poLyrDS)
+        {
+            printf("ERROR: %s: GetDataset() returns NUL just after layer "
+                   "creation.\n",
+                   poDriver->GetDescription());
+            bRet = FALSE;
+        }
+        else if (poLyrDS != poDS)
+        {
+            printf("WARNING: %s: GetDataset()->GetDescription() (=%s) != %s"
+                   "creation.\n",
+                   poDriver->GetDescription(), poLyrDS->GetDescription(),
+                   poDS->GetDescription());
+        }
+
         // Create fields of various types
         int bCreateField = LOG_ACTION(poLayer->TestCapability(OLCCreateField));
         int iFieldStr = -1;
@@ -981,6 +999,7 @@ static int TestCreateLayer(GDALDriver *poDriver, OGRwkbGeometryType eGeomType)
         !EQUAL(poDriver->GetDescription(), "LIBKML") &&
         !EQUAL(poDriver->GetDescription(), "PDF") &&
         !EQUAL(poDriver->GetDescription(), "GeoJSON") &&
+        !EQUAL(poDriver->GetDescription(), "JSONFG") &&
         !EQUAL(poDriver->GetDescription(), "OGR_GMT") &&
         !EQUAL(poDriver->GetDescription(), "PDS4") &&
         !EQUAL(poDriver->GetDescription(), "FlatGeobuf"))
@@ -1585,7 +1604,7 @@ static int TestOGRLayerFeatureCount(GDALDataset *poDS, OGRLayer *poLayer,
                        "OLCZGeometries capability!\n");
             }
 
-            OGRSpatialReference *poGFldSRS =
+            const OGRSpatialReference *poGFldSRS =
                 poLayerDefn->GetGeomFieldDefn(iGeom)->GetSpatialRef();
 
             // Compatibility with old drivers anterior to RFC 41
@@ -1623,7 +1642,7 @@ static int TestOGRLayerFeatureCount(GDALDataset *poDS, OGRLayer *poLayer,
     }
 
     /* mapogr.cpp doesn't like errors after GetNextFeature() */
-    if (CPLGetLastErrorType() != CE_None)
+    if (CPLGetLastErrorType() == CE_Failure)
     {
         bRet = FALSE;
         printf("ERROR: An error was reported : %s\n", CPLGetLastErrorMsg());
@@ -2618,25 +2637,43 @@ static int TestSpatialFilter(OGRLayer *poLayer)
 }
 
 /************************************************************************/
-/*                      TestAttributeFilter()                           */
-/*                                                                      */
-/*      This is intended to be a simple test of the attribute           */
-/*      filtering.  We read the first feature.  Then construct a        */
-/*      attribute filter which includes it, install and                 */
-/*      verify that we get the feature.  Next install a attribute       */
-/*      filter that doesn't include this feature, and test again.       */
+/*                  GetQuotedIfNeededIdentifier()                       */
 /************************************************************************/
 
-static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
-
+static std::string GetQuotedIfNeededIdentifier(const char *pszFieldName)
 {
-    int bRet = TRUE;
+    std::string osIdentifier;
+    const bool bMustQuoteAttrName =
+        pszFieldName[0] == '\0' || strchr(pszFieldName, '_') ||
+        strchr(pszFieldName, ' ') || swq_is_reserved_keyword(pszFieldName);
+    if (bMustQuoteAttrName)
+    {
+        osIdentifier = "\"";
+        osIdentifier += pszFieldName;
+        osIdentifier += "\"";
+    }
+    else
+    {
+        osIdentifier = pszFieldName;
+    }
+    return osIdentifier;
+}
+
+/************************************************************************/
+/*                       GetAttributeFilters()                         */
+/************************************************************************/
+
+static bool GetAttributeFilters(OGRLayer *poLayer,
+                                std::unique_ptr<OGRFeature> &poTargetFeature,
+                                std::string &osInclusiveFilter,
+                                std::string &osExclusiveFilter)
+{
 
     /* -------------------------------------------------------------------- */
     /*      Read the target feature.                                        */
     /* -------------------------------------------------------------------- */
     LOG_ACTION(poLayer->ResetReading());
-    OGRFeature *poTargetFeature = LOG_ACTION(poLayer->GetNextFeature());
+    poTargetFeature.reset(LOG_ACTION(poLayer->GetNextFeature()));
 
     if (poTargetFeature == nullptr)
     {
@@ -2646,7 +2683,7 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
                    "      No features in layer.\n",
                    poLayer->GetName());
         }
-        return bRet;
+        return false;
     }
 
     int i = 0;
@@ -2668,11 +2705,10 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
                    "      Could not find non NULL field.\n",
                    poLayer->GetName());
         }
-        DestroyFeatureAndNullify(poTargetFeature);
-        return bRet;
+        return false;
     }
 
-    const char *pszFieldName =
+    const std::string osFieldName =
         poTargetFeature->GetFieldDefnRef(i)->GetNameRef();
     CPLString osValue = poTargetFeature->GetFieldAsString(i);
     if (eType == OFTReal)
@@ -2693,32 +2729,64 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
     /* -------------------------------------------------------------------- */
     /*      Construct inclusive filter.                                     */
     /* -------------------------------------------------------------------- */
-
-    CPLString osAttributeFilter;
-    const bool bMustQuoteAttrName =
-        pszFieldName[0] == '\0' || strchr(pszFieldName, '_') ||
-        strchr(pszFieldName, ' ') || swq_is_reserved_keyword(pszFieldName);
-    if (bMustQuoteAttrName)
-    {
-        osAttributeFilter = "\"";
-        osAttributeFilter += pszFieldName;
-        osAttributeFilter += "\"";
-    }
-    else
-    {
-        osAttributeFilter = pszFieldName;
-    }
-    osAttributeFilter += " = ";
+    osInclusiveFilter = GetQuotedIfNeededIdentifier(osFieldName.c_str());
+    osInclusiveFilter += " = ";
     if (eType == OFTString)
-        osAttributeFilter += "'";
-    osAttributeFilter += osValue;
+        osInclusiveFilter += "'";
+    osInclusiveFilter += osValue;
     if (eType == OFTString)
-        osAttributeFilter += "'";
+        osInclusiveFilter += "'";
     /* Make sure that the literal will be recognized as a float value */
     /* to avoid int underflow/overflow */
     else if (eType == OFTReal && strchr(osValue, '.') == nullptr)
-        osAttributeFilter += ".";
-    LOG_ACTION(poLayer->SetAttributeFilter(osAttributeFilter));
+        osInclusiveFilter += ".";
+
+    /* -------------------------------------------------------------------- */
+    /*      Construct exclusive filter.                                     */
+    /* -------------------------------------------------------------------- */
+    osExclusiveFilter = GetQuotedIfNeededIdentifier(osFieldName.c_str());
+    osExclusiveFilter += " <> ";
+    if (eType == OFTString)
+        osExclusiveFilter += "'";
+    osExclusiveFilter += osValue;
+    if (eType == OFTString)
+        osExclusiveFilter += "'";
+    /* Make sure that the literal will be recognized as a float value */
+    /* to avoid int underflow/overflow */
+    else if (eType == OFTReal && strchr(osValue, '.') == nullptr)
+        osExclusiveFilter += ".";
+
+    return true;
+}
+
+/************************************************************************/
+/*                      TestAttributeFilter()                           */
+/*                                                                      */
+/*      This is intended to be a simple test of the attribute           */
+/*      filtering.  We read the first feature.  Then construct a        */
+/*      attribute filter which includes it, install and                 */
+/*      verify that we get the feature.  Next install a attribute       */
+/*      filter that doesn't include this feature, and test again.       */
+/************************************************************************/
+
+static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
+
+{
+    int bRet = TRUE;
+
+    std::unique_ptr<OGRFeature> poTargetFeature;
+    std::string osInclusiveFilter;
+    std::string osExclusiveFilter;
+    if (!GetAttributeFilters(poLayer, poTargetFeature, osInclusiveFilter,
+                             osExclusiveFilter))
+    {
+        return true;
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      Apply inclusive filter.                                         */
+    /* -------------------------------------------------------------------- */
+    LOG_ACTION(poLayer->SetAttributeFilter(osInclusiveFilter.c_str()));
 
     /* -------------------------------------------------------------------- */
     /*      Verify that we can find the target feature.                     */
@@ -2729,7 +2797,7 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
     OGRFeature *poFeature = nullptr;
     while ((poFeature = LOG_ACTION(poLayer->GetNextFeature())) != nullptr)
     {
-        if (poFeature->Equal(poTargetFeature))
+        if (poFeature->Equal(poTargetFeature.get()))
         {
             bFoundFeature = true;
             DestroyFeatureAndNullify(poFeature);
@@ -2754,29 +2822,9 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
     const GIntBig nInclusiveCount = LOG_ACTION(poLayer->GetFeatureCount());
 
     /* -------------------------------------------------------------------- */
-    /*      Construct exclusive filter.                                     */
+    /*      Apply exclusive filter.                                         */
     /* -------------------------------------------------------------------- */
-    if (bMustQuoteAttrName)
-    {
-        osAttributeFilter = "\"";
-        osAttributeFilter += pszFieldName;
-        osAttributeFilter += "\"";
-    }
-    else
-    {
-        osAttributeFilter = pszFieldName;
-    }
-    osAttributeFilter += " <> ";
-    if (eType == OFTString)
-        osAttributeFilter += "'";
-    osAttributeFilter += osValue;
-    if (eType == OFTString)
-        osAttributeFilter += "'";
-    /* Make sure that the literal will be recognized as a float value */
-    /* to avoid int underflow/overflow */
-    else if (eType == OFTReal && strchr(osValue, '.') == nullptr)
-        osAttributeFilter += ".";
-    LOG_ACTION(poLayer->SetAttributeFilter(osAttributeFilter));
+    LOG_ACTION(poLayer->SetAttributeFilter(osExclusiveFilter.c_str()));
 
     /* -------------------------------------------------------------------- */
     /*      Verify that we can find the target feature.                     */
@@ -2786,7 +2834,7 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
     GIntBig nExclusiveCountWhileIterating = 0;
     while ((poFeature = LOG_ACTION(poLayer->GetNextFeature())) != nullptr)
     {
-        if (poFeature->Equal(poTargetFeature))
+        if (poFeature->Equal(poTargetFeature.get()))
         {
             DestroyFeatureAndNullify(poFeature);
             break;
@@ -2802,13 +2850,13 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
 
     // Check that GetFeature() ignores the attribute filter
     OGRFeature *poFeature2 =
-        LOG_ACTION(poLayer->GetFeature(poTargetFeature->GetFID()));
+        LOG_ACTION(poLayer->GetFeature(poTargetFeature.get()->GetFID()));
 
     poLayer->ResetReading();
     OGRFeature *poFeature3 = nullptr;
     while ((poFeature3 = LOG_ACTION(poLayer->GetNextFeature())) != nullptr)
     {
-        if (poFeature3->Equal(poTargetFeature))
+        if (poFeature3->Equal(poTargetFeature.get()))
         {
             DestroyFeatureAndNullify(poFeature3);
             break;
@@ -2845,7 +2893,7 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
         printf("INFO: Attribute filter exclusion seems to work.\n");
     }
 
-    if (poFeature2 == nullptr || !poFeature2->Equal(poTargetFeature))
+    if (poFeature2 == nullptr || !poFeature2->Equal(poTargetFeature.get()))
     {
         bRet = FALSE;
         printf("ERROR: Attribute filter has been taken into account "
@@ -2866,8 +2914,6 @@ static int TestAttributeFilter(CPL_UNUSED GDALDataset *poDS, OGRLayer *poLayer)
 
     if (poFeature2 != nullptr)
         DestroyFeatureAndNullify(poFeature2);
-
-    DestroyFeatureAndNullify(poTargetFeature);
 
     return bRet;
 }
@@ -3634,9 +3680,9 @@ static int TestLayerSQL(GDALDataset *poDS, OGRLayer *poLayer)
                     else if (poLayerFeatGeom != nullptr &&
                              poSQLFeatGeom != nullptr)
                     {
-                        OGRSpatialReference *poLayerFeatSRS =
+                        const OGRSpatialReference *poLayerFeatSRS =
                             poLayerFeatGeom->getSpatialReference();
-                        OGRSpatialReference *poSQLFeatSRS =
+                        const OGRSpatialReference *poSQLFeatSRS =
                             poSQLFeatGeom->getSpatialReference();
                         if (poLayerFeatSRS == nullptr &&
                             poSQLFeatSRS != nullptr)
@@ -3745,17 +3791,38 @@ static int TestLayerSQL(GDALDataset *poDS, OGRLayer *poLayer)
     oPoly.addRing(&oRing);
 
     CPLErrorReset();
-    poSQLLyr = LOG_ACTION(poDS->ExecuteSQL(osSQL.c_str(), &oPoly, nullptr));
-    if (CPLGetLastErrorType() != CE_None)
+    if (poLayer->GetLayerDefn()->GetGeomFieldCount() == 0)
     {
-        bRet = FALSE;
-        printf("ERROR: ExecuteSQL() triggered an unexpected error.\n");
+        CPLPushErrorHandler(CPLQuietErrorHandler);
+        poSQLLyr = LOG_ACTION(poDS->ExecuteSQL(osSQL.c_str(), &oPoly, nullptr));
+        CPLPopErrorHandler();
+        if (poSQLLyr)
+        {
+            printf("WARNING: ExecuteSQL() with a spatial filter on a "
+                   "non-spatial layer should have triggered an error.\n");
+        }
+    }
+    else
+    {
+        poSQLLyr = LOG_ACTION(poDS->ExecuteSQL(osSQL.c_str(), &oPoly, nullptr));
+        if (CPLGetLastErrorType() == CE_Failure &&
+            poLayer->GetLayerDefn()->GetGeomFieldCount() > 0)
+        {
+            bRet = FALSE;
+            printf("ERROR: ExecuteSQL() triggered an unexpected error.\n");
+        }
+        if (!poSQLLyr)
+        {
+            printf("ERROR: ExecuteSQL() should have returned a non-NULL "
+                   "result.\n");
+            bRet = FALSE;
+        }
     }
     if (poSQLLyr)
     {
         CPLErrorReset();
         poSQLFeat = LOG_ACTION(poSQLLyr->GetNextFeature());
-        if (CPLGetLastErrorType() != CE_None)
+        if (CPLGetLastErrorType() == CE_Failure)
         {
             bRet = FALSE;
             printf("ERROR: GetNextFeature() triggered an unexpected error.\n");
@@ -3769,14 +3836,377 @@ static int TestLayerSQL(GDALDataset *poDS, OGRLayer *poLayer)
         DestroyFeatureAndNullify(poSQLFeat);
         LOG_ACTION(poDS->ReleaseResultSet(poSQLLyr));
     }
-    else
-    {
-        printf("ERROR: ExecuteSQL() should have returned a non-NULL result.\n");
-        bRet = FALSE;
-    }
 
     if (bRet && bVerbose)
         printf("INFO: TestLayerSQL passed.\n");
+
+    return bRet;
+}
+
+/************************************************************************/
+/*                  CountFeaturesUsingArrowStream()                     */
+/************************************************************************/
+
+static int64_t CountFeaturesUsingArrowStream(OGRLayer *poLayer,
+                                             int64_t nExpectedFID,
+                                             int64_t nUnexpectedFID, bool &bOK)
+{
+    struct ArrowArrayStream stream;
+    if (!LOG_ACTION(poLayer->GetArrowStream(&stream)))
+    {
+        printf("ERROR: GetArrowStream() failed\n");
+        return -1;
+    }
+    struct ArrowSchema schema;
+    if (stream.get_schema(&stream, &schema) != 0)
+    {
+        printf("ERROR: stream.get_schema() failed\n");
+        stream.release(&stream);
+        return -1;
+    }
+    int iFIDColumn = -1;
+    if (schema.n_children > 0 &&
+        (strcmp(schema.children[0]->name, "OGC_FID") == 0 ||
+         strcmp(schema.children[0]->name, poLayer->GetFIDColumn()) == 0) &&
+        strcmp(schema.children[0]->format, "l") == 0)
+    {
+        iFIDColumn = 0;
+    }
+    schema.release(&schema);
+    int64_t nFeatureCountFiltered = 0;
+    bool bExpectedFIDFound = false;
+    bool bUnexpectedFIDFound = false;
+    while (true)
+    {
+        struct ArrowArray array;
+        if (stream.get_next(&stream, &array) != 0)
+        {
+            printf("ERROR: stream.get_next() is NULL\n");
+            stream.release(&stream);
+            return -1;
+        }
+        if (!array.release)
+            break;
+        if (iFIDColumn >= 0 && (nExpectedFID >= 0 || nUnexpectedFID >= 0))
+        {
+            const int64_t *panIds =
+                static_cast<const int64_t *>(
+                    array.children[iFIDColumn]->buffers[1]) +
+                array.children[iFIDColumn]->offset;
+            for (int64_t i = 0; i < array.length; ++i)
+            {
+                if (nExpectedFID >= 0 && panIds[i] == nExpectedFID)
+                    bExpectedFIDFound = true;
+                if (nUnexpectedFID >= 0 && panIds[i] == nUnexpectedFID)
+                    bUnexpectedFIDFound = true;
+            }
+        }
+        nFeatureCountFiltered += array.length;
+        array.release(&array);
+    }
+    if (iFIDColumn >= 0)
+    {
+        if (nExpectedFID >= 0 && !bExpectedFIDFound)
+        {
+            bOK = false;
+            printf("ERROR: expected to find feature of id %" PRId64
+                   ", but did not get it\n",
+                   nExpectedFID);
+        }
+        if (nUnexpectedFID >= 0 && bUnexpectedFIDFound)
+        {
+            bOK = false;
+            printf("ERROR: expected *not* to find feature of id %" PRId64
+                   ", but did get it\n",
+                   nUnexpectedFID);
+        }
+    }
+    stream.release(&stream);
+    return nFeatureCountFiltered;
+}
+
+/************************************************************************/
+/*                   TestLayerGetArrowStream()                          */
+/************************************************************************/
+
+static int TestLayerGetArrowStream(OGRLayer *poLayer)
+{
+    LOG_ACTION(poLayer->SetSpatialFilter(nullptr));
+    LOG_ACTION(poLayer->SetAttributeFilter(nullptr));
+    LOG_ACTION(poLayer->ResetReading());
+
+    struct ArrowArrayStream stream;
+    if (!LOG_ACTION(poLayer->GetArrowStream(&stream)))
+    {
+        printf("ERROR: GetArrowStream() failed\n");
+        return false;
+    }
+
+    if (!stream.release)
+    {
+        printf("ERROR: stream.release is NULL\n");
+        return false;
+    }
+
+    struct ArrowSchema schema;
+    if (stream.get_schema(&stream, &schema) != 0)
+    {
+        printf("ERROR: stream.get_schema() failed\n");
+        stream.release(&stream);
+        return false;
+    }
+
+    if (!schema.release)
+    {
+        printf("ERROR: schema.release is NULL\n");
+        stream.release(&stream);
+        return false;
+    }
+
+    if (strcmp(schema.format, "+s") != 0)
+    {
+        printf("ERROR: expected schema.format to be '+s'. Got '%s'\n",
+               schema.format);
+        schema.release(&schema);
+        stream.release(&stream);
+        return false;
+    }
+
+    int64_t nFeatureCount = 0;
+    while (true)
+    {
+        struct ArrowArray array;
+        if (stream.get_next(&stream, &array) != 0)
+        {
+            printf("ERROR: stream.get_next() is NULL\n");
+            schema.release(&schema);
+            stream.release(&stream);
+            return false;
+        }
+        if (array.release == nullptr)
+        {
+            break;
+        }
+
+        if (array.n_children != schema.n_children)
+        {
+            printf("ERROR: expected array.n_children (=%d) to be "
+                   "schema.n_children (=%d)\n",
+                   int(array.n_children), int(schema.n_children));
+            array.release(&array);
+            schema.release(&schema);
+            stream.release(&stream);
+            return false;
+        }
+
+        int bRet = true;
+        for (int i = 0; i < array.n_children; ++i)
+        {
+            if (array.children[i]->length != array.length)
+            {
+                bRet = false;
+                printf("ERROR: expected array.children[i]->length (=%d) to be "
+                       "array.length (=%d)\n",
+                       int(array.children[i]->length), int(array.length));
+            }
+        }
+        if (!bRet)
+        {
+            array.release(&array);
+            schema.release(&schema);
+            stream.release(&stream);
+            return false;
+        }
+
+        nFeatureCount += array.length;
+
+        array.release(&array);
+
+        if (array.release)
+        {
+            printf("ERROR: array.release should be NULL after release\n");
+            schema.release(&schema);
+            stream.release(&stream);
+            return false;
+        }
+    }
+
+    bool bRet = true;
+    // We are a bit in non-specified behavior below by calling get_next()
+    // after end of iteration.
+    {
+        struct ArrowArray array;
+        if (stream.get_next(&stream, &array) == 0)
+        {
+            if (array.length != 0)
+            {
+                bRet = false;
+                printf("ERROR: get_next() return an array with length != 0 "
+                       "after end of iteration\n");
+            }
+            if (array.release)
+                array.release(&array);
+        }
+    }
+
+    schema.release(&schema);
+    if (schema.release)
+    {
+        printf("ERROR: schema.release should be NULL after release\n");
+        stream.release(&stream);
+        return false;
+    }
+
+    stream.release(&stream);
+    if (stream.release)
+    {
+        printf("ERROR: stream.release should be NULL after release\n");
+        return false;
+    }
+
+    const int64_t nFCClassic = poLayer->GetFeatureCount(true);
+    if (nFeatureCount != nFCClassic)
+    {
+        printf("ERROR: GetArrowStream() returned %" PRId64
+               " features, whereas GetFeatureCount() returned %" PRId64 "\n",
+               nFeatureCount, nFCClassic);
+        bRet = false;
+    }
+
+    {
+        LOG_ACTION(poLayer->SetAttributeFilter("1=1"));
+        const auto nFeatureCountFiltered =
+            CountFeaturesUsingArrowStream(poLayer, -1, -1, bRet);
+        LOG_ACTION(poLayer->SetAttributeFilter(nullptr));
+        if (nFeatureCount != nFeatureCountFiltered)
+        {
+            printf("ERROR: GetArrowStream() with 1=1 filter returned %" PRId64
+                   " features, whereas %" PRId64 " expected\n",
+                   nFeatureCountFiltered, nFeatureCount);
+            bRet = false;
+        }
+    }
+
+    {
+        LOG_ACTION(poLayer->SetAttributeFilter("1=0"));
+        const auto nFeatureCountFiltered =
+            CountFeaturesUsingArrowStream(poLayer, -1, -1, bRet);
+        LOG_ACTION(poLayer->SetAttributeFilter(nullptr));
+        if (nFeatureCountFiltered != 0)
+        {
+            printf("ERROR: GetArrowStream() with 1=0 filter returned %" PRId64
+                   " features, whereas 0 expected\n",
+                   nFeatureCountFiltered);
+            bRet = false;
+        }
+    }
+
+    std::unique_ptr<OGRFeature> poTargetFeature;
+    std::string osInclusiveFilter;
+    std::string osExclusiveFilter;
+    if (GetAttributeFilters(poLayer, poTargetFeature, osInclusiveFilter,
+                            osExclusiveFilter))
+    {
+        {
+            LOG_ACTION(poLayer->SetAttributeFilter(osInclusiveFilter.c_str()));
+            const auto nFeatureCountFiltered = CountFeaturesUsingArrowStream(
+                poLayer, poTargetFeature->GetFID(), -1, bRet);
+            LOG_ACTION(poLayer->SetAttributeFilter(nullptr));
+            if (nFeatureCountFiltered == 0)
+            {
+                printf(
+                    "ERROR: GetArrowStream() with %s filter returned %" PRId64
+                    " features, whereas at least one expected\n",
+                    osInclusiveFilter.c_str(), nFeatureCountFiltered);
+                bRet = false;
+            }
+            else if (bVerbose)
+            {
+                printf("INFO: Attribute filter inclusion with GetArrowStream "
+                       "seems to work.\n");
+            }
+        }
+
+        {
+            LOG_ACTION(poLayer->SetAttributeFilter(osExclusiveFilter.c_str()));
+            const auto nFeatureCountFiltered =
+                CountFeaturesUsingArrowStream(poLayer, -1, -1, bRet);
+            LOG_ACTION(poLayer->SetAttributeFilter(nullptr));
+            if (nFeatureCountFiltered >= nFCClassic)
+            {
+                printf(
+                    "ERROR: GetArrowStream() with %s filter returned %" PRId64
+                    " features, whereas less than %" PRId64 " expected\n",
+                    osExclusiveFilter.c_str(), nFeatureCountFiltered,
+                    nFCClassic);
+                bRet = false;
+            }
+            else if (bVerbose)
+            {
+                printf("INFO: Attribute filter exclusion with GetArrowStream "
+                       "seems to work.\n");
+            }
+        }
+
+        auto poGeom = poTargetFeature->GetGeometryRef();
+        if (poGeom && !poGeom->IsEmpty())
+        {
+            OGREnvelope sEnvelope;
+            poGeom->getEnvelope(&sEnvelope);
+
+            OGREnvelope sLayerExtent;
+            double epsilon = 10.0;
+            if (LOG_ACTION(poLayer->TestCapability(OLCFastGetExtent)) &&
+                LOG_ACTION(poLayer->GetExtent(&sLayerExtent)) == OGRERR_NONE &&
+                sLayerExtent.MinX < sLayerExtent.MaxX &&
+                sLayerExtent.MinY < sLayerExtent.MaxY)
+            {
+                epsilon = std::min(sLayerExtent.MaxX - sLayerExtent.MinX,
+                                   sLayerExtent.MaxY - sLayerExtent.MinY) /
+                          10.0;
+            }
+
+            /* -------------------------------------------------------------------- */
+            /*      Construct inclusive filter.                                     */
+            /* -------------------------------------------------------------------- */
+
+            OGRLinearRing oRing;
+            oRing.setPoint(0, sEnvelope.MinX - 2 * epsilon,
+                           sEnvelope.MinY - 2 * epsilon);
+            oRing.setPoint(1, sEnvelope.MinX - 2 * epsilon,
+                           sEnvelope.MaxY + 1 * epsilon);
+            oRing.setPoint(2, sEnvelope.MaxX + 1 * epsilon,
+                           sEnvelope.MaxY + 1 * epsilon);
+            oRing.setPoint(3, sEnvelope.MaxX + 1 * epsilon,
+                           sEnvelope.MinY - 2 * epsilon);
+            oRing.setPoint(4, sEnvelope.MinX - 2 * epsilon,
+                           sEnvelope.MinY - 2 * epsilon);
+
+            OGRPolygon oInclusiveFilter;
+            oInclusiveFilter.addRing(&oRing);
+
+            LOG_ACTION(poLayer->SetSpatialFilter(&oInclusiveFilter));
+            const auto nFeatureCountFiltered = CountFeaturesUsingArrowStream(
+                poLayer, poTargetFeature->GetFID(), -1, bRet);
+            LOG_ACTION(poLayer->SetSpatialFilter(nullptr));
+            if (nFeatureCountFiltered == 0)
+            {
+                printf("ERROR: GetArrowStream() with inclusive spatial filter "
+                       "returned %" PRId64
+                       " features, whereas at least 1 expected\n",
+                       nFeatureCountFiltered);
+                bRet = false;
+            }
+            else if (bVerbose)
+            {
+                printf("INFO: Spatial filter inclusion with GetArrowStream "
+                       "seems to work.\n");
+            }
+        }
+    }
+
+    if (bRet && bVerbose)
+        printf("INFO: TestLayerGetArrowStream passed.\n");
 
     return bRet;
 }
@@ -3828,6 +4258,11 @@ static int TestOGRLayer(GDALDataset *poDS, OGRLayer *poLayer, int bIsSQLLayer)
     /*      Test GetExtent()                                                */
     /* -------------------------------------------------------------------- */
     bRet &= TestGetExtent(poLayer);
+
+    /* -------------------------------------------------------------------- */
+    /*      Test GetArrowStream() interface                                 */
+    /* -------------------------------------------------------------------- */
+    bRet &= TestLayerGetArrowStream(poLayer);
 
     /* -------------------------------------------------------------------- */
     /*      Test random reading.                                            */
@@ -4135,22 +4570,21 @@ static int TestVirtualIO(GDALDataset *poDS)
         return TRUE;
     }
 
-    char **papszFileList = LOG_ACTION(poDS->GetFileList());
-    char **papszIter = papszFileList;
+    const CPLStringList aosFileList(LOG_ACTION(poDS->GetFileList()));
     CPLString osPath;
     int bAllPathIdentical = TRUE;
-    for (; *papszIter != nullptr; papszIter++)
+    for (const char *pszFilename : aosFileList)
     {
-        if (papszIter == papszFileList)
-            osPath = CPLGetPath(*papszIter);
-        else if (strcmp(osPath, CPLGetPath(*papszIter)) != 0)
+        if (pszFilename == aosFileList[0])
+            osPath = CPLGetPath(pszFilename);
+        else if (strcmp(osPath, CPLGetPath(pszFilename)) != 0)
         {
             bAllPathIdentical = FALSE;
             break;
         }
     }
     CPLString osVirtPath;
-    if (bAllPathIdentical && CSLCount(papszFileList) > 1)
+    if (bAllPathIdentical && aosFileList.size() > 1)
     {
         osVirtPath =
             CPLFormFilename("/vsimem", CPLGetFilename(osPath), nullptr);
@@ -4158,14 +4592,14 @@ static int TestVirtualIO(GDALDataset *poDS)
     }
     else
         osVirtPath = "/vsimem";
-    papszIter = papszFileList;
-    for (; *papszIter != nullptr; papszIter++)
+
+    for (const char *pszFilename : aosFileList)
     {
         const char *pszDestFile =
-            CPLFormFilename(osVirtPath, CPLGetFilename(*papszIter), nullptr);
-        /* CPLDebug("test_ogrsf", "Copying %s to %s", *papszIter, pszDestFile);
+            CPLFormFilename(osVirtPath, CPLGetFilename(pszFilename), nullptr);
+        /* CPLDebug("test_ogrsf", "Copying %s to %s", pszFilename, pszDestFile);
          */
-        CPLCopyFile(pszDestFile, *papszIter);
+        CPLCopyFile(pszDestFile, pszFilename);
     }
 
     const char *pszVirtFile;
@@ -4209,13 +4643,11 @@ static int TestVirtualIO(GDALDataset *poDS)
         }
     }
 
-    papszIter = papszFileList;
-    for (; *papszIter != nullptr; papszIter++)
+    for (const char *pszFilename : aosFileList)
     {
         VSIUnlink(
-            CPLFormFilename(osVirtPath, CPLGetFilename(*papszIter), nullptr));
+            CPLFormFilename(osVirtPath, CPLGetFilename(pszFilename), nullptr));
     }
-    CSLDestroy(papszFileList);
 
     return bRet;
 }

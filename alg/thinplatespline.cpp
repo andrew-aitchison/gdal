@@ -47,8 +47,6 @@
 #include "cpl_error.h"
 #include "cpl_vsi.h"
 
-CPL_CVSID("$Id$")
-
 //////////////////////////////////////////////////////////////////////////////
 //// vizGeorefSpline2D
 //////////////////////////////////////////////////////////////////////////////
@@ -215,7 +213,7 @@ static inline double VizGeorefSpline2DBase_func(const double x1,
 #endif  // defined(__INTEL_COMPILER)
 #endif
 
-#if defined(USE_OPTIMIZED_VizGeorefSpline2DBase_func4)
+#if defined(USE_OPTIMIZED_VizGeorefSpline2DBase_func4) && !defined(CPPCHECK)
 
 /* Derived and adapted from code originating from: */
 
@@ -283,6 +281,7 @@ static inline double VizGeorefSpline2DBase_func(const double x1,
  */
 
 typedef double V2DF __attribute__((__vector_size__(16)));
+
 typedef union
 {
     V2DF v2;

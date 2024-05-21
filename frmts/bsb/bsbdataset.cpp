@@ -432,7 +432,7 @@ void BSBDataset::ScanForGCPs(bool isNos, const char *pszFilename)
                 "1924\",6378388,297,AUTHORITY[\"EPSG\",\"7022\"]],TOWGS84[-87,-"
                 "98,-121,0,0,0,0],AUTHORITY[\"EPSG\",\"6230\"]],PRIMEM["
                 "\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\","
-                "0.01745329251994328,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY["
+                "0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY["
                 "\"EPSG\",\"4230\"]]";
         }
 
@@ -794,11 +794,17 @@ int BSBDataset::IdentifyInternal(GDALOpenInfo *poOpenInfo, bool &isNosOut)
         return FALSE;
 
     /* Additional test to avoid false positive. See #2881 */
-    const char *pszRA = strstr((const char *)poOpenInfo->pabyHeader + i, "RA=");
+    const char *pszHeader =
+        reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
+    const char *pszShiftedHeader = pszHeader + i;
+    const char *pszRA = strstr(pszShiftedHeader, "RA=");
     if (pszRA == nullptr) /* This may be a NO1 file */
-        pszRA = strstr((const char *)poOpenInfo->pabyHeader + i, "[JF");
-    if (pszRA == nullptr ||
-        pszRA - ((const char *)poOpenInfo->pabyHeader + i) > 100)
+        pszRA = strstr(pszShiftedHeader, "[JF");
+    if (pszRA == nullptr)
+        return FALSE;
+    if (pszRA - pszShiftedHeader > 100 && !strstr(pszHeader, "VER/") &&
+        !strstr(pszHeader, "KNP/") && !strstr(pszHeader, "KNQ/") &&
+        !strstr(pszHeader, "RGB/"))
         return FALSE;
 
     return TRUE;

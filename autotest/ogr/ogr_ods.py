@@ -50,6 +50,7 @@ def ogr_ods_check(ds):
 
     lyr = ds.GetLayer(0)
     assert lyr.GetName() == "Feuille1", "bad layer name"
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
 
     assert lyr.GetGeomType() == ogr.wkbNone, "bad layer geometry type"
 
@@ -58,6 +59,8 @@ def ogr_ods_check(ds):
     assert lyr.GetFeatureCount() == 26
 
     assert lyr.TestCapability("foo") == 0
+
+    assert lyr.TestCapability(ogr.OLCStringsAsUTF8) == 1
 
     lyr = ds.GetLayer(6)
     assert lyr.GetName() == "Feuille7", "bad layer name"
@@ -189,14 +192,25 @@ def test_ogr_ods_kspread_1():
 
 def test_ogr_ods_2():
 
-    gdal.SetConfigOption("OGR_ODS_HEADERS", "DISABLE")
-    ds = ogr.Open("data/ods/test.ods")
+    with gdal.config_option("OGR_ODS_HEADERS", "DISABLE"):
+        ds = ogr.Open("data/ods/test.ods")
+
+        lyr = ds.GetLayerByName("Feuille7")
+
+        assert lyr.GetFeatureCount() == 3
+
+
+###############################################################################
+# Test HEADERS = DISABLE open option
+
+
+def test_ogr_ods_headers_open_option():
+
+    ds = gdal.OpenEx("data/ods/test.ods", open_options=["HEADERS=DISABLE"])
 
     lyr = ds.GetLayerByName("Feuille7")
 
     assert lyr.GetFeatureCount() == 3
-
-    gdal.SetConfigOption("OGR_ODS_HEADERS", None)
 
 
 ###############################################################################
@@ -205,14 +219,25 @@ def test_ogr_ods_2():
 
 def test_ogr_ods_3():
 
-    gdal.SetConfigOption("OGR_ODS_FIELD_TYPES", "STRING")
-    ds = ogr.Open("data/ods/test.ods")
+    with gdal.config_option("OGR_ODS_FIELD_TYPES", "STRING"):
+        ds = ogr.Open("data/ods/test.ods")
+
+        lyr = ds.GetLayerByName("Feuille7")
+
+        assert lyr.GetLayerDefn().GetFieldDefn(1).GetType() == ogr.OFTString
+
+
+###############################################################################
+# Test FIELD_TYPES = STRING open option
+
+
+def test_ogr_ods_field_types_open_option():
+
+    ds = gdal.OpenEx("data/ods/test.ods", open_options=["FIELD_TYPES=STRING"])
 
     lyr = ds.GetLayerByName("Feuille7")
 
     assert lyr.GetLayerDefn().GetFieldDefn(1).GetType() == ogr.OFTString
-
-    gdal.SetConfigOption("OGR_ODS_FIELD_TYPES", None)
 
 
 ###############################################################################
@@ -249,23 +274,22 @@ def test_ogr_ods_5():
     )
 
     ds = ogr.Open("tmp/test.ods")
-    ret = ogr_ods_check(ds)
+    ogr_ods_check(ds)
     ds = None
 
     os.unlink("tmp/test.ods")
-
-    return ret
 
 
 ###############################################################################
 # Test formula evaluation
 
 
+@pytest.mark.require_driver("CSV")
 def test_ogr_ods_6():
 
     src_ds = ogr.Open("ODS:data/ods/content_formulas.xml")
     filepath = "/vsimem/content_formulas.csv"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = ogr.GetDriverByName("CSV").CopyDataSource(src_ds, filepath)
     assert out_ds is not None, "Unable to create %s." % filepath
     out_ds = None
@@ -306,7 +330,7 @@ def test_ogr_ods_7():
         os.unlink(filepath)
     shutil.copy("data/ods/test.ods", filepath)
 
-    ds = ogr.Open(filepath, update=1)
+    ds = gdal.OpenEx(filepath, gdal.OF_VECTOR | gdal.OF_UPDATE)
     lyr = ds.GetLayerByName("Feuille7")
     feat = lyr.GetNextFeature()
     if feat.GetFID() != 2:
@@ -315,6 +339,7 @@ def test_ogr_ods_7():
     feat.SetField(0, "modified_value")
     lyr.SetFeature(feat)
     feat = None
+    assert ds.FlushCache() == gdal.CE_None
     ds = None
 
     ds = ogr.Open("tmp/ogr_ods_7.ods")
@@ -341,6 +366,8 @@ def test_ogr_ods_8():
     drv = ogr.GetDriverByName("ODS")
     ds = drv.CreateDataSource("/vsimem/ogr_ods_8.ods")
     lyr = ds.CreateLayer("foo")
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
+    assert lyr.TestCapability(ogr.OLCStringsAsUTF8) == 1
     lyr.CreateField(ogr.FieldDefn("Field1", ogr.OFTInteger64))
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetField(0, 1)

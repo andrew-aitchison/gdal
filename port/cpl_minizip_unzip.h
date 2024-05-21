@@ -84,6 +84,7 @@ extern "C"
     {
         int unused;
     } unzFile__;
+
     typedef unzFile__ *unzFile;
 #else
 typedef voidp unzFile;
@@ -130,8 +131,10 @@ typedef voidp unzFile;
         uLong64 compressed_size;   /* compressed size                 4 bytes */
         uLong64 uncompressed_size; /* uncompressed size               4 bytes */
         uLong size_filename;       /* filename length                 2 bytes */
-        uLong size_file_extra;     /* extra field length              2 bytes */
-        uLong size_file_comment;   /* file comment length             2 bytes */
+        uLong64
+            file_extra_abs_offset; /* absolute offset in the file where file_extra is located */
+        uLong size_file_extra;   /* extra field length              2 bytes */
+        uLong size_file_comment; /* file comment length             2 bytes */
 
         uLong disk_num_start; /* disk number start               2 bytes */
         uLong internal_fa;    /* internal file attributes        2 bytes */
@@ -210,6 +213,7 @@ typedef voidp unzFile;
 
     extern int ZEXPORT cpl_unzLocateFile(unzFile file, const char *szFileName,
                                          int iCaseSensitivity);
+
     /*
       Try locate the file szFileName in the zipfile.
       For the iCaseSensitivity signification, see unzStringFileNameCompare
@@ -253,6 +257,13 @@ typedef voidp unzFile;
     /** Addition for GDAL : START */
 
     extern uLong64 ZEXPORT cpl_unzGetCurrentFileZStreamPos(unzFile file);
+
+    extern int cpl_unzGetLocalHeaderPos(unzFile file,
+                                        uLong64 *pos_local_header);
+
+    extern int cpl_unzCurrentFileInfoFromLocalHeader(
+        unzFile file, uLong64 pos_local_header, unz_file_info *pfile_info,
+        char *szFileName, size_t fileNameBufferSize, uLong64 *posData);
 
     /** Addition for GDAL : END */
 

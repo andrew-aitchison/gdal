@@ -53,8 +53,6 @@
 #include "cpl_worker_thread_pool.h"
 #include "gdal.h"
 
-CPL_CVSID("$Id$")
-
 constexpr double TO_RADIANS = M_PI / 180.0;
 
 /************************************************************************/
@@ -2529,6 +2527,7 @@ CPLErr GDALGridLinear(const void *poOptionsIn, GUInt32 nPoints,
         else
         {
             GDALGridNearestNeighborOptions sNeighbourOptions;
+            sNeighbourOptions.nSizeOfStructure = sizeof(sNeighbourOptions);
             sNeighbourOptions.dfRadius1 = dfRadius < 0.0 ? 0.0 : dfRadius;
             sNeighbourOptions.dfRadius2 = dfRadius < 0.0 ? 0.0 : dfRadius;
             sNeighbourOptions.dfAngle = 0.0;
@@ -2602,6 +2601,7 @@ static int GDALGridProgressMultiThread(GDALGridJob *psJob)
 // Return TRUE if the computation must be interrupted.
 static int GDALGridProgressMonoThread(GDALGridJob *psJob)
 {
+    // coverity[missing_lock]
     const int nCounter = ++(*psJob->pnCounter);
     if (!psJob->pfnRealProgress(nCounter / static_cast<double>(psJob->nYSize),
                                 "", psJob->pRealProgressArg))
@@ -3675,15 +3675,15 @@ CPLErr GDALGridCreate(GDALGridAlgorithm eAlgorithm, const void *poOptions,
 }
 
 /************************************************************************/
-/*                      ParseAlgorithmAndOptions()                      */
+/*                   GDALGridParseAlgorithmAndOptions()                 */
 /************************************************************************/
 
 /** Translates mnemonic gridding algorithm names into GDALGridAlgorithm code,
  * parse control parameters and assign defaults.
  */
-CPLErr ParseAlgorithmAndOptions(const char *pszAlgorithm,
-                                GDALGridAlgorithm *peAlgorithm,
-                                void **ppOptions)
+CPLErr GDALGridParseAlgorithmAndOptions(const char *pszAlgorithm,
+                                        GDALGridAlgorithm *peAlgorithm,
+                                        void **ppOptions)
 {
     CPLAssert(pszAlgorithm);
     CPLAssert(peAlgorithm);

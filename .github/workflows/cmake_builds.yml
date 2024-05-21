@@ -8,6 +8,7 @@ on:
             - 'doc/**'
         branches-ignore:
             - 'backport**'
+            - 'dependabot**'
     pull_request:
         paths-ignore:
             - 'doc/**'
@@ -31,9 +32,9 @@ jobs:
       cache-name: cmake-ubuntu-focal
     steps:
     - name: Checkout GDAL
-      uses: actions/checkout@v3
+      uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
     - name: Setup cache
-      uses: actions/cache@v3
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       id: cache
       with:
           path: ${{ github.workspace }}/.ccache
@@ -41,25 +42,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ env.cache-name }}-${{ github.base_ref }}
             ${{ runner.os }}-${{ env.cache-name }}
-    - name: Install CMake 3.9.1
-      run: |
-        cd ${GITHUB_WORKSPACE}
-        wget https://github.com/Kitware/CMake/releases/download/v3.9.1/cmake-3.9.1-Linux-x86_64.tar.gz
-        tar xzf cmake-3.9.1-Linux-x86_64.tar.gz
-        echo "CMAKE_DIR=$GITHUB_WORKSPACE/cmake-3.9.1-Linux-x86_64/bin" >> $GITHUB_ENV
-        echo "$GITHUB_WORKSPACE/cmake-3.9.1-Linux-x86_64/bin" >> $GITHUB_PATH
-    - run: |
-        cmake --version
     - name: Install dependency
       run: |
         sudo add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable
         sudo apt-get update
-        sudo apt-get install -y -q bison libjpeg-dev libgif-dev liblzma-dev libzstd-dev libgeos-dev git \
+        sudo apt-get install -y -q bison libaec-dev libjpeg-dev libgif-dev liblzma-dev libzstd-dev libgeos-dev git \
            libcurl4-gnutls-dev libproj-dev libxml2-dev  libxerces-c-dev libnetcdf-dev netcdf-bin \
            libpoppler-dev libpoppler-private-dev gpsbabel libhdf4-alt-dev libhdf5-serial-dev libpodofo-dev poppler-utils \
            libfreexl-dev unixodbc-dev libwebp-dev libepsilon-dev liblcms2-2 libcrypto++-dev libkml-dev \
            libmysqlclient-dev libarmadillo-dev wget libfyba-dev libjsoncpp-dev libexpat1-dev \
-           libclc-dev ocl-icd-opencl-dev libsqlite3-dev sqlite3-pcre libpcre3-dev libspatialite-dev libsfcgal-dev fossil libcairo2-dev libjson-c-dev libdeflate-dev liblz4-dev libblosc-dev \
+           libclc-dev ocl-icd-opencl-dev libsqlite3-dev sqlite3-pcre libpcre3-dev libspatialite-dev libsfcgal-dev fossil libcairo2-dev libjson-c-dev libdeflate-dev liblz4-dev libblosc-dev libarchive-dev \
            libqhull-dev libcfitsio-dev libogdi-dev libopenjp2-7-dev libheif-dev \
            python3-dev libpython3-dev libpython3.8-dev python3.8-dev python3-numpy python3-lxml pyflakes python3-setuptools python3-pip python3-venv \
            python3-pytest swig doxygen texlive-latex-base make cppcheck ccache g++ \
@@ -71,7 +63,7 @@ jobs:
         sudo ACCEPT_EULA=Y apt-get install -y msodbcsql17 unixodbc-dev
         # HANA: client side
         # Install hdbsql tool
-        curl -v -j -k -s -L -H "Cookie: eula_3_1_agreed=tools.hana.ondemand.com/developer-license-3_1.txt" https://tools.hana.ondemand.com/additional/hanaclient-latest-linux-x64.tar.gz --output hanaclient-latest-linux-x64.tar.gz \
+        curl -v -j -k -s -L -H "Cookie: eula_3_2_agreed=tools.hana.ondemand.com/developer-license-3_2.txt" https://tools.hana.ondemand.com/additional/hanaclient-latest-linux-x64.tar.gz --output hanaclient-latest-linux-x64.tar.gz \
           && tar -xvf hanaclient-latest-linux-x64.tar.gz \
           && sudo mkdir /usr/sap \
           && sudo ./client/hdbinst -a client --sapmnt=/usr/sap \
@@ -116,8 +108,8 @@ jobs:
             && git checkout ${JXL_TREEISH} \
             && mkdir build \
             && cd build \
-            && sudo apt-get install -y --no-install-recommends libgflags-dev \
-            && /usr/bin/cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/usr .. \
+            && sudo apt-get install -y --no-install-recommends libgflags-dev libbrotli-dev \
+            && /usr/bin/cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DJPEGXL_FORCE_SYSTEM_BROTLI:BOOL=ON -DJPEGXL_ENABLE_JPEGLI_LIBJPEG=OFF -DCMAKE_INSTALL_PREFIX=/usr .. \
             && make -j$(nproc) \
             && sudo make -j$(nproc) install \
             && cd ../.. \
@@ -150,12 +142,12 @@ jobs:
 
     - name: Install pdfium
       run: |
-        wget -q https://github.com/rouault/pdfium_build_gdal_3_7/releases/download/pdfium_5461_v1/install-ubuntu2004-rev5461.tar.gz \
-          && tar -xzf install-ubuntu2004-rev5461.tar.gz \
+        wget -q https://github.com/rouault/pdfium_build_gdal_3_9/releases/download/pdfium_6309_v1/install-ubuntu2004-rev6309.tar.gz \
+          && tar -xzf install-ubuntu2004-rev6309.tar.gz \
           && sudo chown -R root:root install \
           && sudo mv install/lib/* /usr/lib/ \
           && sudo mv install/include/* /usr/include/ \
-          && sudo rm -rf install-ubuntu2004-rev5461.tar.gz install \
+          && sudo rm -rf install-ubuntu2004-rev6309.tar.gz install \
           && sudo apt-get update -y \
           && sudo apt-get install -y --fix-missing --no-install-recommends liblcms2-dev
     - name: Configure ccache
@@ -170,7 +162,7 @@ jobs:
         export PATH=$CMAKE_DIR:/usr/local/bin:/usr/bin:/bin # Avoid CMake config from brew etc.
         mkdir -p $GITHUB_WORKSPACE/superbuild
         cd $GITHUB_WORKSPACE/superbuild
-        printf "cmake_minimum_required(VERSION 3.9)\nproject(test)\nenable_testing()\nadd_subdirectory(gdal)" > CMakeLists.txt
+        printf "cmake_minimum_required(VERSION 3.16)\nproject(test)\nenable_testing()\nadd_subdirectory(gdal)" > CMakeLists.txt
         ln -s .. gdal
         mkdir build
         cd build
@@ -223,6 +215,7 @@ jobs:
         export LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install-gdal/lib
         $GITHUB_WORKSPACE/install-gdal/bin/gdalinfo --version
         PYTHONPATH=$GITHUB_WORKSPACE/install-gdal/lib/python3/dist-packages python3 -c "from osgeo import gdal;print(gdal.VersionInfo(None))"
+        PYTHONPATH=$GITHUB_WORKSPACE/install-gdal/lib/python3/dist-packages python3 $GITHUB_WORKSPACE/scripts/check_doc.py
     - name: CMake with rpath
       run: |
         export PATH=$CMAKE_DIR:/usr/local/bin:/usr/bin:/bin # Avoid CMake config from brew etc.
@@ -242,17 +235,18 @@ jobs:
     - name: Standalone Python bindings build from source
       run: |
         (cd $GITHUB_WORKSPACE/superbuild/build/gdal/swig/python && python setup.py sdist)
-        mv $GITHUB_WORKSPACE/superbuild/build/gdal/swig/python/dist/GDAL-*.tar.gz gdal-python.tar.gz
+        mv $GITHUB_WORKSPACE/superbuild/build/gdal/swig/python/dist/gdal-*.tar.gz gdal-python.tar.gz
         mv $GITHUB_WORKSPACE/superbuild/build/gdal/swig/python gdal-swig-python
         python3 -m venv myvenv
         source myvenv/bin/activate
         # Set PATH so that gdal-config is found
         PATH=$GITHUB_WORKSPACE/install-gdal/bin:$PATH pip install gdal-python.tar.gz[numpy]
         LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install-gdal/lib python -c "from osgeo import gdal_array"
-        which gdal_edit.py
+        which gdal_edit
         cp $GITHUB_WORKSPACE/autotest/gcore/data/byte.tif .
         LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install-gdal/lib ldd myvenv/lib/python3.8/site-packages/osgeo/_gdal.cpython-38-x86_64-linux-gnu.so
-        LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install-gdal/lib gdal_edit.py byte.tif -mo FOO=BAR
+        LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install-gdal/lib gdal_edit byte.tif -mo FOO=BAR
+        rm -f myvenv/bin/gdal_edit
         rm -f myvenv/bin/gdal_edit.py
     - name: Standalone gdal-utils package from wheel
       run: |
@@ -318,22 +312,22 @@ jobs:
         run: |
           git config --global core.autocrlf false
       - name: Checkout GDAL
-        uses: actions/checkout@v3
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - name: Install development packages
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@cc11e9188b693c2b100158c3322424c4cc1dadea # v2.22.0
         with:
           msystem: MINGW64
           update: true
           # Disable mingw-w64-x86_64-crypto++ as it crashes at runtime on eedai_3 test. Likely a build issue with crypto++ itself
           install: |
             base-devel git mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ccache
-            mingw-w64-x86_64-pcre mingw-w64-x86_64-xerces-c mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-pcre mingw-w64-x86_64-xerces-c mingw-w64-x86_64-zstd mingw-w64-x86_64-libarchive
             mingw-w64-x86_64-geos mingw-w64-x86_64-libspatialite mingw-w64-x86_64-proj
             mingw-w64-x86_64-cgal mingw-w64-x86_64-libfreexl mingw-w64-x86_64-hdf5 mingw-w64-x86_64-netcdf mingw-w64-x86_64-poppler mingw-w64-x86_64-postgresql
-            mingw-w64-x86_64-libgeotiff mingw-w64-x86_64-libpng mingw-w64-x86_64-libtiff mingw-w64-x86_64-openjpeg
-            mingw-w64-x86_64-python-pip mingw-w64-x86_64-python-numpy mingw-w64-x86_64-python-pytest mingw-w64-x86_64-python-setuptools mingw-w64-x86_64-python-lxml
+            mingw-w64-x86_64-libgeotiff mingw-w64-x86_64-libpng mingw-w64-x86_64-libtiff mingw-w64-x86_64-openjpeg2
+            mingw-w64-x86_64-python-pip mingw-w64-x86_64-python-numpy mingw-w64-x86_64-python-pytest mingw-w64-x86_64-python-setuptools mingw-w64-x86_64-python-lxml mingw-w64-x86_64-swig mingw-w64-x86_64-python-psutil mingw-w64-x86_64-blosc
       - name: Setup cache
-        uses: actions/cache@v3
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
         id: cache
         with:
           path: ${{ github.workspace }}\.ccache
@@ -351,14 +345,11 @@ jobs:
       - name: populate JAVA_HOME
         run: |
           echo "JAVA_HOME=$JAVA_HOME_11_X64" >> ${GITHUB_ENV}
-      - name: Install PROJ data
-        run: |
-          cd /mingw64/share/proj
-          wget http://download.osgeo.org/proj/proj-datumgrid-1.8.tar.gz
-          tar xvzf proj-datumgrid-1.8.tar.gz
       - name: Install python dependencies for autotest
         run: |
-          python -m pip install pytest-env
+          # One of the dependencies of jsonschema 4.18 is rpds_py which requires a Rust compiler
+          python -m pip install "jsonschema<4.18"
+          python -m pip install -r autotest/requirements.txt
       # Disable mySQL since C:/mysql/lib/mysqlclient.lib (unrelated to msys) is found, which causes linking issues
       # Set explicitly CMAKE_C|CXX_COMPILER otherwise C:/ProgramData/chocolatey/bin/gcc.exe would be used
       - name: Configure
@@ -373,8 +364,7 @@ jobs:
             -DCMAKE_PREFIX_PATH=/mingw64 \
             -DCMAKE_INSTALL_PREFIX=$PWD/install-gdal \
             "-DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD}" \
-            -DGDAL_USE_MYSQL:BOOL=OFF \
-            -DBUILD_CSHARP_BINDINGS=ON
+            -DGDAL_USE_MYSQL:BOOL=OFF
         working-directory: ${{ github.workspace }}
       - name: Build
         run: cmake --build build -j 3
@@ -386,9 +376,11 @@ jobs:
         run: |
           ctest --test-dir $GITHUB_WORKSPACE/build -C Release -V -j 3
         env:
+          BUILD_NAME: mingw64
           SKIP_OGR_GMLAS_HUGE_PROCESSING_TIME: YES
           SKIP_OGR_GMLAS_HTTP_RELATED: YES
           SKIP_TIFF_JPEG12: YES
+          SKIP_VSIRAR: YES
         working-directory: ${{ github.workspace }}
       - name: Install
         run: cmake --build build --target install -j 3
@@ -413,67 +405,47 @@ jobs:
       run: |
         git config --global core.autocrlf false
     - name: Checkout GDAL
-      uses: actions/checkout@v3
-    - uses: ilammy/msvc-dev-cmd@v1
+      uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+    - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
     - name: populate JAVA_HOME
       shell: pwsh
       run: |
         echo "JAVA_HOME=$env:JAVA_HOME_11_X64" >> %GITHUB_ENV%
-    - uses: conda-incubator/setup-miniconda@v2
+    - uses: conda-incubator/setup-miniconda@a4260408e20b96e80095f42ff7f1a15b27dd94ca # v3.0.4
       with:
         activate-environment: gdalenv
-        python-version: 3.9
-        channels: conda-forge
-    - run: |
-        cmake --version
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
+        use-mamba: true
+        auto-update-conda: true
+        use-only-tar-bz2: false
     - name: Install dependency
       shell: bash -l {0}
       run: |
-        conda install --yes --quiet --name gdalenv curl libiconv icu python=3.9 swig numpy pytest pytest-env zlib clcache lxml
-        conda install --yes --quiet --name gdalenv -c conda-forge proj geos hdf4 hdf5 kealib \
-            libnetcdf openjpeg poppler libtiff libpng xerces-c expat libxml2 kealib json-c \
-            cfitsio freexl geotiff jpeg libpq libspatialite libwebp-base pcre pcre2 postgresql \
+        conda install --yes --quiet curl libiconv icu python=3.10 swig numpy pytest pytest-env pytest-benchmark filelock zlib lxml jsonschema
+        # FIXME: remove libnetcdf=4.9.2=nompi_h5902ca5_107 pinning as soon as https://github.com/conda-forge/libnetcdf-feedstock/issues/182 is resolved
+        conda install --yes --quiet proj geos hdf4 hdf5 kealib \
+            libnetcdf=4.9.2=nompi_h5902ca5_107 openjpeg poppler libtiff libpng xerces-c expat libxml2 kealib json-c \
+            cfitsio freexl geotiff libjpeg-turbo libpq libspatialite libwebp-base pcre pcre2 postgresql \
             sqlite tiledb zstd cryptopp cgal doxygen librttopo libkml openssl xz \
-            openjdk ant qhull armadillo blas blas-devel libblas libcblas liblapack liblapacke blosc \
-            "arrow-cpp>=7.0.0" "pyarrow>=7.0.0"
-        cd $CONDA_PREFIX/Library/share/proj
-        curl http://download.osgeo.org/proj/proj-datumgrid-1.8.tar.gz > proj-datumgrid-1.8.tar.gz
-        tar xvzf proj-datumgrid-1.8.tar.gz
-        cd $OLDPWD
-    - name: Setup cache
-      uses: actions/cache@v3
-      id: cache
-      with:
-          path: ${{ github.workspace }}\.clcache
-          key: ${{ runner.os }}-${{ env.cache-name }}-${{ github.base_ref }}${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.cache-name }}-${{ github.base_ref }}
-            ${{ runner.os }}-${{ env.cache-name }}
-    - name: Configure ccache (Part 1)
-      shell: cmd
-      run: |
-          set CLCACHE_DIR=%CD%\.clcache
-          echo CLCACHE_DIR=%CLCACHE_DIR%>> %GITHUB_ENV%
-    - name: Configure ccache (Part 2)
+            openjdk ant qhull armadillo blas blas-devel libblas libcblas liblapack liblapacke blosc libarchive \
+            arrow-cpp pyarrow libaec cmake
+    - name: Check CMake version
       shell: bash -l {0}
       run: |
-          ${CONDA_PREFIX}/Scripts/clcache -z
-          ${CONDA_PREFIX}/Scripts/clcache -M 250000000
-          ${CONDA_PREFIX}/Scripts/clcache -s
-          # Otherwise cmake can find link.exe from Conda instead of MSVC
-          rm /usr/bin/link
-
+        cmake --version
     - name: Install pdfium
       shell: bash -l {0}
       run: |
-        curl -LOs https://github.com/rouault/pdfium_build_gdal_3_7/releases/download/pdfium_5461_v1/install-win10-vs2019-x64-rev5461.zip
-        unzip install-win10-vs2019-x64-rev5461.zip
+        curl -LOs https://github.com/rouault/pdfium_build_gdal_3_9/releases/download/pdfium_6309_v1/install-win10-vs2019-x64-rev6309.zip
+        unzip install-win10-vs2019-x64-rev6309.zip
         mv install install-pdfium
 
     - name: Remove conflicting libraries
-      shell: cmd
+      shell: bash -l {0}
       run: |
-          rd /s /q C:\Strawberry
+          rm -rf C:/Strawberry || /bin/true
+          rm -rf "C:/Program Files/OpenSSL/lib" || /bin/true
 
     - name: Configure
       shell: bash -l {0}
@@ -484,7 +456,7 @@ jobs:
       # Build PDF driver as plugin due to the PDFium build including libopenjp2 symbols which would conflict with external libopenjp2
       run: |
         mkdir -p $GITHUB_WORKSPACE/build
-        cmake -G "${generator}" -Werror=dev "-DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install-gdal" "-DUSE_CCACHE=ON" "-DCMAKE_PREFIX_PATH=${CONDA_PREFIX}" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DGDAL_ENABLE_PLUGINS:BOOL=ON -DGDAL_ENABLE_PLUGINS_NO_DEPS:BOOL=ON -DGDAL_USE_PUBLICDECOMPWT:BOOL=ON -DPUBLICDECOMPWT_URL=https://github.com/rouault/PublicDecompWT -DBUILD_JAVA_BINDINGS=OFF -DBUILD_CSHARP_BINDINGS=ON -DGDAL_USE_MYSQL:BOOL=OFF -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DWERROR_DEV_FLAG="-Werror=dev" -DCMAKE_BUILD_TYPE=Release -DPDFIUM_ROOT=$GITHUB_WORKSPACE/install-pdfium -DGDAL_ENABLE_DRIVER_PDF_PLUGIN:BOOL=ON
+        cmake -G "${generator}" -Werror=dev "-DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install-gdal" "-DUSE_CCACHE=ON" "-DCMAKE_PREFIX_PATH=${CONDA}/envs/gdalenv" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DGDAL_ENABLE_PLUGINS:BOOL=ON -DGDAL_ENABLE_PLUGINS_NO_DEPS:BOOL=ON -DGDAL_USE_PUBLICDECOMPWT:BOOL=ON -DPUBLICDECOMPWT_URL=https://github.com/rouault/PublicDecompWT -DBUILD_JAVA_BINDINGS=OFF -DBUILD_CSHARP_BINDINGS=ON -DGDAL_USE_MYSQL:BOOL=OFF -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DWERROR_DEV_FLAG="-Werror=dev" -DCMAKE_BUILD_TYPE=Release -DPDFIUM_ROOT=$GITHUB_WORKSPACE/install-pdfium -DGDAL_ENABLE_DRIVER_PDF_PLUGIN:BOOL=ON -DCMAKE_UNITY_BUILD=ON
     - name: Build
       shell: bash -l {0}
       run: cmake --build $GITHUB_WORKSPACE/build --config Release -j 2
@@ -511,19 +483,23 @@ jobs:
         gdalinfo --version
         python -VV
         PYTHONPATH=$GITHUB_WORKSPACE/install-gdal/lib/site-packages python -c "from osgeo import gdal;print(gdal.VersionInfo(None))"
-    - name: clcache statistics
-      shell: bash -l {0}
-      run:
-        ${CONDA_PREFIX}/Scripts/clcache -s
+        export PATH=$GITHUB_WORKSPACE/install-gdal/Scripts:$PATH
+        PYTHONPATH=$GITHUB_WORKSPACE/install-gdal/lib/site-packages gdal_edit --version
     - name: Show gdal.pc
       shell: bash -l {0}
       run: cat $GITHUB_WORKSPACE/build/gdal.pc
+    - name: Test python setup.py install
+      shell: bash -l {0}
+      run: |
+        cd $GITHUB_WORKSPACE/build/swig/python
+        python setup.py install
 
   build-windows-minimum:
     runs-on: windows-2022
     env:
         architecture: x64
         generator: Visual Studio 17 2022
+        GDAL_PYTHON_BINDINGS_WITHOUT_NUMPY: YES
     steps:
     # To avoid git clone to mess with the line endings of GDAL autotest data
     # files that look like text, but should be handled as binary content
@@ -531,27 +507,28 @@ jobs:
       run: |
         git config --global core.autocrlf false
     - name: Checkout GDAL
-      uses: actions/checkout@v3
-    - uses: conda-incubator/setup-miniconda@v2
+      uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+    - uses: conda-incubator/setup-miniconda@a4260408e20b96e80095f42ff7f1a15b27dd94ca # v3.0.4
       with:
         activate-environment: gdalenv
-        python-version: 3.9
-        channels: conda-forge
-    - run: |
-        cmake --version
+        miniforge-variant: Mambaforge
+        miniforge-version: latest
+        use-mamba: true
+        auto-update-conda: true
+        use-only-tar-bz2: false
     - name: Install dependency
       shell: bash -l {0}
       run: |
-        conda install --yes --quiet --name gdalenv -c conda-forge proj clcache pytest pytest-env lxml
-        cd $CONDA_PREFIX/Library/share/proj
-        curl http://download.osgeo.org/proj/proj-datumgrid-1.8.tar.gz > proj-datumgrid-1.8.tar.gz
-        tar xvzf proj-datumgrid-1.8.tar.gz
-        cd $OLDPWD
+        conda install --yes --quiet proj pytest pytest-env pytest-benchmark filelock lxml cmake
+    - name: Check CMake version
+      shell: bash -l {0}
+      run: |
+        cmake --version
     - name: Configure
       shell: bash -l {0}
       run: |
         mkdir -p $GITHUB_WORKSPACE/build
-        cmake -A ${architecture} -G "${generator}" -Werror=dev "-DCMAKE_C_COMPILER_LAUNCHER=clcache" "-DCMAKE_CXX_COMPILER_LAUNCHER=clcache" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DGDAL_USE_EXTERNAL_LIBS:BOOL=OFF -DWERROR_DEV_FLAG="-Werror=dev"
+        cmake -A ${architecture} -G "${generator}" "-DCMAKE_PREFIX_PATH=${CONDA}/envs/gdalenv" -Werror=dev "-DCMAKE_CXX_COMPILER_LAUNCHER=clcache" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DGDAL_USE_EXTERNAL_LIBS:BOOL=OFF -DWERROR_DEV_FLAG="-Werror=dev"
     - name: Build
       shell: bash -l {0}
       run: cmake --build $GITHUB_WORKSPACE/build --config RelWithDebInfo -j 2
@@ -559,12 +536,12 @@ jobs:
       shell: bash -l {0}
       run: |
         rm -f build/CMakeCache.txt
-        cmake -A ${architecture} -G "${generator}" -Werror=dev "-DCMAKE_C_COMPILER_LAUNCHER=clcache" "-DCMAKE_CXX_COMPILER_LAUNCHER=clcache" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DGDAL_USE_EXTERNAL_LIBS:BOOL=OFF -DGDAL_USE_PNG_INTERNAL=OFF -DGDAL_USE_JPEG_INTERNAL=OFF -DGDAL_USE_JPEG12_INTERNAL=OFF -DGDAL_USE_GIF_INTERNAL=OFF -DGDAL_USE_LERC_INTERNAL=OFF -DGDAL_USE_LERCV1_INTERNAL=OFF -DGDAL_USE_QHULL_INTERNAL=OFF -DGDAL_USE_OPENCAD_INTERNAL=OFF -DWERROR_DEV_FLAG="-Werror=dev"
+        cmake -A ${architecture} -G "${generator}" "-DCMAKE_PREFIX_PATH=${CONDA}/envs/gdalenv" -Werror=dev "-DCMAKE_CXX_COMPILER_LAUNCHER=clcache" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DGDAL_USE_EXTERNAL_LIBS:BOOL=OFF -DGDAL_USE_PNG_INTERNAL=OFF -DGDAL_USE_JPEG_INTERNAL=OFF -DGDAL_USE_JPEG12_INTERNAL=OFF -DGDAL_USE_GIF_INTERNAL=OFF -DGDAL_USE_LERC_INTERNAL=OFF -DGDAL_USE_LERCV1_INTERNAL=OFF -DGDAL_USE_QHULL_INTERNAL=OFF -DGDAL_USE_OPENCAD_INTERNAL=OFF -DWERROR_DEV_FLAG="-Werror=dev"
     - name: Configure with even less dependencies, and disabling all optional drivers
       shell: bash -l {0}
       run: |
         rm -f build/CMakeCache.txt
-        cmake -A ${architecture} -G "${generator}" -Werror=dev "-DCMAKE_C_COMPILER_LAUNCHER=clcache" "-DCMAKE_CXX_COMPILER_LAUNCHER=clcache" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DGDAL_USE_EXTERNAL_LIBS:BOOL=OFF -DGDAL_USE_PNG_INTERNAL=OFF -DGDAL_USE_JPEG_INTERNAL=OFF -DGDAL_USE_JPEG12_INTERNAL=OFF -DGDAL_USE_GIF_INTERNAL=OFF -DGDAL_USE_LERC_INTERNAL=OFF -DGDAL_USE_LERCV1_INTERNAL=OFF -DGDAL_USE_QHULL_INTERNAL=OFF -DGDAL_USE_OPENCAD_INTERNAL=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF -DWERROR_DEV_FLAG="-Werror=dev"
+        cmake -A ${architecture} -G "${generator}" "-DCMAKE_PREFIX_PATH=${CONDA}/envs/gdalenv" -Werror=dev "-DCMAKE_CXX_COMPILER_LAUNCHER=clcache" -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DCMAKE_C_FLAGS=" /WX" -DCMAKE_CXX_FLAGS=" /WX" -DGDAL_USE_EXTERNAL_LIBS:BOOL=OFF -DGDAL_USE_PNG_INTERNAL=OFF -DGDAL_USE_JPEG_INTERNAL=OFF -DGDAL_USE_JPEG12_INTERNAL=OFF -DGDAL_USE_GIF_INTERNAL=OFF -DGDAL_USE_LERC_INTERNAL=OFF -DGDAL_USE_LERCV1_INTERNAL=OFF -DGDAL_USE_QHULL_INTERNAL=OFF -DGDAL_USE_OPENCAD_INTERNAL=OFF -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF -DOGR_BUILD_OPTIONAL_DRIVERS=OFF -DWERROR_DEV_FLAG="-Werror=dev"
     - name: Build
       shell: bash -l {0}
       run: cmake --build $GITHUB_WORKSPACE/build --config RelWithDebInfo -j 2
@@ -574,29 +551,32 @@ jobs:
         ctest --test-dir $GITHUB_WORKSPACE/build -C RelWithDebInfo -V -j 3
       env:
         SKIP_GDAL_HTTP_SSL_VERIFYSTATUS: YES
-        BUILD_NAME: "build-windows-conda"
+        BUILD_NAME: "build-windows-minimum"
     - name: Show gdal.pc
       shell: bash -l {0}
       run: cat $GITHUB_WORKSPACE/build/gdal.pc
 
   build-mac:
-    runs-on: macOS-latest
+    # M1 MacOS runner: https://github.blog/changelog/2024-01-30-github-actions-introducing-the-new-m1-macos-runner-available-to-open-source/
+    runs-on: macOS-14
     env:
       # Disable Arrow/Parquet because the VM provides libraries in /usr/local/lib/
       # that cause Illegal instruction error when running tests. I suspect the
       # Arrow/Parquet libraries to be built with AVX2 support but the VM worker
       # doesn't support it.
-      CMAKE_OPTIONS: -DCFITSIO_ROOT=/usr/local/opt/cfitsio  -DPoppler_ROOT=/usr/local/opt/poppler -DPROJ_ROOT=/usr/local/opt/proj -DSPATIALITE_ROOT=/usr/local/opt/libspatialite -DPostgreSQL_ROOT=/usr/local/opt/libpq -DEXPAT_ROOT=/usr/local/opt/expat -DXercesC_ROOT=/usr/local/opt/xerces-c -DSQLite3_ROOT=/usr/local/opt/sqlite -DOpenSSL_ROOT=/usr/local/opt/openssl -DPNG_ROOT=/usr/local/opt/libpng -DJPEG_ROOT=/usr/local/opt/jpeg-turbo -DEXPECTED_JPEG_LIB_VERSION=80 -DOpenJPEG_ROOT=/usr/local/opt/openjpeg -DCURL_ROOT=/usr/local/opt/curl -DGDAL_USE_ARROW=OFF -DGDAL_USE_PARQUET=OFF
+      # Disable use of libkml since boost headers cannot be found
+      # Disable ODBC since the postinstall checks don't manage to find sql.h
+      CMAKE_OPTIONS: -DCFITSIO_ROOT=/opt/homebrew/Cellar/cfitsio  -DPoppler_ROOT=/opt/homebrew/Cellar/poppler -DPROJ_ROOT=/opt/homebrew/Cellar/proj -DSPATIALITE_ROOT=/opt/homebrew/Cellar/libspatialite -DPostgreSQL_ROOT=/opt/homebrew/Cellar/libpq -DEXPAT_ROOT=/opt/homebrew/Cellar/expat -DXercesC_ROOT=/opt/homebrew/Cellar/xerces-c -DSQLite3_ROOT=/opt/homebrew/Cellar/sqlite -DOpenSSL_ROOT=/opt/homebrew/Cellar/openssl -DPNG_ROOT=/opt/homebrew/Cellar/libpng -DJPEG_ROOT=/opt/homebrew/Cellar/jpeg-turbo -DEXPECTED_JPEG_LIB_VERSION=80 -DOpenJPEG_ROOT=/opt/homebrew/Cellar/openjpeg -DCURL_ROOT=/opt/homebrew/Cellar/curl -DGDAL_USE_LIBKML=OFF -DGDAL_USE_ODBC=OFF
       cache-name: cmake-macos
     steps:
     - name: Setup xcode
-      uses: maxim-lobanov/setup-xcode@v1
+      uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
       with:
-        xcode-version: 12.4
+        xcode-version: 14.3
     - name: Checkout GDAL
-      uses: actions/checkout@v3
+      uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
     - name: Setup cache
-      uses: actions/cache@v3
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
       id: cache
       with:
           path: ${{ github.workspace }}/.ccache
@@ -608,19 +588,17 @@ jobs:
         cmake --version
     - name: Install dependency
       run: |
+        rm -rf /opt/homebrew/lib/node_modules # conflicts with node@18 from brew
         brew update
         brew outdated
         brew unlink python
-        brew install --overwrite python@3.10 python@3.11
+        brew install --overwrite python@3.11 python@3.12
         brew install postgresql || brew link postgresql
-        brew install pkg-config freexl libxml2 libspatialite geos proj libgeotiff openjpeg giflib libaec postgis poppler doxygen unixodbc jpeg-turbo aom jpeg-xl libheif
+        brew install pkg-config freexl libxml2 libspatialite geos proj libgeotiff openjpeg giflib libaec postgis poppler doxygen unixodbc jpeg-turbo aom jpeg-xl libheif libarchive libkml boost
         brew install ccache swig
+        brew link --force sqlite
         # gdal is automatically installed as a dependency for postgis
         brew uninstall --ignore-dependencies gdal
-        cd /usr/local/opt/proj/share/proj
-        curl http://download.osgeo.org/proj/proj-datumgrid-1.8.tar.gz > proj-datumgrid-1.8.tar.gz
-        tar xvzf proj-datumgrid-1.8.tar.gz
-        cd $OLDPWD
     - name: Configure ccache
       run: |
           echo CCACHE_BASEDIR=$PWD >> ${GITHUB_ENV}
@@ -631,9 +609,10 @@ jobs:
     - name: Configure
       run: |
         mkdir -p $GITHUB_WORKSPACE/build
-        export PKG_CONFIG_PATH=/usr/local/opt/libxml2/lib/pkgconfig
-        cmake -Werror=dev -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install-gdal ${CMAKE_OPTIONS} -DCMAKE_C_FLAGS=-Werror -DCMAKE_CXX_FLAGS=-Werror -DUSE_CCACHE=ON -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DWERROR_DEV_FLAG="-Werror=dev"
-        $(cat $GITHUB_WORKSPACE/build/python_executable.txt) -m pip install --user -r $GITHUB_WORKSPACE/autotest/requirements.txt
+        export PKG_CONFIG_PATH=/opt/homebrew/Cellar/libxml2/lib/pkgconfig
+        # FIXME: remove -DBUILD_PYTHON_BINDINGS=OFF. Python tests fail with "ModuleNotFoundError: No module named '_gdal'" with macos-12
+        cmake -Werror=dev -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install-gdal ${CMAKE_OPTIONS} -DCMAKE_C_FLAGS=-Werror -DCMAKE_CXX_FLAGS=-Werror -DUSE_CCACHE=ON -DCMAKE_UNITY_BUILD=${CMAKE_UNITY_BUILD} -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" -DWERROR_DEV_FLAG="-Werror=dev" -DBUILD_PYTHON_BINDINGS=OFF
+        #$(cat $GITHUB_WORKSPACE/build/python_executable.txt) -m pip install --user -r $GITHUB_WORKSPACE/autotest/requirements.txt
     - name: Build
       run: |
         cmake --build $GITHUB_WORKSPACE/build -j 3
@@ -644,7 +623,7 @@ jobs:
       run: |
         ctest --test-dir $GITHUB_WORKSPACE/build -V -j 3
       env:
-        BUILD_NAME: "MacOS build"
+        BUILD_NAME: "macos_build_brew"
     - name: Install
       run: cmake --build $GITHUB_WORKSPACE/build --target install -j 3
     - name: Test post-install usage (with pkg-config)
@@ -655,7 +634,7 @@ jobs:
         ./autotest/postinstall/test_gdal-config.sh $GITHUB_WORKSPACE/install-gdal
     - name: Test post-install usage (with CMake)
       run: |
-        ./autotest/postinstall/test_cmake.sh $GITHUB_WORKSPACE/install-gdal
+        ./autotest/postinstall/test_cmake.sh $GITHUB_WORKSPACE/install-gdal --dynamic --disable-odbc
     - name: ccache statistics
       run: ccache -s
 
@@ -675,8 +654,8 @@ jobs:
       run: |
         git config --global core.autocrlf false
     - name: Checkout GDAL
-      uses: actions/checkout@v3
-    - uses: conda-incubator/setup-miniconda@v2
+      uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+    - uses: conda-incubator/setup-miniconda@a4260408e20b96e80095f42ff7f1a15b27dd94ca # v3.0.4
       with:
         activate-environment: gdalenv
         python-version: 3.9
@@ -684,7 +663,7 @@ jobs:
     - name: Install dependency
       shell: bash -l {0}
       run: |
-        conda install --yes --quiet --name gdalenv curl libiconv icu python=3.9 swig numpy pytest pytest-env zlib clcache lxml
+        conda install --yes --quiet --name gdalenv curl libiconv icu python=3.9 swig numpy pytest pytest-env pytest-benchmark filelock zlib clcache lxml
         conda install --yes --quiet --name gdalenv -c conda-forge libgdal
     - name: Configure
       shell: bash -l {0}

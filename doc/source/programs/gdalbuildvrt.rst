@@ -15,20 +15,22 @@ Synopsis
 
 .. code-block::
 
-    gdalbuildvrt [-tileindex field_name]
-                [-resolution {highest|lowest|average|user}]
-                [-te xmin ymin xmax ymax] [-tr xres yres] [-tap]
-                [-separate] [-b band]* [-sd subdataset]
-                [-allow_projection_difference] [-q]
-                [-addalpha] [-hidenodata]
-                [-srcnodata "value [value...]"] [-vrtnodata "value [value...]"]
-                [-ignore_srcmaskband]
-                [-a_srs srs_def]
-                [-r {nearest,bilinear,cubic,cubicspline,lanczos,average,mode}]
-                [-oo NAME=VALUE]*
-                [-input_file_list my_list.txt] [-overwrite]
-                [-strict | -non_strict]
-                output.vrt [gdalfile]*
+    gdalbuildvrt [--help] [--help-general]
+                 [-tileindex <field_name>]
+                 [-resolution {highest|lowest|average|user}]
+                 [-te <xmin> <ymin> <xmax> <ymax>] [-tr <xres> <yres>] [-tap]
+                 [-separate] [-b <band>]... [-sd <n>]
+                 [-allow_projection_difference] [-q]
+                 [-addalpha] [-hidenodata]
+                 [-srcnodata "<value>[ <value>]..."] [-vrtnodata "<value>[ <value>]..."
+                 [-ignore_srcmaskband]
+                 [-nodata_max_mask_threshold <threshold>]
+                 [-a_srs <srs_def>]
+                 [-r {nearest|bilinear|cubic|cubicspline|lanczos|average|mode}]
+                 [-oo <NAME>=<VALUE>]...
+                 [-input_file_list <filename>] [-overwrite]
+                 [-strict | -non_strict]
+                 <output_filename.vrt> <input_raster> [<input_raster>]...
 
 Description
 -----------
@@ -36,11 +38,18 @@ Description
 This program builds a VRT (Virtual Dataset) that is a mosaic of the list of
 input GDAL datasets. The list of input GDAL datasets can be specified at the end
 of the command line, or put in a text file (one filename per line) for very long lists,
-or it can be a MapServer tileindex (see \ref gdaltindex utility). In the later case, all
+or it can be a MapServer tileindex (see :ref:`gdaltindex` utility). In the later case, all
 entries in the tile index will be added to the VRT.
 
+.. note::
+
+    Starting with GDAL 3.9, for virtual mosaic with a very large number of source rasters
+    (typically hundreds of thousands of source rasters, or more), it is advised to use the
+    :ref:`gdaltindex` utility to generate a tile index compatible of the
+    :ref:`GTI <raster.gti>` driver.
+
 With -separate, each files goes into a separate band in the VRT dataset. Otherwise,
-the files are considered as tiles of a larger mosaic and the VRT file has as many bands as one
+the files are considered as source rasters of a larger mosaic and the VRT file has as many bands as one
 of the input files.
 
 If one GDAL dataset is made of several subdatasets and has 0 raster bands,
@@ -61,7 +70,9 @@ changed in later versions.
 
 .. program:: gdalbuildvrt
 
-.. option:: -tileindex
+.. include:: options/help_and_help_general.rst
+
+.. option:: -tileindex <field_name>
 
     Use the specified value as the tile index field, instead of the default
     value which is 'location'.
@@ -93,7 +104,7 @@ changed in later versions.
     such that the aligned extent includes the minimum extent.
     Alignment means that xmin / resx, ymin / resy, xmax / resx and ymax / resy are integer values.
 
-.. option:: -te xmin ymin xmax ymax
+.. option:: -te <xmin> <ymin> <xmax> <ymax>
 
     Set georeferenced extents of VRT file. The values must be expressed in georeferenced units.
     If not specified, the extent of the VRT is the minimum bounding box of the set of source rasters.
@@ -114,7 +125,7 @@ changed in later versions.
     dataset which doesn't report nodata value but is transparent in areas with no
     data.
 
-.. option:: -srcnodata <value> [<value>...]
+.. option:: -srcnodata "<value>[ <value>]..."
 
     Set nodata values for input bands (different values can be supplied for each band). If
     more than one value is supplied all values should be quoted to keep them
@@ -136,20 +147,28 @@ changed in later versions.
     not be taken into account, and in case of overlapping between sources, the
     last one will override previous ones in areas of overlap.
 
+.. option:: -nodata_max_mask_threshold <threshold>
+
+    .. versionadded:: 3.9
+
+    Insert a <NoDataFromMaskSource> source, which replaces the value of the source
+    with the value of :option:`-vrtnodata` (or 0 if not specified) when the value
+    of the mask band of the source is less or equal to the threshold.
+    This is typically used to transform a R,G,B,A image into a R,G,B one with a NoData value.
+
 .. option:: -b <band>
 
     Select an input <band> to be processed. Bands are numbered from 1.
     If input bands not set all bands will be added to vrt.
     Multiple :option:`-b` switches may be used to select a set of input bands.
 
-.. option:: -sd< <subdataset>
+.. option:: -sd <n>
 
-    If the input
-    dataset contains several subdatasets use a subdataset with the specified
-    number (starting from 1). This is an alternative of giving the full subdataset
-    name as an input.
+    If the input dataset contains several subdatasets, use a subdataset with the
+    specified number (starting from 1). This is an alternative of giving the full subdataset
+    name as an input to the utility.
 
-.. option:: -vrtnodata <value> [<value>...]
+.. option:: -vrtnodata "<value>[ <value>]..."
 
     Set nodata values at the VRT band level (different values can be supplied for each band).  If more
     than one value is supplied all values should be quoted to keep them together
@@ -160,9 +179,13 @@ changed in later versions.
 
 .. option:: -separate
 
-    Place each input file into a separate band. In that case, only the first
-    band of each dataset will be placed into a new band. Contrary to the default mode, it is not
+    Place each input file into a separate band. Contrary to the default mode, it is not
     required that all bands have the same datatype.
+
+    Starting with GDAL 3.8, all bands of each input file are added as separate
+    VRT bands, unless :option:`-b` is specified to select a subset of them.
+    Before GDAL 3.8, only the first band of each input file was placed into a
+    new VRT band, and :option:`-b` was ignored.
 
 .. option:: -allow_projection_difference
 
@@ -175,17 +198,17 @@ changed in later versions.
     Override the projection for the output file.  The <srs_def> may be any of the usual GDAL/OGR forms,
     complete WKT, PROJ.4, EPSG:n or a file containing the WKT. No reprojection is done.
 
-.. option:: -r {nearest (default),bilinear,cubic,cubicspline,lanczos,average,mode}
+.. option:: -r {nearest|bilinear|cubic|cubicspline|lanczos|average|mode}
 
-    Select a resampling algorithm.
+    Select a resampling algorithm. Nearest is the default
 
-.. option:: -oo NAME=VALUE
+.. option:: -oo <NAME>=<VALUE>
 
     Dataset open option (format specific)
 
     .. versionadded:: 2.2
 
-.. option:: -input_file_list <mylist.txt>
+.. option:: -input_file_list <filename>
 
     To specify a text file with an input filename on each line
 

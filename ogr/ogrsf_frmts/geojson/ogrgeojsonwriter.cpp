@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 static json_object *
 json_object_new_float_with_significant_figures(float fVal,
@@ -58,8 +59,10 @@ json_object_new_float_with_significant_figures(float fVal,
 void OGRGeoJSONWriteOptions::SetRFC7946Settings()
 {
     bBBOXRFC7946 = true;
-    if (nCoordPrecision < 0)
-        nCoordPrecision = 7;
+    if (nXYCoordPrecision < 0)
+        nXYCoordPrecision = 7;
+    if (nZCoordPrecision < 0)
+        nZCoordPrecision = 3;
     bPolygonRightHandRule = true;
     bCanPatchCoordinatesWithNativeData = false;
     bHonourReservedRFC7946Members = true;
@@ -94,13 +97,23 @@ void OGRGeoJSONWriteOptions::SetIDOptions(CSLConstList papszOptions)
 /************************************************************************/
 
 static json_object *
-json_object_new_coord(double dfVal, const OGRGeoJSONWriteOptions &oOptions)
+json_object_new_coord(double dfVal, int nDimIdx,
+                      const OGRGeoJSONWriteOptions &oOptions)
 {
     // If coordinate precision is specified, or significant figures is not
     // then use the '%f' formatting.
-    if (oOptions.nCoordPrecision >= 0 || oOptions.nSignificantFigures < 0)
-        return json_object_new_double_with_precision(dfVal,
-                                                     oOptions.nCoordPrecision);
+    if (nDimIdx <= 2)
+    {
+        if (oOptions.nXYCoordPrecision >= 0 || oOptions.nSignificantFigures < 0)
+            return json_object_new_double_with_precision(
+                dfVal, oOptions.nXYCoordPrecision);
+    }
+    else
+    {
+        if (oOptions.nZCoordPrecision >= 0 || oOptions.nSignificantFigures < 0)
+            return json_object_new_double_with_precision(
+                dfVal, oOptions.nZCoordPrecision);
+    }
 
     return json_object_new_double_with_significant_figures(
         dfVal, oOptions.nSignificantFigures);
@@ -445,7 +458,7 @@ static void OGRGeoJSONPatchGeometry(json_object *poJSonGeometry,
 /*                           OGRGeoJSONGetBBox                          */
 /************************************************************************/
 
-OGREnvelope3D OGRGeoJSONGetBBox(OGRGeometry *poGeometry,
+OGREnvelope3D OGRGeoJSONGetBBox(const OGRGeometry *poGeometry,
                                 const OGRGeoJSONWriteOptions &oOptions)
 {
     OGREnvelope3D sEnvelope;
@@ -458,17 +471,20 @@ OGREnvelope3D OGRGeoJSONGetBBox(OGRGeometry *poGeometry,
         const double EPS = 1e-7;
         const OGRwkbGeometryType eType =
             wkbFlatten(poGeometry->getGeometryType());
-        if (OGR_GT_IsSubClassOf(eType, wkbGeometryCollection) &&
-            poGeometry->toGeometryCollection()->getNumGeometries() >= 2 &&
-            fabs(sEnvelope.MinX - (-180.0)) < EPS &&
+        const bool bMultiPart =
+            OGR_GT_IsSubClassOf(eType, wkbGeometryCollection) &&
+            poGeometry->toGeometryCollection()->getNumGeometries() >= 2;
+        if (bMultiPart && fabs(sEnvelope.MinX - (-180.0)) < EPS &&
             fabs(sEnvelope.MaxX - 180.0) < EPS)
         {
-            OGRGeometryCollection *poGC = poGeometry->toGeometryCollection();
+            // First heuristics (quite safe) when the geometry looks to
+            // have been really split at the dateline.
+            const auto *poGC = poGeometry->toGeometryCollection();
             double dfWestLimit = -180.0;
             double dfEastLimit = 180.0;
             bool bWestLimitIsInit = false;
             bool bEastLimitIsInit = false;
-            for (auto &&poMember : poGC)
+            for (const auto *poMember : poGC)
             {
                 OGREnvelope sEnvelopePart;
                 if (poMember->IsEmpty())
@@ -513,6 +529,44 @@ OGREnvelope3D OGRGeoJSONGetBBox(OGRGeometry *poGeometry,
             }
             sEnvelope.MinX = dfWestLimit;
             sEnvelope.MaxX = dfEastLimit;
+        }
+        else if (bMultiPart && sEnvelope.MaxX - sEnvelope.MinX > 180 &&
+                 sEnvelope.MinX >= -180 && sEnvelope.MaxX <= 180)
+        {
+            // More fragile heuristics for a geometry like Alaska
+            // (https://github.com/qgis/QGIS/issues/42827) which spans over
+            // the antimeridian but does not touch it.
+            const auto *poGC = poGeometry->toGeometryCollection();
+            double dfWestLimit = std::numeric_limits<double>::infinity();
+            double dfEastLimit = -std::numeric_limits<double>::infinity();
+            for (const auto *poMember : poGC)
+            {
+                OGREnvelope sEnvelopePart;
+                if (poMember->IsEmpty())
+                    continue;
+                poMember->getEnvelope(&sEnvelopePart);
+                if (sEnvelopePart.MinX > -120 && sEnvelopePart.MaxX < 120)
+                {
+                    dfWestLimit = std::numeric_limits<double>::infinity();
+                    dfEastLimit = -std::numeric_limits<double>::infinity();
+                    break;
+                }
+                if (sEnvelopePart.MinX > 0)
+                {
+                    dfWestLimit = std::min(dfWestLimit, sEnvelopePart.MinX);
+                }
+                else
+                {
+                    CPLAssert(sEnvelopePart.MaxX < 0);
+                    dfEastLimit = std::max(dfEastLimit, sEnvelopePart.MaxX);
+                }
+            }
+            if (dfWestLimit != std::numeric_limits<double>::infinity() &&
+                dfEastLimit + 360 - dfWestLimit < 180)
+            {
+                sEnvelope.MinX = dfWestLimit;
+                sEnvelope.MaxX = dfEastLimit;
+            }
         }
     }
 
@@ -663,6 +717,81 @@ json_object *OGRGeoJSONWriteFeature(OGRFeature *poFeature,
     /* -------------------------------------------------------------------- */
     /*      Write FID if available                                          */
     /* -------------------------------------------------------------------- */
+    OGRGeoJSONWriteId(poFeature, poObj, bIdAlreadyWritten, oOptions);
+
+    /* -------------------------------------------------------------------- */
+    /*      Write feature attributes to GeoJSON "properties" object.        */
+    /* -------------------------------------------------------------------- */
+    if (bHasProperties)
+    {
+        json_object *poObjProps = OGRGeoJSONWriteAttributes(
+            poFeature, bWriteIdIfFoundInAttributes, oOptions);
+        json_object_object_add(poObj, "properties", poObjProps);
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      Write feature geometry to GeoJSON "geometry" object.            */
+    /*      Null geometries are allowed, according to the GeoJSON Spec.     */
+    /* -------------------------------------------------------------------- */
+    json_object *poObjGeom = nullptr;
+
+    OGRGeometry *poGeometry = poFeature->GetGeometryRef();
+    if (nullptr != poGeometry)
+    {
+        poObjGeom = OGRGeoJSONWriteGeometry(poGeometry, oOptions);
+
+        if (bWriteBBOX && !poGeometry->IsEmpty())
+        {
+            OGREnvelope3D sEnvelope = OGRGeoJSONGetBBox(poGeometry, oOptions);
+
+            json_object *poObjBBOX = json_object_new_array();
+            json_object_array_add(
+                poObjBBOX, json_object_new_coord(sEnvelope.MinX, 1, oOptions));
+            json_object_array_add(
+                poObjBBOX, json_object_new_coord(sEnvelope.MinY, 2, oOptions));
+            if (wkbHasZ(poGeometry->getGeometryType()))
+                json_object_array_add(
+                    poObjBBOX,
+                    json_object_new_coord(sEnvelope.MinZ, 3, oOptions));
+            json_object_array_add(
+                poObjBBOX, json_object_new_coord(sEnvelope.MaxX, 1, oOptions));
+            json_object_array_add(
+                poObjBBOX, json_object_new_coord(sEnvelope.MaxY, 2, oOptions));
+            if (wkbHasZ(poGeometry->getGeometryType()))
+                json_object_array_add(
+                    poObjBBOX,
+                    json_object_new_coord(sEnvelope.MaxZ, 3, oOptions));
+
+            json_object_object_add(poObj, "bbox", poObjBBOX);
+        }
+
+        bool bOutPatchableCoords = false;
+        bool bOutCompatibleCoords = false;
+        if (OGRGeoJSONIsPatchableGeometry(poObjGeom, poNativeGeom,
+                                          bOutPatchableCoords,
+                                          bOutCompatibleCoords))
+        {
+            OGRGeoJSONPatchGeometry(poObjGeom, poNativeGeom,
+                                    bOutPatchableCoords, oOptions);
+        }
+    }
+
+    json_object_object_add(poObj, "geometry", poObjGeom);
+
+    if (poNativeGeom != nullptr)
+        json_object_put(poNativeGeom);
+
+    return poObj;
+}
+
+/************************************************************************/
+/*                        OGRGeoJSONWriteId                            */
+/************************************************************************/
+
+void OGRGeoJSONWriteId(const OGRFeature *poFeature, json_object *poObj,
+                       bool bIdAlreadyWritten,
+                       const OGRGeoJSONWriteOptions &oOptions)
+{
     if (!oOptions.osIDField.empty())
     {
         int nIdx = poFeature->GetDefnRef()->GetFieldIndexCaseSensitive(
@@ -703,68 +832,6 @@ json_object *OGRGeoJSONWriteFeature(OGRFeature *poFeature,
                                    json_object_new_int64(poFeature->GetFID()));
         }
     }
-
-    /* -------------------------------------------------------------------- */
-    /*      Write feature attributes to GeoJSON "properties" object.        */
-    /* -------------------------------------------------------------------- */
-    if (bHasProperties)
-    {
-        json_object *poObjProps = OGRGeoJSONWriteAttributes(
-            poFeature, bWriteIdIfFoundInAttributes, oOptions);
-        json_object_object_add(poObj, "properties", poObjProps);
-    }
-
-    /* -------------------------------------------------------------------- */
-    /*      Write feature geometry to GeoJSON "geometry" object.            */
-    /*      Null geometries are allowed, according to the GeoJSON Spec.     */
-    /* -------------------------------------------------------------------- */
-    json_object *poObjGeom = nullptr;
-
-    OGRGeometry *poGeometry = poFeature->GetGeometryRef();
-    if (nullptr != poGeometry)
-    {
-        poObjGeom = OGRGeoJSONWriteGeometry(poGeometry, oOptions);
-
-        if (bWriteBBOX && !poGeometry->IsEmpty())
-        {
-            OGREnvelope3D sEnvelope = OGRGeoJSONGetBBox(poGeometry, oOptions);
-
-            json_object *poObjBBOX = json_object_new_array();
-            json_object_array_add(
-                poObjBBOX, json_object_new_coord(sEnvelope.MinX, oOptions));
-            json_object_array_add(
-                poObjBBOX, json_object_new_coord(sEnvelope.MinY, oOptions));
-            if (wkbHasZ(poGeometry->getGeometryType()))
-                json_object_array_add(
-                    poObjBBOX, json_object_new_coord(sEnvelope.MinZ, oOptions));
-            json_object_array_add(
-                poObjBBOX, json_object_new_coord(sEnvelope.MaxX, oOptions));
-            json_object_array_add(
-                poObjBBOX, json_object_new_coord(sEnvelope.MaxY, oOptions));
-            if (wkbHasZ(poGeometry->getGeometryType()))
-                json_object_array_add(
-                    poObjBBOX, json_object_new_coord(sEnvelope.MaxZ, oOptions));
-
-            json_object_object_add(poObj, "bbox", poObjBBOX);
-        }
-
-        bool bOutPatchableCoords = false;
-        bool bOutCompatibleCoords = false;
-        if (OGRGeoJSONIsPatchableGeometry(poObjGeom, poNativeGeom,
-                                          bOutPatchableCoords,
-                                          bOutCompatibleCoords))
-        {
-            OGRGeoJSONPatchGeometry(poObjGeom, poNativeGeom,
-                                    bOutPatchableCoords, oOptions);
-        }
-    }
-
-    json_object_object_add(poObj, "geometry", poObjGeom);
-
-    if (poNativeGeom != nullptr)
-        json_object_put(poNativeGeom);
-
-    return poObj;
 }
 
 /************************************************************************/
@@ -795,6 +862,35 @@ json_object *OGRGeoJSONWriteAttributes(OGRFeature *poFeature,
             : MAX_SIGNIFICANT_DIGITS_FLOAT32;
 
     const int nFieldCount = poDefn->GetFieldCount();
+
+    json_object *poNativeObjProp = nullptr;
+    json_object *poProperties = nullptr;
+
+    // Scan the fields to determine if there is a chance of
+    // mixed types and we can use native media
+    bool bUseNativeMedia{false};
+
+    if (poFeature->GetNativeMediaType() &&
+        strcmp(poFeature->GetNativeMediaType(), "application/vnd.geo+json") ==
+            0 &&
+        poFeature->GetNativeData())
+    {
+        for (int nField = 0; nField < nFieldCount; ++nField)
+        {
+            if (poDefn->GetFieldDefn(nField)->GetSubType() == OFSTJSON)
+            {
+                if (OGRJSonParse(poFeature->GetNativeData(), &poNativeObjProp,
+                                 false))
+                {
+                    poProperties = OGRGeoJSONFindMemberByName(poNativeObjProp,
+                                                              "properties");
+                    bUseNativeMedia = poProperties != nullptr;
+                }
+                break;
+            }
+        }
+    }
+
     for (int nField = 0; nField < nFieldCount; ++nField)
     {
         if (!poFeature->IsFieldSet(nField) || nField == nIDField)
@@ -869,13 +965,35 @@ json_object *OGRGeoJSONWriteAttributes(OGRFeature *poFeature,
         {
             const char *pszStr = poFeature->GetFieldAsString(nField);
             const size_t nLen = strlen(pszStr);
-            poObjProp = nullptr;
+
             if (eSubType == OFSTJSON ||
-                (pszStr[0] == '{' && pszStr[nLen - 1] == '}') ||
-                (pszStr[0] == '[' && pszStr[nLen - 1] == ']'))
+                (oOptions.bAutodetectJsonStrings &&
+                 ((pszStr[0] == '{' && pszStr[nLen - 1] == '}') ||
+                  (pszStr[0] == '[' && pszStr[nLen - 1] == ']'))))
             {
-                OGRJSonParse(pszStr, &poObjProp, false);
+                if (bUseNativeMedia)
+                {
+                    if (json_object *poProperty = OGRGeoJSONFindMemberByName(
+                            poProperties, poFieldDefn->GetNameRef()))
+                    {
+                        const char *pszProp{json_object_get_string(poProperty)};
+                        if (pszProp && strcmp(pszProp, pszStr) == 0)
+                        {
+                            poObjProp = json_object_get(poProperty);
+                        }
+                    }
+                }
+
+                if (poObjProp == nullptr)
+                {
+                    if ((pszStr[0] == '{' && pszStr[nLen - 1] == '}') ||
+                        (pszStr[0] == '[' && pszStr[nLen - 1] == ']'))
+                    {
+                        OGRJSonParse(pszStr, &poObjProp, false);
+                    }
+                }
             }
+
             if (poObjProp == nullptr)
                 poObjProp = json_object_new_string(pszStr);
         }
@@ -969,22 +1087,17 @@ json_object *OGRGeoJSONWriteAttributes(OGRFeature *poFeature,
                                poObjProp);
     }
 
+    if (bUseNativeMedia)
+    {
+        json_object_put(poNativeObjProp);
+    }
+
     return poObjProps;
 }
 
 /************************************************************************/
 /*                           OGRGeoJSONWriteGeometry                    */
 /************************************************************************/
-
-json_object *OGRGeoJSONWriteGeometry(const OGRGeometry *poGeometry,
-                                     int nCoordPrecision,
-                                     int nSignificantFigures)
-{
-    OGRGeoJSONWriteOptions oOptions;
-    oOptions.nCoordPrecision = nCoordPrecision;
-    oOptions.nSignificantFigures = nSignificantFigures;
-    return OGRGeoJSONWriteGeometry(poGeometry, oOptions);
-}
 
 json_object *OGRGeoJSONWriteGeometry(const OGRGeometry *poGeometry,
                                      const OGRGeoJSONWriteOptions &oOptions)
@@ -1293,8 +1406,8 @@ json_object *OGRGeoJSONWriteCoords(double const &fX, double const &fY,
         return nullptr;
     }
     poObjCoords = json_object_new_array();
-    json_object_array_add(poObjCoords, json_object_new_coord(fX, oOptions));
-    json_object_array_add(poObjCoords, json_object_new_coord(fY, oOptions));
+    json_object_array_add(poObjCoords, json_object_new_coord(fX, 1, oOptions));
+    json_object_array_add(poObjCoords, json_object_new_coord(fY, 2, oOptions));
 
     return poObjCoords;
 }
@@ -1311,9 +1424,9 @@ json_object *OGRGeoJSONWriteCoords(double const &fX, double const &fY,
         return nullptr;
     }
     json_object *poObjCoords = json_object_new_array();
-    json_object_array_add(poObjCoords, json_object_new_coord(fX, oOptions));
-    json_object_array_add(poObjCoords, json_object_new_coord(fY, oOptions));
-    json_object_array_add(poObjCoords, json_object_new_coord(fZ, oOptions));
+    json_object_array_add(poObjCoords, json_object_new_coord(fX, 1, oOptions));
+    json_object_array_add(poObjCoords, json_object_new_coord(fY, 2, oOptions));
+    json_object_array_add(poObjCoords, json_object_new_coord(fZ, 3, oOptions));
 
     return poObjCoords;
 }
@@ -1419,10 +1532,17 @@ char *OGR_G_ExportToJson(OGRGeometryH hGeometry)
  * The following options are supported :
  * <ul>
  * <li>COORDINATE_PRECISION=number: maximum number of figures after decimal
- * separator to write in coordinates.</li> <li>SIGNIFICANT_FIGURES=number:
+ * separator to write in coordinates.</li>
+ * <li>XY_COORD_PRECISION=integer: number of decimal figures for X,Y coordinates
+ * (added in GDAL 3.9)</li>
+ * <li>Z_COORD_PRECISION=integer: number of decimal figures for Z coordinates
+ * (added in GDAL 3.9)</li>
+ * <li>SIGNIFICANT_FIGURES=number:
  * maximum number of significant figures (GDAL &gt;= 2.1).</li>
  * </ul>
  *
+ * If XY_COORD_PRECISION or Z_COORD_PRECISION is specified, COORDINATE_PRECISION
+ * or SIGNIFICANT_FIGURES will be ignored if specified.
  * If COORDINATE_PRECISION is defined, SIGNIFICANT_FIGURES will be ignored if
  * specified.
  * When none are defined, the default is COORDINATE_PRECISION=15.
@@ -1440,16 +1560,19 @@ char *OGR_G_ExportToJsonEx(OGRGeometryH hGeometry, char **papszOptions)
 {
     VALIDATE_POINTER1(hGeometry, "OGR_G_ExportToJson", nullptr);
 
-    OGRGeometry *poGeometry = reinterpret_cast<OGRGeometry *>(hGeometry);
+    OGRGeometry *poGeometry = OGRGeometry::FromHandle(hGeometry);
 
-    const int nCoordPrecision =
-        atoi(CSLFetchNameValueDef(papszOptions, "COORDINATE_PRECISION", "-1"));
+    const char *pszCoordPrecision =
+        CSLFetchNameValueDef(papszOptions, "COORDINATE_PRECISION", "-1");
 
     const int nSignificantFigures =
         atoi(CSLFetchNameValueDef(papszOptions, "SIGNIFICANT_FIGURES", "-1"));
 
     OGRGeoJSONWriteOptions oOptions;
-    oOptions.nCoordPrecision = nCoordPrecision;
+    oOptions.nXYCoordPrecision = atoi(CSLFetchNameValueDef(
+        papszOptions, "XY_COORD_PRECISION", pszCoordPrecision));
+    oOptions.nZCoordPrecision = atoi(CSLFetchNameValueDef(
+        papszOptions, "Z_COORD_PRECISION", pszCoordPrecision));
     oOptions.nSignificantFigures = nSignificantFigures;
 
     // If the CRS has latitude, longitude (or northing, easting) axis order,

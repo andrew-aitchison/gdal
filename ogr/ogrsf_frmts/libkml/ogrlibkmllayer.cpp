@@ -71,16 +71,24 @@ using kmlengine::Bbox;
 
 CPLString OGRLIBKMLGetSanitizedNCName(const char *pszName)
 {
-    CPLString osName(pszName);
+    CPLString osName;
     // (Approximate) validation rules for a valid NCName.
+
+    // If the first character is illegal as a first character, but allowed in
+    // later positions, preprend an initial underscore
+    // (cf https://github.com/OSGeo/gdal/issues/9538)
+    if (pszName[0] == '-' || pszName[0] == '.' ||
+        (pszName[0] >= '0' && pszName[0] <= '9'))
+    {
+        osName = "_";
+    }
+    osName += pszName;
+
     for (size_t i = 0; i < osName.size(); i++)
     {
         char ch = osName[i];
-        if ((ch >= 'A' && ch <= 'Z') || ch == '_' || (ch >= 'a' && ch <= 'z'))
-        {
-            /* ok */
-        }
-        else if (i > 0 && (ch == '-' || ch == '.' || (ch >= '0' && ch <= '9')))
+        if ((ch >= 'A' && ch <= 'Z') || ch == '_' || (ch >= 'a' && ch <= 'z') ||
+            (ch == '-' || ch == '.' || (ch >= '0' && ch <= '9')))
         {
             /* ok */
         }
@@ -116,9 +124,10 @@ OGRLIBKMLLayer::OGRLIBKMLLayer(
     const char *pszFileName, int bNew, int bUpdateIn)
     : bUpdate(CPL_TO_BOOL(bUpdateIn)), nFeatures(0), iFeature(0), nFID(1),
       m_pszName(CPLStrdup(pszLayerName)), m_pszFileName(CPLStrdup(pszFileName)),
-      m_poKmlLayer(poKmlContainer),  // Store the layers container.
-      m_poKmlLayerRoot(poKmlRoot),   // Store the root element pointer.
-      m_poKmlUpdate(poKmlUpdate), m_poOgrDS(poOgrDS),
+      m_poKmlLayer(std::move(poKmlContainer)),  // Store the layers container.
+      m_poKmlLayerRoot(
+          std::move(poKmlRoot)),  // Store the root element pointer.
+      m_poKmlUpdate(std::move(poKmlUpdate)), m_poOgrDS(poOgrDS),
       m_poOgrFeatureDefn(new OGRFeatureDefn(pszLayerName)),
       m_poKmlSchema(nullptr), m_poOgrSRS(new OGRSpatialReference(nullptr)),
       m_bReadGroundOverlay(
@@ -253,7 +262,7 @@ OGRLIBKMLLayer::OGRLIBKMLLayer(
                     {
                         m_poKmlSchema = nullptr;
                     }
-                    kml2FeatureDef(schema, m_poOgrFeatureDefn);
+                    kml2FeatureDef(std::move(schema), m_poOgrFeatureDefn);
                 }
             }
         }
@@ -339,7 +348,7 @@ OGRLIBKMLLayer::OGRLIBKMLLayer(
                                         {
                                             m_poKmlSchema = nullptr;
                                         }
-                                        kml2FeatureDef(schema,
+                                        kml2FeatureDef(std::move(schema),
                                                        m_poOgrFeatureDefn);
                                     }
                                 }
@@ -728,7 +737,7 @@ OGRErr OGRLIBKMLLayer::GetExtent(OGREnvelope *psExtent, int bForce)
 
 ******************************************************************************/
 
-OGRErr OGRLIBKMLLayer::CreateField(OGRFieldDefn *poField, int /* bApproxOK */)
+OGRErr OGRLIBKMLLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 {
     if (!bUpdate)
         return OGRERR_UNSUPPORTED_OPERATION;
@@ -737,8 +746,8 @@ OGRErr OGRLIBKMLLayer::CreateField(OGRFieldDefn *poField, int /* bApproxOK */)
     {
         SimpleFieldPtr poKmlSimpleField = nullptr;
 
-        if ((poKmlSimpleField =
-                 FieldDef2kml(poField, m_poOgrDS->GetKmlFactory())))
+        if ((poKmlSimpleField = FieldDef2kml(
+                 poField, m_poOgrDS->GetKmlFactory(), CPL_TO_BOOL(bApproxOK))))
         {
             if (!m_poKmlSchema)
             {
@@ -1084,8 +1093,9 @@ void OGRLIBKMLLayer::Finalize(DocumentPtr poKmlDocument)
         m_poKmlLayer->set_region(region);
     }
 
-    createkmlliststyle(poKmlFactory, GetName(), m_poKmlLayer, poKmlDocument,
-                       osListStyleType, osListStyleIconHref);
+    createkmlliststyle(poKmlFactory, GetName(), m_poKmlLayer,
+                       std::move(poKmlDocument), osListStyleType,
+                       osListStyleIconHref);
 }
 
 /************************************************************************/
@@ -1200,4 +1210,13 @@ void OGRLIBKMLLayer::SetListStyle(const char *pszListStyleType,
 {
     osListStyleType = pszListStyleType ? pszListStyleType : "";
     osListStyleIconHref = pszListStyleIconHref ? pszListStyleIconHref : "";
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRLIBKMLLayer::GetDataset()
+{
+    return m_poOgrDS;
 }

@@ -36,6 +36,7 @@
 
 #include "gdal_frmts.h"
 #include "postgisraster.h"
+#include "postgisrasterdrivercore.h"
 #include <math.h>
 
 #include <algorithm>
@@ -289,10 +290,11 @@ int PostGISRasterDataset::CloseDependentDatasets()
 /*                            FlushCache()                              */
 /************************************************************************/
 
-void PostGISRasterDataset::FlushCache(bool bAtClosing)
+CPLErr PostGISRasterDataset::FlushCache(bool bAtClosing)
 {
-    VRTDataset::FlushCache(bAtClosing);
+    const CPLErr eErr = VRTDataset::FlushCache(bAtClosing);
     oOutDBDatasetCache.clear();
+    return eErr;
 }
 
 /************************************************************************/
@@ -766,9 +768,9 @@ PostGISRasterDataset *PostGISRasterDataset::GetOverviewDS(int iOvr)
  *
  * This method is adapted from gdalbuildvrt as is in GDAL 1.10.0
  ***********************************************************************/
-GBool PostGISRasterDataset::GetDstWin(PostGISRasterTileDataset *psDP,
-                                      int *pnDstXOff, int *pnDstYOff,
-                                      int *pnDstXSize, int *pnDstYSize)
+void PostGISRasterDataset::GetDstWin(PostGISRasterTileDataset *psDP,
+                                     int *pnDstXOff, int *pnDstYOff,
+                                     int *pnDstXSize, int *pnDstYSize)
 {
     double we_res = this->adfGeoTransform[GEOTRSFRM_WE_RES];
     double ns_res = this->adfGeoTransform[GEOTRSFRM_NS_RES];
@@ -792,14 +794,12 @@ GBool PostGISRasterDataset::GetDstWin(PostGISRasterTileDataset *psDP,
     *pnDstYSize = static_cast<int>(
         0.5 + psDP->GetRasterYSize() * adfTileGeoTransform[GEOTRSFRM_NS_RES] /
                   ns_res);
-
-    return true;
 }
 
 /***********************************************************************
  * \brief Add tiles bands as complex source for raster bands.
  **********************************************************************/
-GBool PostGISRasterDataset::AddComplexSource(PostGISRasterTileDataset *poRTDS)
+void PostGISRasterDataset::AddComplexSource(PostGISRasterTileDataset *poRTDS)
 {
     // Parameters to add the tile bands as sources
     int nDstXOff = 0;
@@ -808,10 +808,7 @@ GBool PostGISRasterDataset::AddComplexSource(PostGISRasterTileDataset *poRTDS)
     int nDstYSize = 0;
 
     // Get src and dst parameters
-    GBool bValidTile =
-        GetDstWin(poRTDS, &nDstXOff, &nDstYOff, &nDstXSize, &nDstYSize);
-    if (!bValidTile)
-        return false;
+    GetDstWin(poRTDS, &nDstXOff, &nDstYOff, &nDstXSize, &nDstYSize);
 
 #ifdef DEBUG_VERBOSE
     CPLDebug("PostGIS_Raster",
@@ -843,8 +840,6 @@ GBool PostGISRasterDataset::AddComplexSource(PostGISRasterTileDataset *poRTDS)
 
         prtb->poSource = prb->papoSources[prb->nSources - 1];
     }
-
-    return true;
 }
 
 /************************************************************************/
@@ -923,6 +918,7 @@ void PostGISRasterDataset::CacheTile(const char *pszMetadata,
     const int nExpectedBands = bAllBandCaching ? GetRasterCount() : 1;
 
     int nWKBLength = 0;
+
     struct CPLFreer
     {
         void operator()(GByte *x) const
@@ -930,6 +926,7 @@ void PostGISRasterDataset::CacheTile(const char *pszMetadata,
             CPLFree(x);
         }
     };
+
     std::unique_ptr<GByte, CPLFreer> pbyDataAutoFreed(
         CPLHexToBinary(pszRaster, &nWKBLength));
     GByte *pbyData = pbyDataAutoFreed.get();
@@ -1212,10 +1209,11 @@ GBool PostGISRasterDataset::LoadSources(int nXOff, int nYOff, int nXSize,
         CPLTestBool(CPLGetConfigOption("PR_FORCE_LOAD_RASTERS", "FALSE"));
     bool bAllBandCaching = false;
 
-    CPLString osPrimaryKeyNameI(CPLQuotedSQLIdentifier(pszPrimaryKeyName));
-    CPLString osSchemaI(CPLQuotedSQLIdentifier(pszSchema));
-    CPLString osTableI(CPLQuotedSQLIdentifier(pszTable));
-    CPLString osColumnI(CPLQuotedSQLIdentifier(pszColumn));
+    const std::string osPrimaryKeyNameI(
+        CPLQuotedSQLIdentifier(pszPrimaryKeyName));
+    const std::string osSchemaI(CPLQuotedSQLIdentifier(pszSchema));
+    const std::string osTableI(CPLQuotedSQLIdentifier(pszTable));
+    const std::string osColumnI(CPLQuotedSQLIdentifier(pszColumn));
 
     PGresult *poResult = nullptr;
     if (m_nTiles > 0 && !bFetchAll)
@@ -1303,7 +1301,7 @@ GBool PostGISRasterDataset::LoadSources(int nXOff, int nYOff, int nXSize,
 
     if (bFetchAll || !osIDsToFetch.empty() || !osSpatialFilter.empty())
     {
-        CPLString osWHERE;
+        std::string osWHERE;
         if (!osIDsToFetch.empty())
         {
             osWHERE += osPrimaryKeyNameI;
@@ -1313,7 +1311,7 @@ GBool PostGISRasterDataset::LoadSources(int nXOff, int nYOff, int nXSize,
         }
         else if (!osSpatialFilter.empty())
         {
-            osWHERE = osSpatialFilter;
+            osWHERE = std::move(osSpatialFilter);
         }
         if (pszWhere != nullptr)
         {
@@ -1399,22 +1397,16 @@ GBool PostGISRasterDataset::LoadSources(int nXOff, int nYOff, int nXSize,
                                                 GetRasterCount(), nullptr);
                 if (poRTDS != nullptr)
                 {
-                    if (AddComplexSource(poRTDS))
-                    {
-                        oMapPKIDToRTDS[poRTDS->pszPKID] = poRTDS;
-                        papoSourcesHolders =
-                            static_cast<PostGISRasterTileDataset **>(
-                                CPLRealloc(papoSourcesHolders,
-                                           sizeof(PostGISRasterTileDataset *) *
-                                               (m_nTiles + 1)));
-                        papoSourcesHolders[m_nTiles++] = poRTDS;
-                        CPLQuadTreeInsert(hQuadTree, poRTDS);
-                    }
-                    else
-                    {
-                        delete poRTDS;
-                        poRTDS = nullptr;
-                    }
+                    AddComplexSource(poRTDS);
+
+                    oMapPKIDToRTDS[poRTDS->pszPKID] = poRTDS;
+                    papoSourcesHolders =
+                        static_cast<PostGISRasterTileDataset **>(
+                            CPLRealloc(papoSourcesHolders,
+                                       sizeof(PostGISRasterTileDataset *) *
+                                           (m_nTiles + 1)));
+                    papoSourcesHolders[m_nTiles++] = poRTDS;
+                    CPLQuadTreeInsert(hQuadTree, poRTDS);
                 }
             }
 
@@ -2105,16 +2097,7 @@ GBool PostGISRasterDataset::ConstructOneDatasetFromTiles(PGresult *poResult)
     for (int iSource = 0; iSource < l_nTiles; iSource++)
     {
         PostGISRasterTileDataset *poRTDS = papoSourcesHolders[iSource];
-        if (!AddComplexSource(poRTDS))
-        {
-            CPLDebug("PostGIS_Raster",
-                     "PostGISRasterDataset::ConstructOneDatasetFromTiles:"
-                     "Bounding box of tile %d does not intersect the "
-                     "bounding box of dataset ",
-                     iSource);
-
-            continue;
-        }
+        AddComplexSource(poRTDS);
         if (poRTDS->pszPKID != nullptr)
             oMapPKIDToRTDS[poRTDS->pszPKID] = poRTDS;
         CPLQuadTreeInsert(hQuadTree, poRTDS);
@@ -2822,7 +2805,7 @@ GetConnectionInfo(const char *pszFilename, char **ppszConnectionString,
 {
     int nPos = -1, sPos = -1, i;
     char *pszTmp = nullptr;
-    char **papszParams = ParseConnectionString(pszFilename);
+    char **papszParams = PostGISRasterParseConnectionString(pszFilename);
     if (papszParams == nullptr)
     {
         return false;
@@ -3167,11 +3150,9 @@ static PGconn *GetConnection(const char *pszFilename,
         /**************************************************************
          * Open a new database connection
          **************************************************************/
-        PostGISRasterDriver *poDriver = static_cast<PostGISRasterDriver *>(
-            GDALGetDriverByName("PostGISRaster"));
-
-        poConn = poDriver->GetConnection(*ppszConnectionString, pszService,
-                                         pszDbname, pszHost, pszPort, pszUser);
+        poConn = PostGISRasterDriver::gpoPostGISRasterDriver->GetConnection(
+            *ppszConnectionString, pszService, pszDbname, pszHost, pszPort,
+            pszUser);
 
         if (poConn == nullptr)
         {
@@ -3188,29 +3169,6 @@ static PGconn *GetConnection(const char *pszFilename,
     CPLFree(pszPassword);
 
     return poConn;
-}
-
-/************************************************************************/
-/*                            Identify()                                */
-/************************************************************************/
-
-int PostGISRasterDataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (poOpenInfo->pszFilename == nullptr || poOpenInfo->fpL != nullptr ||
-        !STARTS_WITH_CI(poOpenInfo->pszFilename, "PG:"))
-    {
-        return FALSE;
-    }
-
-    // Will avoid a OGR PostgreSQL connection string to be recognized as a
-    // PostgisRaster one and later fail (#6034)
-    if (strstr(poOpenInfo->pszFilename, " schemas=") ||
-        strstr(poOpenInfo->pszFilename, " SCHEMAS="))
-    {
-        return FALSE;
-    }
-
-    return TRUE;
 }
 
 /***********************************************************************
@@ -3240,7 +3198,7 @@ GDALDataset *PostGISRasterDataset::Open(GDALOpenInfo *poOpenInfo)
     /**************************
      * Check input parameter
      **************************/
-    if (!Identify(poOpenInfo))
+    if (!PostGISRasterDriverIdentify(poOpenInfo))
         return nullptr;
 
     poConn = GetConnection(poOpenInfo->pszFilename, &pszConnectionString,
@@ -4122,18 +4080,13 @@ void GDALRegister_PostGISRaster()
     if (!GDAL_CHECK_VERSION("PostGISRaster driver"))
         return;
 
-    if (GDALGetDriverByName("PostGISRaster") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new PostGISRasterDriver();
-
-    poDriver->SetDescription("PostGISRaster");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "PostGIS Raster driver");
-    poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
+    PostGISRasterDriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = PostGISRasterDataset::Open;
-    poDriver->pfnIdentify = PostGISRasterDataset::Identify;
     poDriver->pfnCreateCopy = PostGISRasterDataset::CreateCopy;
     poDriver->pfnDelete = PostGISRasterDataset::Delete;
 

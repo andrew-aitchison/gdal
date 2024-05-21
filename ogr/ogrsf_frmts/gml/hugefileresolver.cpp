@@ -123,6 +123,7 @@ class huge_helper
           pLastHref(nullptr), pFirstParent(nullptr), pLastParent(nullptr)
     {
     }
+
     sqlite3 *hDB;
     sqlite3_stmt *hNodes;
     sqlite3_stmt *hEdges;
@@ -1838,6 +1839,7 @@ bool GMLReader::ParseXMLHugeFile(const char *pszOutputFilename,
         {
             CPLError(CE_Failure, CPLE_OpenFailed, "sqlite3_open(%s) failed: %s",
                      pszSQLiteFilename, sqlite3_errmsg(hDB));
+            sqlite3_close(hDB);
             return false;
         }
     }

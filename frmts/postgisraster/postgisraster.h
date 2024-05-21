@@ -162,8 +162,6 @@ typedef struct
 
 // Some tools definitions
 char *ReplaceQuotes(const char *, int);
-char *ReplaceSingleQuotes(const char *, int);
-char **ParseConnectionString(const char *);
 GBool TranslateDataType(const char *, GDALDataType *, int *);
 
 class PostGISRasterRasterBand;
@@ -177,7 +175,7 @@ class PostGISRasterDriver final : public GDALDriver
 {
 
   private:
-    CPLMutex *hMutex;
+    CPLMutex *hMutex = nullptr;
     std::map<CPLString, PGconn *> oMapConnection{};
 
     CPL_DISALLOW_COPY_ASSIGN(PostGISRasterDriver)
@@ -188,6 +186,8 @@ class PostGISRasterDriver final : public GDALDriver
                           const char *pszServiceIn, const char *pszDbnameIn,
                           const char *pszHostIn, const char *pszPortIn,
                           const char *pszUserIn);
+
+    static PostGISRasterDriver *gpoPostGISRasterDriver;
 };
 
 /***********************************************************************
@@ -275,8 +275,8 @@ class PostGISRasterDataset final : public VRTDataset
     GBool YieldSubdatasets(PGresult *, const char *);
     GBool SetRasterProperties(const char *);
     GBool BrowseDatabase(const char *, const char *);
-    GBool AddComplexSource(PostGISRasterTileDataset *poRTDS);
-    GBool GetDstWin(PostGISRasterTileDataset *, int *, int *, int *, int *);
+    void AddComplexSource(PostGISRasterTileDataset *poRTDS);
+    void GetDstWin(PostGISRasterTileDataset *, int *, int *, int *, int *);
     BandMetadata *GetBandsMetadata(int *);
     PROverview *GetOverviewTables(int *);
 
@@ -292,6 +292,7 @@ class PostGISRasterDataset final : public VRTDataset
     {
         return oMapPKIDToRTDS[pszPKID];
     }
+
     PostGISRasterTileDataset *GetMatchingSourceRef(double dfUpperLeftX,
                                                    double dfUpperLeftY);
 
@@ -308,13 +309,12 @@ class PostGISRasterDataset final : public VRTDataset
 
   protected:
     virtual int CloseDependentDatasets() override;
-    virtual void FlushCache(bool bAtClosing) override;
+    virtual CPLErr FlushCache(bool bAtClosing) override;
 
   public:
     PostGISRasterDataset();
     virtual ~PostGISRasterDataset();
     static GDALDataset *Open(GDALOpenInfo *);
-    static int Identify(GDALOpenInfo *);
     static GDALDataset *CreateCopy(const char *, GDALDataset *, int, char **,
                                    GDALProgressFunc, void *);
     static GBool InsertRaster(PGconn *, PostGISRasterDataset *, const char *,
@@ -410,6 +410,7 @@ class PostGISRasterTileDataset final : public GDALDataset
     CPLErr GetGeoTransform(double *) override;
     void GetExtent(double *pdfMinX, double *pdfMinY, double *pdfMaxX,
                    double *pdfMaxY) const;
+
     const char *GetPKID() const
     {
         return pszPKID;

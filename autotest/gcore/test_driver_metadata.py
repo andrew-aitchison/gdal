@@ -29,10 +29,25 @@
 ###############################################################################
 
 
+import gdaltest
 import pytest
 from lxml import etree
 
 from osgeo import gdal
+
+# For unknown reason on mingw64 CI, this now crashes
+# on File "D:/a/gdal/gdal/build/autotest/gcore/test_driver_metadata.py", line 396 in test_metadata_openoptionlist
+# This used to work previously, so likely related to some update in a
+# mingw64 component, although the diff between a broken and working CI run
+# does not show an obvious culprit. And this works in a local VM...
+# And now this breaks on build-windows-conda too
+pytestmark = pytest.mark.skipif(
+    gdaltest.is_travis_branch("mingw64")
+    or gdaltest.is_travis_branch("build-windows-conda")
+    or gdaltest.is_travis_branch("build-windows-minimum"),
+    reason="Crashes for unknown reason",
+)
+
 
 all_driver_names = [
     gdal.GetDriver(i).GetDescription() for i in range(gdal.GetDriverCount())
@@ -590,6 +605,50 @@ def test_metadata_alter_geom_field_defn_flags(driver_name):
 
     driver = gdal.GetDriverByName(driver_name)
     flags_str = driver.GetMetadataItem(gdal.DMD_ALTER_GEOM_FIELD_DEFN_FLAGS)
+    if flags_str is not None:
+        for flag in flags_str.split(" "):
+            assert flag in supported_flags
+
+
+@pytest.mark.parametrize("driver_name", ogr_driver_names)
+def test_metadata_alter_field_defn_flags(driver_name):
+    """Test if GDAL_DMD_ALTER_FIELD_DEFN_FLAGS metadataitem returns valid flags"""
+
+    supported_flags = {
+        "Name",
+        "Type",
+        "WidthPrecision",
+        "Nullable",
+        "Default",
+        "Unique",
+        "AlternativeName",
+        "Comment",
+        "Domain",
+    }
+
+    driver = gdal.GetDriverByName(driver_name)
+    flags_str = driver.GetMetadataItem(gdal.DMD_ALTER_FIELD_DEFN_FLAGS)
+    if flags_str is not None:
+        for flag in flags_str.split(" "):
+            assert flag in supported_flags
+
+
+@pytest.mark.parametrize("driver_name", ogr_driver_names)
+def test_metadata_creation_field_defn_flags(driver_name):
+    """Test if GDAL_DMD_CREATION_FIELD_DEFN_FLAGS metadataitem returns valid flags"""
+
+    supported_flags = {
+        "WidthPrecision",
+        "Nullable",
+        "Default",
+        "Unique",
+        "AlternativeName",
+        "Comment",
+        "Domain",
+    }
+
+    driver = gdal.GetDriverByName(driver_name)
+    flags_str = driver.GetMetadataItem(gdal.DMD_CREATION_FIELD_DEFN_FLAGS)
     if flags_str is not None:
         for flag in flags_str.split(" "):
             assert flag in supported_flags

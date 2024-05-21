@@ -52,6 +52,39 @@ except AttributeError:
         "osgeo.gdal_array.GDALTypeCodeToNumericTypeCode is unavailable"
     )
 
+pytestmark = pytest.mark.skipif(
+    test_py_scripts.get_py_script("gdal_calc") is None,
+    reason="gdal_calc not available",
+)
+
+
+@pytest.fixture()
+def script_path():
+    return test_py_scripts.get_py_script("gdal_calc")
+
+
+###############################################################################
+#
+
+
+def test_gdal_calc_help(script_path):
+
+    assert "ERROR" not in test_py_scripts.run_py_script(
+        script_path, "gdal_calc", "--help"
+    )
+
+
+###############################################################################
+#
+
+
+def test_gdal_calc_version(script_path):
+
+    assert "ERROR" not in test_py_scripts.run_py_script(
+        script_path, "gdal_calc", "--version"
+    )
+
+
 # Usage: gdal_calc.py [-A <filename>] [--A_band] [-B...-Z filename] [other_options]
 
 
@@ -76,27 +109,31 @@ opts_counter_counter = 0
 input_checksum = (12603, 58561, 36064, 10807)
 
 
-def get_input_file():
-    infile = make_temp_filename(0)
+@pytest.fixture()
+def stefan_full_rgba(tmp_path):
+
+    infile = str(tmp_path / "stefan_full_rgba.tif")
+
     if not os.path.isfile(infile):
         shutil.copy(
             test_py_scripts.get_data_path("gcore") + "stefan_full_rgba.tif", infile
         )
+
     return infile
 
 
-def format_temp_filename(test_id, idx, is_opt=False):
+def format_temp_filename(root, test_id, idx, is_opt=False):
     if not is_opt:
-        out_template = "tmp/test_gdal_calc_py{}.tif"
+        out_template = str(root) + "/test_gdal_calc_py{}.tif"
         return out_template.format(
             "" if test_id == 0 else "_{}_{}".format(test_id, idx)
         )
     else:
-        opts_template = "tmp/opt{}"
+        opts_template = str(root) + "/opt{}"
         return opts_template.format(idx)
 
 
-def make_temp_filename(test_id, is_opt=False):
+def make_temp_filename(root, test_id, is_opt=False):
     if not is_opt:
         global temp_counter_dict
         temp_counter_dict[test_id] = 1 + (temp_counter_dict[test_id] if test_id else 0)
@@ -105,25 +142,19 @@ def make_temp_filename(test_id, is_opt=False):
         global opts_counter_counter
         opts_counter_counter = opts_counter_counter + 1
         idx = opts_counter_counter
-    return format_temp_filename(test_id, idx, is_opt)
+    return format_temp_filename(root, test_id, idx, is_opt)
 
 
-def make_temp_filename_list(test_id, test_count, is_opt=False):
-    return list(make_temp_filename(test_id, is_opt) for _ in range(test_count))
+def make_temp_filename_list(root, test_id, test_count, is_opt=False):
+    return list(make_temp_filename(root, test_id, is_opt) for _ in range(test_count))
 
 
-def test_gdal_calc_py_1():
+def test_gdal_calc_py_1(script_path, tmp_path, stefan_full_rgba):
     """test basic copy"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 1, 3
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     test_py_scripts.run_py_script(
         script_path, "gdal_calc", f"-A {infile} --calc=A --overwrite --outfile {out[0]}"
@@ -136,7 +167,7 @@ def test_gdal_calc_py_1():
     test_py_scripts.run_py_script(
         script_path,
         "gdal_calc",
-        f"-Z {infile} --Z_band=2 --calc=Z --overwrite --outfile {out[2]}",
+        f"-Z {infile} --Z_band=2 --calc=Z --overwrite --format GTiff --outfile {out[2]}",
     )
 
     for i, checksum in zip(
@@ -166,18 +197,12 @@ def test_gdal_calc_py_1():
     check_file(out[2], zero_cs)
 
 
-def test_gdal_calc_py_2():
+def test_gdal_calc_py_2(script_path, tmp_path, stefan_full_rgba):
     """test simple formulas"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 2, 3
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     test_py_scripts.run_py_script(
         script_path,
@@ -202,18 +227,12 @@ def test_gdal_calc_py_2():
         check_file(out[i], checksum, i + 1)
 
 
-def test_gdal_calc_py_3():
+def test_gdal_calc_py_3(script_path, tmp_path, stefan_full_rgba):
     """test --allBands option (simple copy)"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 3, 1
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     test_py_scripts.run_py_script(
         script_path,
@@ -226,18 +245,12 @@ def test_gdal_calc_py_3():
         check_file(out[0], checksum, 1, bnd_idx=i + 1)
 
 
-def test_gdal_calc_py_4():
+def test_gdal_calc_py_4(script_path, tmp_path, stefan_full_rgba):
     """test --allBands option (simple calc)"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 4, 3
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     # some values are clipped to 255, but this doesn't matter... small values were visually checked
     test_py_scripts.run_py_script(
@@ -253,6 +266,9 @@ def test_gdal_calc_py_4():
     bnd_count = 3
     for i, checksum in zip(range(bnd_count), (29935, 13128, 59092)):
         check_file(out[1], checksum, 2, bnd_idx=i + 1)
+        # also check NoDataValue
+        ds = gdal.Open(out[1])
+        assert ds.GetRasterBand(i + 1).GetNoDataValue() == 999
 
     # these values were not tested
     test_py_scripts.run_py_script(
@@ -265,20 +281,17 @@ def test_gdal_calc_py_4():
     bnd_count = 3
     for i, checksum in zip(range(bnd_count), (10025, 62785, 10621)):
         check_file(out[2], checksum, 3, bnd_idx=i + 1)
+        # also check NoDataValue
+        ds = gdal.Open(out[2])
+        assert ds.GetRasterBand(i + 1).GetNoDataValue() == 999
 
 
-def test_gdal_calc_py_5():
+def test_gdal_calc_py_5(script_path, tmp_path, stefan_full_rgba):
     """test python interface, basic copy"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 5, 4
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     gdal_calc.Calc("A", A=infile, overwrite=True, quiet=True, outfile=out[0])
     gdal_calc.Calc("A", A=infile, A_band=2, overwrite=True, quiet=True, outfile=out[1])
@@ -303,17 +316,11 @@ def test_gdal_calc_py_5():
         check_file(out[3], checksum, 4, bnd_idx=i + 1)
 
 
-def test_gdal_calc_py_6():
+def test_gdal_calc_py_6(script_path, tmp_path):
     """test nodata"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
     test_id, test_count = 6, 2
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     gdal.Translate(
         out[0],
@@ -332,19 +339,13 @@ def test_gdal_calc_py_6():
         ds = None
 
 
-def test_gdal_calc_py_7():
+def test_gdal_calc_py_7(script_path, tmp_path, stefan_full_rgba):
     """test --optfile"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 7, 4
-    out = make_temp_filename_list(test_id, test_count)
-    opt_files = make_temp_filename_list(test_id, test_count, is_opt=True)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
+    opt_files = make_temp_filename_list(tmp_path, test_id, test_count, is_opt=True)
 
     with open(opt_files[0], "w") as f:
         f.write(f"-A {infile} --calc=A --overwrite --outfile {out[0]}")
@@ -391,18 +392,12 @@ def test_gdal_calc_py_7():
             check_file(out[i], checksum, i + 1)
 
 
-def test_gdal_calc_py_8():
+def test_gdal_calc_py_8(script_path, tmp_path, stefan_full_rgba):
     """test multiple calcs"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 8, 1
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     test_py_scripts.run_py_script(
         script_path,
@@ -433,7 +428,7 @@ def my_max(a):
     return ret
 
 
-def test_gdal_calc_py_9():
+def test_gdal_calc_py_9(script_path, tmp_path, stefan_full_rgba):
     """
     test calculating sum in different ways. testing the following features:
     * noDataValue
@@ -443,16 +438,9 @@ def test_gdal_calc_py_9():
     * single alpha for multiple datasets
     * extent = 'fail'
     """
-
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    infile = get_input_file()
+    infile = stefan_full_rgba
     test_id, test_count = 9, 9
-    out = make_temp_filename_list(test_id, test_count)
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
 
     common_kwargs = {
         "hideNoData": True,
@@ -474,6 +462,7 @@ def test_gdal_calc_py_9():
         kwargs = copy(common_kwargs)
         kwargs.update(inputs0)
         ds = gdal_calc.Calc(calc="a", outfile=outfile, **kwargs)
+        assert ds.GetRasterBand(1).GetNoDataValue() is None
         if return_ds:
             input_file = ds
         else:
@@ -575,62 +564,49 @@ def test_gdal_calc_py_9():
     i += 1
 
 
-def test_gdal_calc_py_multiple_inputs_same_alpha():
+def test_gdal_calc_py_10(script_path, tmp_path, stefan_full_rgba):
+    """test --NoDataValue=none"""
+
+    infile = stefan_full_rgba
+    test_id, test_count = 10, 4
+    out = make_temp_filename_list(tmp_path, test_id, test_count)
+
+    test_py_scripts.run_py_script(
+        script_path,
+        "gdal_calc",
+        f"-A {infile} --A_band=1 --NoDataValue=none --calc=A "
+        f"--overwrite --outfile {out[0]}",
+    )
+
+    check_file(out[0], input_checksum[0])
+    ds = gdal.Open(out[0])
+    assert ds.GetRasterBand(1).GetNoDataValue() is None
+
+
+def test_gdal_calc_py_multiple_inputs_same_alpha(script_path, tmp_path):
     """test multiple values for -A flag, including wildcards"""
 
-    script_path = test_py_scripts.get_py_script("gdal_calc")
-    if script_path is None:
-        pytest.skip(
-            "gdal_calc script not found, skipping all tests", allow_module_level=True
-        )
-
-    shutil.copy("../gcore/data/byte.tif", "tmp/input_wildcard_1.tif")
-    shutil.copy("../gcore/data/byte.tif", "tmp/input_wildcard_2.tif")
+    shutil.copy("../gcore/data/byte.tif", f"{tmp_path}/input_wildcard_1.tif")
+    shutil.copy("../gcore/data/byte.tif", f"{tmp_path}/input_wildcard_2.tif")
 
     test_py_scripts.run_py_script(
         script_path,
         "gdal_calc",
-        '-A ../gcore/data/byte.tif ../gcore/data/byte.tif tmp/input_wildcard_*.tif --calc="sum(A.astype(numpy.float32),axis=0)" --overwrite --outfile tmp/test_gdal_calc_py_multiple_inputs_same_alpha.tif --type Float32 --overwrite',
+        f'-A ../gcore/data/byte.tif ../gcore/data/byte.tif {tmp_path}/input_wildcard_*.tif --calc="sum(A.astype(numpy.float32),axis=0)" --overwrite --outfile {tmp_path}/test_gdal_calc_py_multiple_inputs_same_alpha.tif --type Float32 --overwrite',
     )
 
     test_py_scripts.run_py_script(
         script_path,
         "gdal_calc",
-        '-A ../gcore/data/byte.tif --calc="A.astype(numpy.float32)*4" --overwrite --outfile tmp/test_gdal_calc_py_multiple_inputs_same_alpha_ref.tif --type Float32 --overwrite',
+        f'-A ../gcore/data/byte.tif --calc="A.astype(numpy.float32)*4" --overwrite --outfile {tmp_path}/test_gdal_calc_py_multiple_inputs_same_alpha_ref.tif --type Float32 --overwrite',
     )
 
-    ds = gdal.Open("tmp/test_gdal_calc_py_multiple_inputs_same_alpha.tif")
+    ds = gdal.Open(f"{tmp_path}/test_gdal_calc_py_multiple_inputs_same_alpha.tif")
     cs = ds.GetRasterBand(1).Checksum()
     ds = None
 
-    ds = gdal.Open("tmp/test_gdal_calc_py_multiple_inputs_same_alpha_ref.tif")
+    ds = gdal.Open(f"{tmp_path}/test_gdal_calc_py_multiple_inputs_same_alpha_ref.tif")
     cs_ref = ds.GetRasterBand(1).Checksum()
     ds = None
 
-    gdal.Unlink("tmp/input_wildcard_1.tif")
-    gdal.Unlink("tmp/input_wildcard_2.tif")
-    gdal.Unlink("tmp/test_gdal_calc_py_multiple_inputs_same_alpha.tif")
-    gdal.Unlink("tmp/test_gdal_calc_py_multiple_inputs_same_alpha_ref.tif")
-
     assert cs == cs_ref
-
-
-def test_gdal_calc_py_cleanup():
-    """cleanup all temporary files that were created in this pytest"""
-    global temp_counter_dict
-    global opts_counter_counter
-    temp_files = []
-    for test_id, count in temp_counter_dict.items():
-        for i in range(count):
-            name = format_temp_filename(test_id, i + 1)
-            temp_files.append(name)
-
-    for i in range(opts_counter_counter):
-        name = format_temp_filename(test_id, i + 1, True)
-        temp_files.append(name)
-
-    for filename in temp_files:
-        try:
-            os.remove(filename)
-        except OSError:
-            pass

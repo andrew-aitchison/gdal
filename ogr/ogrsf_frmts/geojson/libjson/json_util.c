@@ -38,13 +38,13 @@
 #include <unistd.h>
 #endif /* HAVE_UNISTD_H */
 
-#ifdef WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <io.h>
 #include <windows.h>
-#endif /* defined(WIN32) */
+#endif /* defined(_WIN32) */
 
-#if !defined(HAVE_OPEN) && defined(WIN32)
+#if !defined(HAVE_OPEN) && defined(_WIN32)
 #define open _open
 #endif
 
@@ -57,6 +57,8 @@
 #include "json_tokener.h"
 #include "json_util.h"
 #include "printbuf.h"
+
+#include "cpl_string.h"
 
 static int _json_object_to_fd(int fd, struct json_object *obj, int flags, const char *filename);
 
@@ -227,7 +229,7 @@ int json_object_to_file(const char *filename, struct json_object *obj)
 int json_parse_double(const char *buf, double *retval)
 {
 	char *end;
-	*retval = strtod(buf, &end);
+	*retval = CPLStrtod(buf, &end);
 	return end == buf ? 1 : 0;
 }
 

@@ -118,8 +118,8 @@ OGRErr OGRWAsPDataSource::Load(bool bSilent)
     CPLReadLineL(hFile);
     CPLReadLineL(hFile);
 
-    oLayer.reset(new OGRWAsPLayer(CPLGetBasename(sFilename.c_str()), hFile,
-                                  poSpatialRef));
+    oLayer.reset(new OGRWAsPLayer(this, CPLGetBasename(sFilename.c_str()),
+                                  hFile, poSpatialRef));
     if (poSpatialRef)
         poSpatialRef->Release();
 
@@ -133,7 +133,7 @@ OGRErr OGRWAsPDataSource::Load(bool bSilent)
         return OGRERR_FAILURE;
     }
 
-    double dfValues[4];
+    double dfValues[4] = {0};
     int iNumValues = 0;
     {
         std::istringstream iss(pszLine);
@@ -185,12 +185,15 @@ OGRLayer *OGRWAsPDataSource::GetLayer(int iLayer)
 /*                             ICreateLayer()                           */
 /************************************************************************/
 
-OGRLayer *OGRWAsPDataSource::ICreateLayer(const char *pszName,
-                                          OGRSpatialReference *poSpatialRef,
-                                          OGRwkbGeometryType eGType,
-                                          char **papszOptions)
+OGRLayer *
+OGRWAsPDataSource::ICreateLayer(const char *pszName,
+                                const OGRGeomFieldDefn *poGeomFieldDefn,
+                                CSLConstList papszOptions)
 
 {
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSpatialRef =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     if (eGType != wkbLineString && eGType != wkbLineString25D &&
         eGType != wkbMultiLineString && eGType != wkbMultiLineString25D &&
@@ -305,15 +308,15 @@ OGRLayer *OGRWAsPDataSource::ICreateLayer(const char *pszName,
         }
     }
 
-    auto poSRSClone = poSpatialRef;
-    if (poSRSClone)
+    OGRSpatialReference *poSRSClone = nullptr;
+    if (poSpatialRef)
     {
-        poSRSClone = poSRSClone->Clone();
+        poSRSClone = poSpatialRef->Clone();
         poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     oLayer.reset(new OGRWAsPLayer(
-        CPLGetBasename(pszName), hFile, poSRSClone, sFirstField, sSecondField,
-        sGeomField, bMerge, pdfTolerance.release(),
+        this, CPLGetBasename(pszName), hFile, poSRSClone, sFirstField,
+        sSecondField, sGeomField, bMerge, pdfTolerance.release(),
         pdfAdjacentPointTolerance.release(), pdfPointToCircleRadius.release()));
     if (poSRSClone)
         poSRSClone->Release();

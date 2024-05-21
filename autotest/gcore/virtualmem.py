@@ -247,10 +247,8 @@ def test_virtualmem_2():
 ###############################################################################
 # Test virtual mem auto with a raw driver
 @pytest.mark.skipif(sys.platform != "linux", reason="Incorrect platform")
+@pytest.mark.require_driver("EHdr")
 def test_virtualmem_3():
-
-    if gdal.GetDriverByName("EHdr") is None:
-        pytest.skip("EHdr driver missing")
 
     for tmpfile in ["tmp/virtualmem_3.img", "/vsimem/virtualmem_3.img"]:
         ds = gdal.GetDriverByName("EHdr").Create(tmpfile, 400, 300, 2)
@@ -288,7 +286,8 @@ def test_virtualmem_3():
 def test_virtualmem_4():
     tmpfile = "tmp/virtualmem_4.tif"
     for option in ["INTERLEAVE=PIXEL", "INTERLEAVE=BAND"]:
-        gdal.Unlink(tmpfile)
+        if gdal.VSIStatL(tmpfile) is not None:
+            gdal.Unlink(tmpfile)
         ds = gdal.GetDriverByName("GTiff").Create(
             tmpfile, 400, 301, 2, options=[option]
         )

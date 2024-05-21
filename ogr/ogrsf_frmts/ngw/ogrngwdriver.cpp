@@ -302,7 +302,7 @@ static GDALDataset *OGRNGWDriverCreateCopy(const char *pszFilename,
         if (poTmpDS != nullptr)
         {
             bCloseDS = true;
-            osFilename = osTempFilename;
+            osFilename = std::move(osTempFilename);
             poSrcDS = poTmpDS;
         }
         else
@@ -581,6 +581,8 @@ void RegisterOGRNGW()
     poDriver->SetMetadataItem(
         GDAL_DMD_CREATIONFIELDDATATYPES,
         "Integer Integer64 Real String Date DateTime Time");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "AlternativeName");
     poDriver->SetMetadataItem(GDAL_DCAP_NOTNULL_GEOMFIELDS, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_MULTIPLE_VECTOR_LAYERS, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_RENAME_LAYERS, "YES");

@@ -6,7 +6,7 @@ gdal_rasterize
 
 .. only:: html
 
-    Burns vector geometries into a raster.
+    Burns vector geometries into a raster
 
 .. Index:: gdal_rasterize
 
@@ -15,15 +15,16 @@ Synopsis
 
 .. code-block::
 
-    gdal_rasterize [-b band]* [-i] [-at]
-        {[-burn value]* | [-a attribute_name] | [-3d]} [-add]
-        [-l layername]* [-where expression] [-sql select_statement]
-        [-dialect dialect] [-of format] [-a_srs srs_def] [-to NAME=VALUE]*
-        [-co "NAME=VALUE"]* [-a_nodata value] [-init value]*
-        [-te xmin ymin xmax ymax] [-tr xres yres] [-tap] [-ts width height]
+    gdal_rasterize [--help] [--help-general]
+        [-b <band>]... [-i] [-at]
+        [-oo <NAME>=<VALUE>]...
+        {[-burn <value>]... | [-a <attribute_name>] | [-3d]} [-add]
+        [-l <layername>]... [-where <expression>] [-sql <select_statement>|@<filename>]
+        [-dialect <dialect>] [-of <format>] [-a_srs <srs_def>] [-to <NAME>=<VALUE>]...
+        [-co <NAME>=<VALUE>]... [-a_nodata <value>] [-init <value>]...
+        [-te <xmin> <ymin> <xmax> <ymax>] [-tr <xres> <yres>] [-tap] [-ts <width> <height>]
         [-ot {Byte/Int8/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/
-                CInt16/CInt32/CFloat32/CFloat64}]
-        [-optim {[AUTO]/VECTOR/RASTER}] [-q]
+             CInt16/CInt32/CFloat32/CFloat64}] [-optim {AUTO|VECTOR|RASTER}] [-q]
         <src_datasource> <dst_filename>
 
 Description
@@ -31,12 +32,15 @@ Description
 
 This program burns vector geometries (points, lines, and polygons) into the
 raster band(s) of a raster image.  Vectors are read from OGR supported vector
-formats.
+formats. If the output raster already exists, the affected pixels are updated
+in-place.
 
 Note that on the fly reprojection of vector data to the coordinate system of the
 raster data is only supported since GDAL 2.1.0.
 
 .. program:: gdal_rasterize
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -b <band>
 
@@ -50,11 +54,18 @@ raster data is only supported since GDAL 2.1.0.
     with the first feature into all parts of the image *not* inside the
     provided polygon.
 
+    .. note::
+
+        When the vector features contain a polygon nested within another polygon
+        (like an island in a lake), GDAL must be built against GEOS to get
+        correct results.
+
 .. option:: -at
 
     Enables the ALL_TOUCHED rasterization option so that all pixels touched
     by lines or polygons will be updated, not just those on the line render path,
-    or whose center point is within the polygon.  Defaults to disabled for normal
+    or whose center point is within the polygon (behavior is unspecified when the
+    polygon is just touching the pixel center). Defaults to disabled for normal
     rendering rules.
 
 .. option:: -burn <value>
@@ -94,6 +105,8 @@ raster data is only supported since GDAL 2.1.0.
 
     An SQL statement to be evaluated against the datasource to produce a
     virtual layer of features to be burned in.
+    Starting with GDAL 3.7, the ``@filename`` syntax can be used to indicate
+    that the content is in the pointed filename.
 
 .. option:: -dialect <dialect>
 
@@ -124,7 +137,7 @@ raster data is only supported since GDAL 2.1.0.
     The <srs_def> may be any of the usual GDAL/OGR forms, complete WKT, PROJ.4,
     EPSG:n or a file containing the WKT.
 
-.. option:: -to NAME=VALUE
+.. option:: -to <NAME>=<VALUE>
 
     set a transformer
     option suitable to pass to :cpp:func:`GDALCreateGenImgProjTransformer2`. This is
@@ -162,7 +175,7 @@ raster data is only supported since GDAL 2.1.0.
 
     Force the output bands to be of the indicated data type. Defaults to ``Float64``
 
-.. option:: -optim {[AUTO]/VECTOR/RASTER}}
+.. option:: -optim {AUTO|VECTOR|RASTER}
 
     Force the algorithm used (results are identical). The raster mode is used in most cases and
     optimise read/write operations. The vector mode is useful with a decent amount of input
@@ -171,6 +184,12 @@ raster data is only supported since GDAL 2.1.0.
     properties.
 
     .. versionadded:: 2.3
+
+.. option:: -oo <NAME>=<VALUE>
+
+    .. versionadded:: 3.7
+
+    Source dataset open option (format specific)
 
 .. option:: -q
 
@@ -183,11 +202,10 @@ raster data is only supported since GDAL 2.1.0.
 .. option:: <dst_filename>
 
     The GDAL supported output file.  Must support update mode access.
-    This file will be created (or overwritten if it already exists):option:`-of`,
-    :option:`-a_nodata`, :option:`-init`, :option:`-a_srs`, :option:`-co`, :option:`-te`,
-    :option:`-tr`, :option:`-tap`, :option:`-ts`, or :option:`-ot` options are used.
+    This file will be created if it does not already exist
+    If the output raster already exists, the affected pixels are updated in-place.
 
-The program create a new target raster image when any of the :option:`-of`,
+The program creates a new target raster image when any of the :option:`-of`,
 :option:`-a_nodata`, :option:`-init`, :option:`-a_srs`, :option:`-co`, :option:`-te`,
 :option:`-tr`, :option:`-tap`, :option:`-ts`, or :option:`-ot` options are used.
 The resolution or size must be specified using the :option:`-tr` or :option:`-ts` option for all new
@@ -201,13 +219,13 @@ This utility is also callable from C with :cpp:func:`GDALRasterize`.
 
 .. versionadded:: 2.1
 
-Example
--------
+Examples
+--------
 
 The following would burn all polygons from mask.shp into the RGB TIFF
 file work.tif with the color red (RGB = 255,0,0).
 
-::
+.. code-block::
 
     gdal_rasterize -b 1 -b 2 -b 3 -burn 255 -burn 0 -burn 0 -l mask mask.shp work.tif
 
@@ -215,7 +233,7 @@ file work.tif with the color red (RGB = 255,0,0).
 The following would burn all "class A" buildings into the output elevation
 file, pulling the top elevation from the ROOF_H attribute.
 
-::
+.. code-block::
 
     gdal_rasterize -a ROOF_H -where "class='A'" -l footprints footprints.shp city_dem.tif
 
@@ -223,6 +241,6 @@ The following would burn all polygons from footprint.shp into a new 1000x1000
 rgb TIFF as the color red.  Note that :option:`-b` is not used; the order of the :option:`-burn`
 options determines the bands of the output raster.
 
-::
+.. code-block::
 
     gdal_rasterize -burn 255 -burn 0 -burn 0 -ot Byte -ts 1000 1000 -l footprints footprints.shp mask.tif

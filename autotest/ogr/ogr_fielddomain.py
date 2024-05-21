@@ -28,7 +28,6 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import gdaltest
 import pytest
 
 from osgeo import gdal, ogr
@@ -41,7 +40,7 @@ def test_ogr_fielddomain_range():
             None, "desc", ogr.OFTInteger, ogr.OFSTNone, 1, True, 2, True
         )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             ogr.CreateRangeFieldDomain(
                 "name", "desc", ogr.OFTString, ogr.OFSTNone, 1, True, 2, True
@@ -88,12 +87,51 @@ def test_ogr_fielddomain_range():
     assert domain.GetMaxAsDouble() == -1234567890123.0
     assert not domain.IsMaxInclusive()
 
-    with pytest.raises(Exception):
-        with gdaltest.error_handler():
-            domain.GetEnumeration()
+    domain = ogr.CreateRangeFieldDomainDateTime(
+        "datetime_range",
+        "datetime_range_desc",
+        "2023-07-03T12:13:14",
+        True,
+        "2023-07-03T12:13:15",
+        True,
+    )
+    assert domain.GetName() == "datetime_range"
+    assert domain.GetDescription() == "datetime_range_desc"
+    assert domain.GetDomainType() == ogr.OFDT_RANGE
+    assert domain.GetFieldType() == ogr.OFTDateTime
+    assert domain.GetFieldSubType() == ogr.OFSTNone
+    assert domain.GetMinAsString() == "2023-07-03T12:13:14"
+    assert domain.GetMaxAsString() == "2023-07-03T12:13:15"
+    ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    ds.AddFieldDomain(domain)
+    ret = gdal.VectorInfo(ds, format="json")
+    assert ret["domains"] == {
+        "datetime_range": {
+            "description": "datetime_range_desc",
+            "fieldType": "DateTime",
+            "maxValue": "2023-07-03T12:13:15",
+            "maxValueIncluded": True,
+            "mergePolicy": "default value",
+            "minValue": "2023-07-03T12:13:14",
+            "minValueIncluded": True,
+            "splitPolicy": "default value",
+            "type": "range",
+        }
+    }
+    ret = gdal.VectorInfo(ds, options="-fielddomain datetime_range")
+    assert "Description: datetime_range_desc" in ret
+    assert "Type: range" in ret
+    assert "Field type: DateTime" in ret
+    assert "Split policy: default value" in ret
+    assert "Merge policy: default value" in ret
+    assert "Minimum value: 2023-07-03T12:13:14" in ret
+    assert "Maximum value: 2023-07-03T12:13:15" in ret
 
-    with gdaltest.error_handler():
-        assert domain.GetGlob() is None
+    with pytest.raises(Exception, match="should be called with a coded field domain"):
+        domain.GetEnumeration()
+
+    with pytest.raises(Exception, match="should be called with a glob field domain"):
+        domain.GetGlob()
 
 
 def test_ogr_fielddomain_coded():
@@ -158,11 +196,11 @@ def test_ogr_fielddomain_mem_driver():
 
     assert ds.GetFieldDomain("name").GetDomainType() == ogr.OFDT_GLOB
 
-    with pytest.raises(Exception):
-        assert ds.GetFieldDomain(None)
+    with pytest.raises(Exception, match="Received a NULL pointer"):
+        ds.GetFieldDomain(None)
 
-    with pytest.raises(Exception):
-        assert ds.AddFieldDomain(None)
+    with pytest.raises(Exception, match="Received a NULL pointer"):
+        ds.AddFieldDomain(None)
 
     # Duplicate domain
     assert not ds.AddFieldDomain(
@@ -214,6 +252,7 @@ def test_delete_domain_assigned_to_field():
     field_defn.SetDomainName("name")
     lyr.CreateField(field_defn)
     field_defn = ogr.FieldDefn("new_string2", ogr.OFTString)
+    field_defn.SetWidth(16)
     field_defn.SetDomainName("name2")
     lyr.CreateField(field_defn)
 
@@ -241,6 +280,9 @@ def test_delete_domain_assigned_to_field():
     if gdal.GetDriverByName("SQLITE") is not None:
         sql_lyr = ds.ExecuteSQL("SELECT * FROM ogr_mem_1", dialect="SQLITE")
         assert sql_lyr.GetLayerDefn().GetFieldDefn(0).GetDomainName() == "name"
+        assert sql_lyr.GetLayerDefn().GetFieldDefn(0).GetType() == ogr.OFTString
+        assert sql_lyr.GetLayerDefn().GetFieldDefn(1).GetDomainName() == "name2"
+        assert sql_lyr.GetLayerDefn().GetFieldDefn(1).GetType() == ogr.OFTString
         ds.ReleaseResultSet(sql_lyr)
 
     # deleting domain should remove it from field definitions too

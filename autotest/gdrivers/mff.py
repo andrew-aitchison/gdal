@@ -28,8 +28,10 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-
 import gdaltest
+import pytest
+
+pytestmark = pytest.mark.require_driver("MFF")
 
 ###############################################################################
 # Test reading a - fake - MFF dataset
@@ -38,7 +40,7 @@ import gdaltest
 def test_mff_1():
 
     tst = gdaltest.GDALTest("MFF", "mff/fakemff.hdr", 1, 1)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -48,7 +50,7 @@ def test_mff_1():
 def test_mff_2():
 
     tst = gdaltest.GDALTest("MFF", "mff/fakemfftiled.hdr", 1, 1)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -58,4 +60,4 @@ def test_mff_2():
 def test_mff_3():
 
     tst = gdaltest.GDALTest("MFF", "mff/bytemff.hdr", 1, 4672)
-    return tst.testOpen()
+    tst.testOpen()

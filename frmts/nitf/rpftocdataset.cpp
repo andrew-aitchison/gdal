@@ -321,6 +321,7 @@ class RPFTOCProxyRasterBandRGBA final : public GDALPamRasterBand
         blockByteSize = nBlockXSize * nBlockYSize;
         memset(colorTable, 0, sizeof(colorTable));
     }
+
     virtual ~RPFTOCProxyRasterBandRGBA()
     {
     }
@@ -824,9 +825,8 @@ GDALDataset *RPFTOCSubDataset::CreateDataSetFromTocEntry(
             /* for large datasets. So these sanity checks will be done at the
              * time we really need */
             /* to access the file (see SanityCheckOK method) */
-            GDALDataset *poSrcDS =
-                reinterpret_cast<GDALDataset *>(GDALOpenShared(
-                    entry->frameEntries[i].fullFilePath, GA_ReadOnly));
+            GDALDataset *poSrcDS = GDALDataset::FromHandle(GDALOpenShared(
+                entry->frameEntries[i].fullFilePath, GA_ReadOnly));
             ASSERT_CREATE_VRT(poSrcDS);
             poSrcDS->GetGeoTransform(geoTransf);
             projectionRef = CPLStrdup(poSrcDS->GetProjectionRef());
@@ -925,9 +925,8 @@ GDALDataset *RPFTOCSubDataset::CreateDataSetFromTocEntry(
                 continue;
 
             bool bAllBlack = true;
-            GDALDataset *poSrcDS =
-                reinterpret_cast<GDALDataset *>(GDALOpenShared(
-                    entry->frameEntries[i].fullFilePath, GA_ReadOnly));
+            GDALDataset *poSrcDS = GDALDataset::FromHandle(GDALOpenShared(
+                entry->frameEntries[i].fullFilePath, GA_ReadOnly));
             if (poSrcDS != nullptr)
             {
                 if (poSrcDS->GetRasterCount() == 1)

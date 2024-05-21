@@ -56,6 +56,7 @@ class DXFBlockDefinition
     DXFBlockDefinition()
     {
     }
+
     ~DXFBlockDefinition();
 
     std::vector<OGRDXFFeature *> apoFeatures;
@@ -155,6 +156,7 @@ class OGRDXFInsertTransformer final : public OGRCoordinateTransformation
         oResult.dfZOffset = this->dfZOffset;
         return oResult;
     }
+
     OGRDXFInsertTransformer GetRotateScaleTransformer()
     {
         OGRDXFInsertTransformer oResult;
@@ -170,19 +172,20 @@ class OGRDXFInsertTransformer final : public OGRCoordinateTransformation
         return new OGRDXFInsertTransformer(*this);
     }
 
-    OGRSpatialReference *GetSourceCS() override
-    {
-        return nullptr;
-    }
-    OGRSpatialReference *GetTargetCS() override
+    const OGRSpatialReference *GetSourceCS() const override
     {
         return nullptr;
     }
 
-    int Transform(int nCount, double *x, double *y, double *z, double * /* t */,
-                  int *pabSuccess) override
+    const OGRSpatialReference *GetTargetCS() const override
     {
-        for (int i = 0; i < nCount; i++)
+        return nullptr;
+    }
+
+    int Transform(size_t nCount, double *x, double *y, double *z,
+                  double * /* t */, int *pabSuccess) override
+    {
+        for (size_t i = 0; i < nCount; i++)
         {
             x[i] *= dfXScale;
             y[i] *= dfYScale;
@@ -287,19 +290,21 @@ class OGRDXFOCSTransformer final : public OGRCoordinateTransformation
   public:
     explicit OGRDXFOCSTransformer(double adfNIn[3], bool bInverse = false);
 
-    OGRSpatialReference *GetSourceCS() override
-    {
-        return nullptr;
-    }
-    OGRSpatialReference *GetTargetCS() override
+    const OGRSpatialReference *GetSourceCS() const override
     {
         return nullptr;
     }
 
-    int Transform(int nCount, double *adfX, double *adfY, double *adfZ,
+    const OGRSpatialReference *GetTargetCS() const override
+    {
+        return nullptr;
+    }
+
+    int Transform(size_t nCount, double *adfX, double *adfY, double *adfZ,
                   double *adfT, int *pabSuccess) override;
 
-    int InverseTransform(int nCount, double *adfX, double *adfY, double *adfZ);
+    int InverseTransform(size_t nCount, double *adfX, double *adfY,
+                         double *adfZ);
 
     void ComposeOnto(OGRDXFAffineTransform &poCT) const;
 
@@ -329,6 +334,7 @@ struct DXFTriple
     DXFTriple() : dfX(0.0), dfY(0.0), dfZ(0.0)
     {
     }
+
     DXFTriple(double x, double y, double z) : dfX(x), dfY(y), dfZ(z)
     {
     }
@@ -347,6 +353,7 @@ struct DXFTriple
         dfZ *= dfValue;
         return *this;
     }
+
     DXFTriple &operator/=(const double dfValue)
     {
         dfX /= dfValue;
@@ -393,6 +400,11 @@ class OGRDXFFeature final : public OGRFeature
     // Additional data for ATTRIB and ATTDEF entities
     CPLString osAttributeTag;
 
+    // Store ATTRIB entities associated with an INSERT, for use when
+    // DXF_INLINE_BLOCKS is true and a block with attributes is INSERTed
+    // in another block
+    std::vector<std::unique_ptr<OGRDXFFeature>> apoAttribFeatures;
+
   public:
     explicit OGRDXFFeature(OGRFeatureDefn *poFeatureDefn);
 
@@ -402,29 +414,40 @@ class OGRDXFFeature final : public OGRFeature
     {
         return oOCS;
     }
+
     bool IsBlockReference() const
     {
         return bIsBlockReference;
     }
+
     CPLString GetBlockName() const
     {
         return osBlockName;
     }
+
     double GetBlockAngle() const
     {
         return dfBlockAngle;
     }
+
     DXFTriple GetBlockScale() const
     {
         return oBlockScale;
     }
+
     DXFTriple GetInsertOCSCoords() const
     {
         return oOriginalCoords;
     }
+
     CPLString GetAttributeTag() const
     {
         return osAttributeTag;
+    }
+
+    const std::vector<std::unique_ptr<OGRDXFFeature>> &GetAttribFeatures() const
+    {
+        return apoAttribFeatures;
     }
 
     void SetInsertOCSCoords(const DXFTriple &oTriple)
@@ -468,6 +491,7 @@ class OGRDXFLayer final : public OGRLayer
         std::vector<std::unique_ptr<OGRDXFFeature>> m_apoAttribs{};
         std::unique_ptr<OGRDXFFeature> m_poTemplateFeature{};
     };
+
     InsertState m_oInsertState{};
 
     void ClearPendingFeatures();
@@ -516,7 +540,7 @@ class OGRDXFLayer final : public OGRLayer
                                      OGRDXFFeatureQueue &apoExtraFeatures,
                                      const bool bInlineNestedBlocks,
                                      const bool bMergeGeometry);
-    OGRDXFFeature *
+    static OGRDXFFeature *
     InsertBlockReference(const CPLString &osBlockName,
                          const OGRDXFInsertTransformer &oTransformer,
                          OGRDXFFeature *const poFeature);
@@ -548,6 +572,8 @@ class OGRDXFLayer final : public OGRLayer
     }
 
     int TestCapability(const char *) override;
+
+    GDALDataset *GetDataset() override;
 
     OGRDXFFeature *GetNextUnfilteredFeature();
 };
@@ -673,6 +699,7 @@ class OGRDXFDataSource final : public OGRDataSource
     {
         return static_cast<int>(apoLayers.size());
     }
+
     OGRLayer *GetLayer(int) override;
 
     int TestCapability(const char *) override;
@@ -683,34 +710,41 @@ class OGRDXFDataSource final : public OGRDataSource
     {
         return bInlineBlocks;
     }
+
     bool ShouldMergeBlockGeometries() const
     {
         return bMergeBlockGeometries;
     }
+
     bool ShouldTranslateEscapes() const
     {
         return bTranslateEscapeSequences;
     }
+
     bool ShouldIncludeRawCodeValues() const
     {
         return bIncludeRawCodeValues;
     }
+
     bool In3DExtensibleMode() const
     {
         return b3DExtensibleMode;
     }
+
     static void AddStandardFields(OGRFeatureDefn *poDef, const int nFieldModes);
 
     // Implemented in ogrdxf_blockmap.cpp
     bool ReadBlocksSection();
     DXFBlockDefinition *LookupBlock(const char *pszName);
     CPLString GetBlockNameByRecordHandle(const char *pszID);
+
     std::map<CPLString, DXFBlockDefinition> &GetBlockMap()
     {
         return oBlockMap;
     }
 
     bool PushBlockInsertion(const CPLString &osBlockName);
+
     void PopBlockInsertion()
     {
         aosBlockInsertionStack.pop_back();
@@ -729,10 +763,12 @@ class OGRDXFDataSource final : public OGRDataSource
                                         const char *pszDefault);
     bool LookupDimStyle(const char *pszDimstyle,
                         std::map<CPLString, CPLString> &oDimStyleProperties);
+
     const std::map<CPLString, std::vector<double>> &GetLineTypeTable() const
     {
         return oLineTypeTable;
     }
+
     std::vector<double> LookupLineType(const char *pszName);
     bool TextStyleExists(const char *pszTextStyle);
     CPLString GetTextStyleNameByHandle(const char *pszID);
@@ -756,18 +792,22 @@ class OGRDXFDataSource final : public OGRDataSource
     {
         return oReader.nLineNumber;
     }
+
     int ReadValue(char *pszValueBuffer, int nValueBufferSize = 81)
     {
         return oReader.ReadValue(pszValueBuffer, nValueBufferSize);
     }
+
     void RestartEntities()
     {
         oReader.ResetReadPointer(iEntitiesOffset, iEntitiesLineNumber);
     }
+
     void UnreadValue()
     {
         oReader.UnreadValue();
     }
+
     void ResetReadPointer(int iNewOffset)
     {
         oReader.ResetReadPointer(iNewOffset);
@@ -816,6 +856,7 @@ class OGRDXFWriterLayer final : public OGRLayer
     void ResetReading() override
     {
     }
+
     OGRFeature *GetNextFeature() override
     {
         return nullptr;
@@ -828,7 +869,10 @@ class OGRDXFWriterLayer final : public OGRLayer
 
     int TestCapability(const char *) override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK = TRUE) override;
+    OGRErr CreateField(const OGRFieldDefn *poField,
+                       int bApproxOK = TRUE) override;
+
+    GDALDataset *GetDataset() override;
 
     void ResetFP(VSILFILE *);
 
@@ -836,6 +880,7 @@ class OGRDXFWriterLayer final : public OGRLayer
     {
         return oNewLineTypes;
     }
+
     std::map<CPLString, std::map<CPLString, CPLString>> &GetNewTextStyleMap()
     {
         return oNewTextStyles;
@@ -857,6 +902,7 @@ class OGRDXFBlocksWriterLayer final : public OGRLayer
     void ResetReading() override
     {
     }
+
     OGRFeature *GetNextFeature() override
     {
         return nullptr;
@@ -869,7 +915,8 @@ class OGRDXFBlocksWriterLayer final : public OGRLayer
 
     int TestCapability(const char *) override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK = TRUE) override;
+    OGRErr CreateField(const OGRFieldDefn *poField,
+                       int bApproxOK = TRUE) override;
 
     std::vector<OGRFeature *> apoBlocks;
     OGRFeature *FindBlock(const char *);
@@ -934,12 +981,12 @@ class OGRDXFWriterDS final : public OGRDataSource
     int TestCapability(const char *) override;
 
     OGRLayer *ICreateLayer(const char *pszName,
-                           OGRSpatialReference *poSpatialRef = nullptr,
-                           OGRwkbGeometryType eGType = wkbUnknown,
-                           char **papszOptions = nullptr) override;
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
 
     bool CheckEntityID(const char *pszEntityID);
-    long WriteEntityID(VSILFILE *fp, long nPreferredFID = OGRNullFID);
+    bool WriteEntityID(VSILFILE *fp, long &nAssignedFID,
+                       long nPreferredFID = OGRNullFID);
 
     void UpdateExtent(OGREnvelope *psEnvelope);
 };

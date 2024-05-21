@@ -34,47 +34,56 @@ import struct
 
 import gdaltest
 import pytest
+import test_cli_utilities
 
 from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("JPEGXL")
 
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 def test_jpegxl_read():
     tst = gdaltest.GDALTest("JPEGXL", "jpegxl/byte.jxl", 1, 4672)
-    return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 def test_jpegxl_byte():
-    tst = gdaltest.GDALTest("JPEGXL", "byte.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst = gdaltest.GDALTest(
+        "JPEGXL", "byte.tif", 1, 4672, options=["LOSSLESS_COPY=YES"]
+    )
+    tst.testCreateCopy(vsimem=1)
 
 
 def test_jpegxl_uint16():
     tst = gdaltest.GDALTest("JPEGXL", "../../gcore/data/uint16.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 def test_jpegxl_float32():
     tst = gdaltest.GDALTest("JPEGXL", "float32.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 def test_jpegxl_grey_alpha():
     tst = gdaltest.GDALTest(
         "JPEGXL", "../../gcore/data/stefan_full_greyalpha.tif", 1, 1970
     )
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 def test_jpegxl_rgb():
     tst = gdaltest.GDALTest("JPEGXL", "rgbsmall.tif", 1, 21212)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 def test_jpegxl_rgba():
     tst = gdaltest.GDALTest("JPEGXL", "../../gcore/data/stefan_full_rgba.tif", 1, 12603)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 @pytest.mark.parametrize("lossless", ["YES", "NO", None])
@@ -101,6 +110,20 @@ def test_jpegxl_rgba_lossless_param(lossless):
 
     ds = None
     gdal.GetDriverByName("JPEGXL").Delete(outfilename)
+
+
+def test_jpegxl_rgba_lossless_no_but_lossless_copy_yes():
+
+    src_ds = gdal.Open("../gcore/data/stefan_full_rgba.tif")
+    outfilename = "/vsimem/out.jxl"
+    with gdal.quiet_errors():
+        assert (
+            gdal.GetDriverByName("JPEGXL").CreateCopy(
+                outfilename, src_ds, options=["LOSSLESS=NO", "LOSSLESS_COPY=YES"]
+            )
+            is None
+        )
+    assert gdal.VSIStatL(outfilename) is None
 
 
 def test_jpegxl_rgba_distance():
@@ -135,7 +158,7 @@ def test_jpegxl_rgba_quality(quality, equivalent_distance):
     cs = ds.GetRasterBand(1).Checksum()
     assert cs != 0 and cs != src_ds.GetRasterBand(1).Checksum()
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("JPEGXL").CreateCopy(
             outfilename, src_ds, options=["DISTANCE=" + str(equivalent_distance)]
         )
@@ -146,12 +169,8 @@ def test_jpegxl_rgba_quality(quality, equivalent_distance):
     gdal.GetDriverByName("JPEGXL").Delete(outfilename)
 
 
+@pytest.mark.require_creation_option("JPEGXL", "COMPRESS_BOX")
 def test_jpegxl_xmp():
-
-    if "COMPRESS_BOX" not in gdal.GetDriverByName("JPEGXL").GetMetadataItem(
-        "DMD_CREATIONOPTIONLIST"
-    ):
-        pytest.skip()
 
     src_ds = gdal.Open("data/gtiff/byte_with_xmp.tif")
     outfilename = "/vsimem/out.jxl"
@@ -167,12 +186,8 @@ def test_jpegxl_xmp():
     gdal.GetDriverByName("JPEGXL").Delete(outfilename)
 
 
+@pytest.mark.require_creation_option("JPEGXL", "COMPRESS_BOX")
 def test_jpegxl_exif():
-
-    if "COMPRESS_BOX" not in gdal.GetDriverByName("JPEGXL").GetMetadataItem(
-        "DMD_CREATIONOPTIONLIST"
-    ):
-        pytest.skip()
 
     src_ds = gdal.Open("../gcore/data/exif_and_gps.tif")
     outfilename = "/vsimem/out.jxl"
@@ -188,14 +203,10 @@ def test_jpegxl_exif():
     gdal.GetDriverByName("JPEGXL").Delete(outfilename)
 
 
+@pytest.mark.require_creation_option("JPEGXL", "COMPRESS_BOX")
 def test_jpegxl_read_huge_xmp_compressed_box():
 
-    if "COMPRESS_BOX" not in gdal.GetDriverByName("JPEGXL").GetMetadataItem(
-        "DMD_CREATIONOPTIONLIST"
-    ):
-        pytest.skip()
-
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         ds = gdal.Open("data/jpegxl/huge_xmp_compressed_box.jxl")
         assert ds is not None
@@ -348,10 +359,31 @@ def test_jpegxl_lossless_copy_of_jpeg():
     data = data[0 : len(data) // 2]
     with gdaltest.tempfile("/vsimem/truncated.jpg", data):
         src_ds = gdal.Open("/vsimem/truncated.jpg")
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             assert (
                 gdal.GetDriverByName("JPEGXL").CreateCopy(outfilename, src_ds) is None
             )
+
+
+@pytest.mark.require_creation_option("JPEGXL", "COMPRESS_BOX")
+def test_jpegxl_lossless_copy_of_jpeg_disabled():
+
+    jpeg_drv = gdal.GetDriverByName("JPEG")
+    if jpeg_drv is None:
+        pytest.skip("JPEG driver missing")
+
+    src_ds = gdal.Open("data/jpeg/albania.jpg")
+    outfilename = "/vsimem/out.jxl"
+    gdal.GetDriverByName("JPEGXL").CreateCopy(
+        outfilename, src_ds, options=["LOSSLESS_COPY=NO"]
+    )
+    ds = gdal.Open(outfilename)
+    assert ds is not None
+
+    assert ds.GetMetadataItem("ORIGINAL_COMPRESSION", "IMAGE_STRUCTURE") != "JPEG"
+
+    ds = None
+    gdal.GetDriverByName("JPEGXL").Delete(outfilename)
 
 
 def test_jpegxl_lossless_copy_of_jpeg_with_mask_band():
@@ -367,7 +399,7 @@ def test_jpegxl_lossless_copy_of_jpeg_with_mask_band():
     has_box_api = "COMPRESS_BOX" in drv.GetMetadataItem("DMD_CREATIONOPTIONLIST")
     src_ds = gdal.Open("data/jpeg/masked.jpg")
     outfilename = "/vsimem/out.jxl"
-    drv.CreateCopy(outfilename, src_ds)
+    drv.CreateCopy(outfilename, src_ds, options=["LOSSLESS_COPY=YES"])
     if has_box_api:
         assert gdal.VSIStatL(outfilename + ".aux.xml") is None
 
@@ -405,15 +437,13 @@ def test_jpegxl_lossless_copy_of_jpeg_with_mask_band():
     jpeg_drv.Delete(outfilename_jpg)
 
 
+@pytest.mark.require_creation_option("JPEGXL", "COMPRESS_BOX")
 def test_jpegxl_lossless_copy_of_jpeg_xmp():
 
     jpeg_drv = gdal.GetDriverByName("JPEG")
     if jpeg_drv is None:
         pytest.skip("JPEG driver missing")
     drv = gdal.GetDriverByName("JPEGXL")
-    has_box_api = "COMPRESS_BOX" in drv.GetMetadataItem("DMD_CREATIONOPTIONLIST")
-    if not has_box_api:
-        pytest.skip()
 
     src_ds = gdal.Open("data/jpeg/byte_with_xmp.jpg")
     outfilename = "/vsimem/out.jxl"
@@ -475,7 +505,7 @@ def test_jpegxl_write_extra_channels():
         )  # 'Band 2' encoded in .jxl file, but hidden when reading back
         assert ds.GetRasterBand(3).GetDescription() == "third channel"
     else:
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             assert drv.CreateCopy(outfilename, mem_ds) is None
             assert (
                 gdal.GetLastErrorMsg()
@@ -544,21 +574,21 @@ def test_jpegxl_createcopy_errors():
 
     # band count = 0
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert gdal.GetDriverByName("JPEGXL").CreateCopy(outfilename, src_ds) is None
         assert gdal.GetLastErrorMsg() != ""
 
     # unsupported data type
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1, gdal.GDT_Int16)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert gdal.GetDriverByName("JPEGXL").CreateCopy(outfilename, src_ds) is None
         assert gdal.GetLastErrorMsg() != ""
 
     # wrong out file name
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert (
             gdal.GetDriverByName("JPEGXL").CreateCopy("/i_do/not/exist.jxl", src_ds)
@@ -568,7 +598,7 @@ def test_jpegxl_createcopy_errors():
 
     # mutually exclusive options
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert (
             gdal.GetDriverByName("JPEGXL").CreateCopy(
@@ -580,7 +610,19 @@ def test_jpegxl_createcopy_errors():
 
     # mutually exclusive options
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
+        gdal.ErrorReset()
+        assert (
+            gdal.GetDriverByName("JPEGXL").CreateCopy(
+                outfilename, src_ds, options=["LOSSLESS=YES", "ALPHA_DISTANCE=1"]
+            )
+            is None
+        )
+        assert gdal.GetLastErrorMsg() != ""
+
+    # mutually exclusive options
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert (
             gdal.GetDriverByName("JPEGXL").CreateCopy(
@@ -592,7 +634,7 @@ def test_jpegxl_createcopy_errors():
 
     # mutually exclusive options
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert (
             gdal.GetDriverByName("JPEGXL").CreateCopy(
@@ -604,7 +646,7 @@ def test_jpegxl_createcopy_errors():
 
     # wrong value for DISTANCE
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert (
             gdal.GetDriverByName("JPEGXL").CreateCopy(
@@ -616,7 +658,7 @@ def test_jpegxl_createcopy_errors():
 
     # wrong value for EFFORT
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         assert (
             gdal.GetDriverByName("JPEGXL").CreateCopy(
@@ -748,10 +790,58 @@ def test_jpegxl_apply_orientation(orientation):
     assert ds.RasterXSize == 3
     assert ds.RasterYSize == 5
     vals = struct.unpack("B" * 3 * 5, ds.ReadRaster())
-    vals = [1 if v else 0 for v in vals]
+    vals = [1 if v >= 128 else 0 for v in vals]
     assert vals == [1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0]
     if orientation != 1:
         assert ds.GetMetadataItem("EXIF_Orientation", "EXIF") is None
         assert ds.GetMetadataItem("original_EXIF_Orientation", "EXIF") == str(
             orientation
         )
+
+
+###############################################################################
+# Test ALPHA_DISTANCE option
+
+
+@pytest.mark.require_creation_option(
+    "JPEGXL", "ALPHA_DISTANCE"
+)  # "libjxl > 0.8.1 required"
+def test_jpegxl_alpha_distance_zero():
+
+    drv = gdal.GetDriverByName("JPEGXL")
+
+    src_ds = gdal.Open("../gcore/data/stefan_full_rgba.tif")
+    filename = "/vsimem/test_jpegxl_alpha_distance_zero.jxl"
+    drv.CreateCopy(
+        filename,
+        src_ds,
+        options=["LOSSLESS=NO", "ALPHA_DISTANCE=0"],
+    )
+    ds = gdal.Open(filename)
+    assert ds.GetRasterBand(1).Checksum() != src_ds.GetRasterBand(1).Checksum()
+    assert ds.GetRasterBand(4).Checksum() == src_ds.GetRasterBand(4).Checksum()
+    ds = None
+
+    gdal.Unlink(filename)
+
+
+###############################################################################
+# Test identifying a JPEGXL raw codestream (not withing a JPEGXL container)
+# that has not a .jxl extension
+# Serves as a way of checking that the simplified identification method in GDAL
+# core, when the driver built as a plugin, is followed by a call to the real
+# driver to further refine the identification.
+
+pytest.mark.skipif(
+    test_cli_utilities.get_cli_utility_path("gdalmanage") is None,
+    reason="gdalmanage not available",
+)
+
+
+def test_jpegxl_identify_raw_codestream():
+
+    gdalmanage_path = test_cli_utilities.get_cli_utility_path("gdalmanage")
+    out, err = gdaltest.runexternal_out_and_err(
+        f"{gdalmanage_path} identify data/jpegxl/test.jxl.bin"
+    )
+    assert "JPEGXL" in out

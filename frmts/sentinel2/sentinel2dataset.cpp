@@ -126,8 +126,10 @@ static const char *L2A_BandDescription_SNW =
     "for high confidence snow/ice";
 
 static const SENTINEL2_L2A_BandDescription asL2ABandDesc[] = {
+    {"AOT", L2A_BandDescription_AOT, 10, TL_IMG_DATA_Rxxm},
     {"AOT", L2A_BandDescription_AOT, 20, TL_IMG_DATA_Rxxm},
     {"AOT", L2A_BandDescription_AOT, 60, TL_IMG_DATA_Rxxm},
+    {"WVP", L2A_BandDescription_WVP, 10, TL_IMG_DATA_Rxxm},
     {"WVP", L2A_BandDescription_WVP, 20, TL_IMG_DATA_Rxxm},
     {"WVP", L2A_BandDescription_WVP, 60, TL_IMG_DATA_Rxxm},
     {"SCL", L2A_BandDescription_SCL, 20, TL_IMG_DATA_Rxxm},
@@ -452,6 +454,7 @@ class SENTINEL2_CPLXMLNodeHolder
     explicit SENTINEL2_CPLXMLNodeHolder(CPLXMLNode *psNode) : m_psNode(psNode)
     {
     }
+
     ~SENTINEL2_CPLXMLNodeHolder()
     {
         if (m_psNode)
@@ -508,7 +511,7 @@ GDALDataset *SENTINEL2Dataset::Open(GDALOpenInfo *poOpenInfo)
          STARTS_WITH_CI(pszJustFilename, "S2B_USER_PRD_MSI")) &&
         EQUAL(CPLGetExtension(pszJustFilename), "zip"))
     {
-        CPLString osBasename(CPLGetBasename(pszJustFilename));
+        const CPLString osBasename(CPLGetBasename(pszJustFilename));
         CPLString osFilename(poOpenInfo->pszFilename);
         CPLString osMTD(osBasename);
         // Normally given above constraints, osMTD.size() should be >= 16
@@ -534,7 +537,7 @@ GDALDataset *SENTINEL2Dataset::Open(GDALOpenInfo *poOpenInfo)
               STARTS_WITH_CI(pszJustFilename, "S2B_MSIL1C_")) &&
              EQUAL(CPLGetExtension(pszJustFilename), "zip"))
     {
-        CPLString osBasename(CPLGetBasename(pszJustFilename));
+        const CPLString osBasename(CPLGetBasename(pszJustFilename));
         CPLString osFilename(poOpenInfo->pszFilename);
         CPLString osSAFE(osBasename);
         // S2B_MSIL1C_20171004T233419_N0206_R001_T54DWM_20171005T001811.SAFE.zip
@@ -553,7 +556,7 @@ GDALDataset *SENTINEL2Dataset::Open(GDALOpenInfo *poOpenInfo)
               STARTS_WITH_CI(pszJustFilename, "S2B_MSIL2A_")) &&
              EQUAL(CPLGetExtension(pszJustFilename), "zip"))
     {
-        CPLString osBasename(CPLGetBasename(pszJustFilename));
+        const CPLString osBasename(CPLGetBasename(pszJustFilename));
         CPLString osFilename(poOpenInfo->pszFilename);
         CPLString osSAFE(osBasename);
         // S2B_MSIL1C_20171004T233419_N0206_R001_T54DWM_20171005T001811.SAFE.zip
@@ -3405,6 +3408,51 @@ void SENTINEL2Dataset::AddL1CL2ABandMetadata(
                 }
             }
         }
+
+        CPLXMLNode *psOL = CPLGetXMLNode(
+            psIC, (eLevel == SENTINEL2_L1C) ? "Radiometric_Offset_List"
+                                            : "BOA_ADD_OFFSET_VALUES_LIST");
+        if (psOL != nullptr)
+        {
+            for (CPLXMLNode *psIter = psOL->psChild; psIter != nullptr;
+                 psIter = psIter->psNext)
+            {
+                if (psIter->eType != CXT_Element ||
+                    !EQUAL(psIter->pszValue, (eLevel == SENTINEL2_L1C)
+                                                 ? "RADIO_ADD_OFFSET"
+                                                 : "BOA_ADD_OFFSET"))
+                {
+                    continue;
+                }
+                const char *pszBandId =
+                    CPLGetXMLValue(psIter, "band_id", nullptr);
+                const char *pszValue = CPLGetXMLValue(psIter, nullptr, nullptr);
+                if (pszBandId != nullptr && pszValue != nullptr)
+                {
+                    int nIdx = atoi(pszBandId);
+                    if (nIdx >= 0 && nIdx < (int)NB_BANDS)
+                    {
+                        for (int i = 0; i < nBands; i++)
+                        {
+                            GDALRasterBand *poBand = GetRasterBand(i + 1);
+                            const char *pszBandName =
+                                poBand->GetMetadataItem("BANDNAME");
+                            if (pszBandName != nullptr &&
+                                EQUAL(asBandDesc[nIdx].pszBandName,
+                                      pszBandName))
+                            {
+                                poBand->GDALRasterBand::SetMetadataItem(
+                                    (eLevel == SENTINEL2_L1C)
+                                        ? "RADIO_ADD_OFFSET"
+                                        : "BOA_ADD_OFFSET",
+                                    pszValue);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -3558,7 +3606,14 @@ SENTINEL2Dataset *SENTINEL2Dataset::CreateL1CL2ADataset(
         static_cast<int>((dfMaxY - dfMinY) / nSubDSPrecision + 0.5);
     SENTINEL2Dataset *poDS = new SENTINEL2Dataset(nRasterXSize, nRasterYSize);
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
     poDS->aosNonJP2Files = aosNonJP2Files;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     OGRSpatialReference oSRS;
     char *pszProjection = nullptr;

@@ -30,7 +30,6 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import os
 import sys
 
 import pytest
@@ -42,14 +41,25 @@ import test_cli_utilities
 
 from osgeo import gdal, ogr, osr
 
+pytestmark = pytest.mark.skipif(
+    test_cli_utilities.get_gdal_rasterize_path() is None,
+    reason="gdal_rasterize not available",
+)
+
+
+@pytest.fixture()
+def gdal_rasterize_path():
+    return test_cli_utilities.get_gdal_rasterize_path()
+
+
 ###############################################################################
 # Simple polygon rasterization (adapted from alg/rasterize.py).
 
 
-def test_gdal_rasterize_1():
+def test_gdal_rasterize_1(gdal_rasterize_path, tmp_path):
 
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
+    output_tif = str(tmp_path / "rast1.tif")
+    input_tab = str(tmp_path / "rast1.tab")
 
     # Setup working spatial reference
     # sr_wkt = 'LOCAL_CS["arbitrary"]'
@@ -61,7 +71,7 @@ def test_gdal_rasterize_1():
     # Create a raster to rasterize into.
 
     target_ds = gdal.GetDriverByName("GTiff").Create(
-        "tmp/rast1.tif", 100, 100, 3, gdal.GDT_Byte
+        output_tif, 100, 100, 3, gdal.GDT_Byte
     )
     target_ds.SetGeoTransform((1000, 1, 0, 1100, 0, -1))
     target_ds.SetProjection(sr_wkt)
@@ -71,7 +81,7 @@ def test_gdal_rasterize_1():
 
     # Create a layer to rasterize from.
 
-    rast_ogr_ds = ogr.GetDriverByName("MapInfo File").CreateDataSource("tmp/rast1.tab")
+    rast_ogr_ds = ogr.GetDriverByName("MapInfo File").CreateDataSource(input_tab)
     rast_lyr = rast_ogr_ds.CreateLayer("rast1", srs=sr)
 
     rast_lyr.GetLayerDefn()
@@ -101,44 +111,37 @@ def test_gdal_rasterize_1():
     rast_lyr.CreateFeature(feat)
 
     # Close file
-    rast_ogr_ds.Destroy()
+    rast_ogr_ds.Close()
 
     # Run the algorithm.
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_gdal_rasterize_path()
-        + " -b 3 -b 2 -b 1 -burn 200 -burn 220 -burn 240 -l rast1 tmp/rast1.tab tmp/rast1.tif"
+        f"{gdal_rasterize_path} -b 3 -b 2 -b 1 -burn 200 -burn 220 -burn 240 -l rast1 {input_tab} {output_tif}"
     )
     assert err is None or err == "", "got error/warning"
 
     # Check results.
 
-    target_ds = gdal.Open("tmp/rast1.tif")
+    target_ds = gdal.Open(output_tif)
     expected = 6452
     checksum = target_ds.GetRasterBand(2).Checksum()
     assert checksum == expected, "Did not get expected image checksum"
 
     target_ds = None
 
-    gdal.GetDriverByName("GTiff").Delete("tmp/rast1.tif")
-    ogr.GetDriverByName("MapInfo File").DeleteDataSource("tmp/rast1.tab")
-
 
 ###############################################################################
 # Test rasterization with ALL_TOUCHED (adapted from alg/rasterize.py).
 
 
-def test_gdal_rasterize_2():
+@pytest.mark.require_driver("CSV")
+def test_gdal_rasterize_2(gdal_rasterize_path, tmp_path):
 
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
-
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
+    output_tif = str(tmp_path / "rast2.tif")
 
     # Create a raster to rasterize into.
 
     target_ds = gdal.GetDriverByName("GTiff").Create(
-        "tmp/rast2.tif", 12, 12, 3, gdal.GDT_Byte
+        output_tif, 12, 12, 3, gdal.GDT_Byte
     )
     target_ds.SetGeoTransform((0, 1, 0, 12, 0, -1))
 
@@ -147,46 +150,43 @@ def test_gdal_rasterize_2():
 
     # Run the algorithm.
     gdaltest.runexternal(
-        test_cli_utilities.get_gdal_rasterize_path()
-        + " -at -b 3 -b 2 -b 1 -burn 200 -burn 220 -burn 240 -l cutline ../alg/data/cutline.csv tmp/rast2.tif"
+        f"{gdal_rasterize_path} -at -b 3 -b 2 -b 1 -burn 200 -burn 220 -burn 240 -l cutline ../alg/data/cutline.csv {output_tif}"
     )
 
     # Check results.
 
-    target_ds = gdal.Open("tmp/rast2.tif")
+    target_ds = gdal.Open(output_tif)
     expected = 121
     checksum = target_ds.GetRasterBand(2).Checksum()
     assert checksum == expected, "Did not get expected image checksum"
 
     target_ds = None
 
-    gdal.GetDriverByName("GTiff").Delete("tmp/rast2.tif")
-
 
 ###############################################################################
 # Test creating an output file
 
 
-def test_gdal_rasterize_3():
+def test_gdal_rasterize_3(gdal_rasterize_path, tmp_path):
+
+    contour_shp = str(tmp_path / "n43dt0.shp")
+    output_tif = str(tmp_path / "n43dt0.tif")
 
     if test_cli_utilities.get_gdal_contour_path() is None:
-        pytest.skip()
-
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
+        pytest.skip("gdal_contour missing")
 
     gdaltest.runexternal(
         test_cli_utilities.get_gdal_contour_path()
-        + " ../gdrivers/data/n43.tif tmp/n43dt0.shp -i 10 -3d"
+        + f" ../gdrivers/data/n43.tif {contour_shp} -i 10 -3d"
     )
 
     gdaltest.runexternal(
-        test_cli_utilities.get_gdal_rasterize_path()
-        + " -3d tmp/n43dt0.shp tmp/n43dt0.tif -l n43dt0 -ts 121 121 -a_nodata 0 -q"
+        gdal_rasterize_path
+        + f" -3d {contour_shp} {output_tif} -l n43dt0 -ts 121 121 -a_nodata 0 -q"
     )
 
     ds_ref = gdal.Open("../gdrivers/data/n43.tif")
-    ds = gdal.Open("tmp/n43dt0.tif")
+    ds = gdal.Open(output_tif)
 
     assert (
         ds.GetRasterBand(1).GetNoDataValue() == 0.0
@@ -205,37 +205,33 @@ def test_gdal_rasterize_3():
 
     wkt = ds.GetProjectionRef()
     assert wkt.find("WGS_1984") != -1, "did not get expected SRS"
-
-    ogr.GetDriverByName("ESRI Shapefile").DeleteDataSource("tmp/n43dt0.shp")
-    gdal.GetDriverByName("GTiff").Delete("tmp/n43dt0.tif")
+    ds = None
 
 
 ###############################################################################
 # Same but with -tr argument
 
 
-def test_gdal_rasterize_4():
+def test_gdal_rasterize_4(gdal_rasterize_path, tmp_path):
+
+    contour_shp = str(tmp_path / "n43dt0.shp")
+    output_tif = str(tmp_path / "n43dt0.tif")
 
     if test_cli_utilities.get_gdal_contour_path() is None:
-        pytest.skip()
-
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
-
-    gdal.GetDriverByName("GTiff").Delete("tmp/n43dt0.tif")
+        pytest.skip("gdal_contour missing")
 
     gdaltest.runexternal(
         test_cli_utilities.get_gdal_contour_path()
-        + " ../gdrivers/data/n43.tif tmp/n43dt0.shp -i 10 -3d"
+        + f" ../gdrivers/data/n43.tif {contour_shp} -i 10 -3d"
     )
 
     gdaltest.runexternal(
-        test_cli_utilities.get_gdal_rasterize_path()
-        + " -3d tmp/n43dt0.shp tmp/n43dt0.tif -l n43dt0 -tr 0.008333333333333  0.008333333333333 -a_nodata 0 -a_srs EPSG:4326"
+        gdal_rasterize_path
+        + f" -3d {contour_shp} {output_tif} -l n43dt0 -tr 0.008333333333333  0.008333333333333 -a_nodata 0 -a_srs EPSG:4326"
     )
 
     ds_ref = gdal.Open("../gdrivers/data/n43.tif")
-    ds = gdal.Open("tmp/n43dt0.tif")
+    ds = gdal.Open(output_tif)
 
     assert (
         ds.GetRasterBand(1).GetNoDataValue() == 0.0
@@ -260,24 +256,20 @@ def test_gdal_rasterize_4():
 
     wkt = ds.GetProjectionRef()
     assert wkt.find("WGS_1984") != -1, "did not get expected SRS"
-
-    ogr.GetDriverByName("ESRI Shapefile").DeleteDataSource("tmp/n43dt0.shp")
-    gdal.GetDriverByName("GTiff").Delete("tmp/n43dt0.tif")
+    ds = None
 
 
 ###############################################################################
 # Test point rasterization (#3774)
 
 
-def test_gdal_rasterize_5():
+@pytest.mark.require_driver("CSV")
+def test_gdal_rasterize_5(gdal_rasterize_path, tmp_path):
 
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
+    input_csv = str(tmp_path / "test_gdal_rasterize_5.csv")
+    output_tif = str(tmp_path / "test_gdal_rasterize_5.tif")
 
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
-
-    f = open("tmp/test_gdal_rasterize_5.csv", "wb")
+    f = open(input_csv, "wb")
     f.write(
         """x,y,Value
 0.5,0.5,1
@@ -290,27 +282,14 @@ def test_gdal_rasterize_5():
     )
     f.close()
 
-    f = open("tmp/test_gdal_rasterize_5.vrt", "wb")
-    f.write(
-        """<OGRVRTDataSource>
-    <OGRVRTLayer name="test">
-        <SrcDataSource relativetoVRT="1">test_gdal_rasterize_5.csv</SrcDataSource>
-        <SrcLayer>test_gdal_rasterize_5</SrcLayer>
-        <GeometryType>wkbPoint</GeometryType>
-        <GeometryField encoding="PointFromColumns" x="x" y="y"/>
-    </OGRVRTLayer>
-</OGRVRTDataSource>""".encode(
-            "ascii"
-        )
-    )
-    f.close()
-
     gdaltest.runexternal(
-        test_cli_utilities.get_gdal_rasterize_path()
-        + " -l test tmp/test_gdal_rasterize_5.vrt tmp/test_gdal_rasterize_5.tif -a Value -tr 1 1 -ot Byte"
+        gdal_rasterize_path
+        + " -l test_gdal_rasterize_5 -oo X_POSSIBLE_NAMES=x -oo Y_POSSIBLE_NAMES=y "
+        + f" {input_csv} {output_tif} "
+        + " -a Value -tr 1 1 -ot Byte"
     )
 
-    ds = gdal.Open("tmp/test_gdal_rasterize_5.tif")
+    ds = gdal.Open(output_tif)
     assert (
         ds.RasterXSize == 3 and ds.RasterYSize == 3
     ), "did not get expected dimensions"
@@ -329,24 +308,19 @@ def test_gdal_rasterize_5():
 
     ds = None
 
-    gdal.GetDriverByName("GTiff").Delete("tmp/test_gdal_rasterize_5.tif")
-    os.unlink("tmp/test_gdal_rasterize_5.csv")
-    os.unlink("tmp/test_gdal_rasterize_5.vrt")
-
 
 ###############################################################################
 # Test on the fly reprojection of input data
 
 
-def test_gdal_rasterize_6():
+@pytest.mark.require_driver("CSV")
+def test_gdal_rasterize_6(gdal_rasterize_path, tmp_path):
 
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
+    input_csv = str(tmp_path / "test_gdal_rasterize_6.csv")
+    input_prj = str(tmp_path / "test_gdal_rasterize_6.prj")
+    output_tif = str(tmp_path / "test_gdal_rasterize_6.tif")
 
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
-
-    f = open("tmp/test_gdal_rasterize_6.csv", "wb")
+    f = open(input_csv, "wb")
     f.write(
         """WKT,Value
 "POLYGON((2 49,2 50,3 50,3 49,2 49))",255
@@ -356,11 +330,11 @@ def test_gdal_rasterize_6():
     )
     f.close()
 
-    f = open("tmp/test_gdal_rasterize_6.prj", "wb")
+    f = open(input_prj, "wb")
     f.write("""EPSG:4326""".encode("ascii"))
     f.close()
 
-    ds = gdal.GetDriverByName("GTiff").Create("tmp/test_gdal_rasterize_6.tif", 100, 100)
+    ds = gdal.GetDriverByName("GTiff").Create(output_tif, 100, 100)
     ds.SetGeoTransform(
         [200000, (400000 - 200000) / 100, 0, 6500000, 0, -(6500000 - 6200000) / 100]
     )
@@ -370,46 +344,39 @@ def test_gdal_rasterize_6():
     ds = None
 
     gdaltest.runexternal(
-        test_cli_utilities.get_gdal_rasterize_path()
-        + " -l test_gdal_rasterize_6 tmp/test_gdal_rasterize_6.csv tmp/test_gdal_rasterize_6.tif -a Value"
+        gdal_rasterize_path
+        + f" -l test_gdal_rasterize_6 {input_csv} {output_tif} -a Value"
     )
 
-    ds = gdal.Open("tmp/test_gdal_rasterize_6.tif")
+    ds = gdal.Open(output_tif)
     assert ds.GetRasterBand(1).Checksum() == 39190, "did not get expected checksum"
 
     ds = None
-
-    gdal.GetDriverByName("GTiff").Delete("tmp/test_gdal_rasterize_6.tif")
-    os.unlink("tmp/test_gdal_rasterize_6.csv")
-    os.unlink("tmp/test_gdal_rasterize_6.prj")
 
 
 ###############################################################################
 # Test SQLITE dialect in SQL
 
 
-def test_gdal_rasterize_7():
+@pytest.mark.require_driver("SQLite")
+@pytest.mark.require_driver("CSV")
+@pytest.mark.parametrize("sql_in_file", [False, True])
+def test_gdal_rasterize_7(gdal_rasterize_path, sql_in_file, tmp_path):
 
     pytest.importorskip("numpy")
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
 
-    drv = ogr.GetDriverByName("SQLite")
-    if drv is None:
-        pytest.skip("SQLite driver missing")
+    input_csv = str(tmp_path / "test_gdal_rasterize_7.csv")
+    output_tif = str(tmp_path / "test_gdal_rasterize_7.tif")
+    sql_txt = str(tmp_path / "sql.txt")
 
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
+    try:
+        drv = ogr.GetDriverByName("SQLITE")
+        drv.CreateDataSource("/vsimem/foo.db", options=["SPATIALITE=YES"])
+        gdal.Unlink("/vsimem/foo.db")
+    except Exception:
+        pytest.skip("Spatialite not available")
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = drv.CreateDataSource("/vsimem/foo.db", options=["SPATIALITE=YES"])
-    if ds is None:
-        pytest.skip()
-    ds = None
-    gdal.Unlink("/vsimem/foo.db")
-    gdal.PopErrorHandler()
-
-    f = open("tmp/test_gdal_rasterize_7.csv", "wb")
+    f = open(input_csv, "wb")
     x = (0, 0, 50, 50, 25)
     y = (0, 50, 0, 50, 25)
     f.write("WKT,Value\n".encode("ascii"))
@@ -419,24 +386,27 @@ def test_gdal_rasterize_7():
 
     f.close()
 
-    cmds = """tmp/test_gdal_rasterize_7.csv
-              tmp/test_gdal_rasterize_7.tif
-              -init 0 -burn 1
-              -sql "SELECT ST_Buffer(GEOMETRY, 2) FROM test_gdal_rasterize_7"
-              -dialect sqlite -tr 1 1 -te -1 -1 51 51"""
+    sql = "SELECT ST_Buffer(GEOMETRY, 2) FROM test_gdal_rasterize_7"
+    if sql_in_file:
+        open(sql_txt, "wt").write(sql)
+        sql = f"@{sql_txt}"
+    else:
+        sql = '"' + sql + '"'
+    cmds = (
+        f"{input_csv} "
+        + f"{output_tif} "
+        + "-init 0 -burn 1 "
+        + f"-sql {sql} "
+        + "-dialect sqlite -tr 1 1 -te -1 -1 51 51"
+    )
 
-    gdaltest.runexternal(test_cli_utilities.get_gdal_rasterize_path() + " " + cmds)
+    gdaltest.runexternal(gdal_rasterize_path + " " + cmds)
 
-    ds = gdal.Open("tmp/test_gdal_rasterize_7.tif")
+    ds = gdal.Open(output_tif)
     data = ds.GetRasterBand(1).ReadAsArray()
     assert data.sum() > 5, "Only rasterized 5 pixels or less."
 
     ds = None
-
-    if os.path.exists("tmp/test_gdal_rasterize_7.tif"):
-        gdal.GetDriverByName("GTiff").Delete("tmp/test_gdal_rasterize_7.tif")
-    if os.path.exists("tmp/test_gdal_rasterize_7.csv"):
-        os.unlink("tmp/test_gdal_rasterize_7.csv")
 
 
 ###############################################################################
@@ -444,28 +414,23 @@ def test_gdal_rasterize_7():
 # layer, #6058.
 
 
-def test_gdal_rasterize_8():
+@pytest.mark.require_driver("CSV")
+def test_gdal_rasterize_8(gdal_rasterize_path, tmp_path):
 
-    if test_cli_utilities.get_gdal_rasterize_path() is None:
-        pytest.skip()
+    input_csv = str(tmp_path / "test_gdal_rasterize_8.csv")
+    output_tif = str(tmp_path / "test_gdal_rasterize_8.tif")
 
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
-
-    f = open("tmp/test_gdal_rasterize_8.csv", "wb")
+    f = open(input_csv, "wb")
     f.write("WKT,Value\n".encode("ascii"))
     f.write('"LINESTRING (0 0, 5 5, 10 0, 10 10)",1'.encode("ascii"))
     f.close()
 
-    cmds = """tmp/test_gdal_rasterize_8.csv tmp/test_gdal_rasterize_8.tif -init 0 -burn 1 -tr 1 1"""
+    cmds = f"""{input_csv} {output_tif} -init 0 -burn 1 -tr 1 1"""
 
-    gdaltest.runexternal(test_cli_utilities.get_gdal_rasterize_path() + " " + cmds)
+    gdaltest.runexternal(gdal_rasterize_path + " " + cmds)
 
-    ds = gdal.Open("tmp/test_gdal_rasterize_8.tif")
+    ds = gdal.Open(output_tif)
     cs = ds.GetRasterBand(1).Checksum()
     assert cs == 21, "Did not rasterize line data properly"
 
     ds = None
-
-    gdal.GetDriverByName("GTiff").Delete("tmp/test_gdal_rasterize_8.tif")
-    os.unlink("tmp/test_gdal_rasterize_8.csv")

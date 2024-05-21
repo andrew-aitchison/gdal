@@ -38,6 +38,8 @@ from threading import Thread
 
 import gdaltest
 
+from osgeo import gdal
+
 do_log = False
 custom_handler = None
 
@@ -48,8 +50,8 @@ def install_http_handler(handler_instance):
     custom_handler = handler_instance
     try:
         yield
-    finally:
         handler_instance.final_check()
+    finally:
         custom_handler = None
 
 
@@ -66,6 +68,7 @@ class RequestResponse(object):
         expected_body=None,
         add_content_length_header=True,
         unexpected_headers=[],
+        silence_server_exception=False,
     ):
         self.method = method
         self.path = path
@@ -77,6 +80,7 @@ class RequestResponse(object):
         self.expected_body = expected_body
         self.add_content_length_header = add_content_length_header
         self.unexpected_headers = unexpected_headers
+        self.silence_server_exception = silence_server_exception
 
     def __repr__(self):
         return (
@@ -89,27 +93,70 @@ class RequestResponse(object):
 
 
 class FileHandler(object):
-    def __init__(self, _dict):
-        self.dict = _dict
+    """
+    Handler that serves files from a dictionary and/or a fallback VSI location.
+    """
+
+    def __init__(self, _dict, content_type=None):
+        self.dict = {"GET": _dict, "PUT": {}, "POST": {}, "DELETE": {}}
+        self.content_type = content_type
+        self.fallback = None
 
     def final_check(self):
         pass
 
-    def do_HEAD(self, request):
-        if request.path not in self.dict:
-            request.send_response(404)
-            request.end_headers()
-        else:
-            request.send_response(200)
-            request.send_header("Content-Length", len(self.dict[request.path]))
-            request.end_headers()
+    def handle_get(self, path, contents):
+        self.add_file(path, contents, verb="GET")
 
-    def do_GET(self, request):
-        if request.path not in self.dict:
+    def handle_put(self, path, contents):
+        self.add_file(path, contents, verb="PUT")
+
+    def handle_delete(self, path, contents):
+        self.add_file(path, contents, verb="DELETE")
+
+    def handle_post(self, path, contents, post_body=None):
+        self.add_file(path, contents, verb="POST", post_body=post_body)
+
+    def add_file(self, path, contents, verb="GET", post_body=None):
+        if type(contents) is str:
+            contents = contents.encode()
+
+        if type(post_body) is str:
+            post_body = post_body.encode()
+
+        if verb == "POST":
+            if path in self.dict["POST"]:
+                self.dict["POST"][path][post_body] = contents
+            else:
+                self.dict["POST"][path] = {post_body: contents}
+        else:
+            self.dict[verb][path] = contents
+
+    def set_fallback(self, path):
+        self.fallback = path
+
+    def lookup(self, path, verb, post_body=None):
+
+        if path in self.dict[verb]:
+            if verb == "POST":
+                return self.dict["POST"][path].get(post_body, None)
+            else:
+                return self.dict[verb][path]
+
+        if verb == "GET" and self.fallback:
+            stat = gdal.VSIStatL(f"{self.fallback}/{path}")
+            if stat is not None:
+                f = gdal.VSIFOpenL(f"{self.fallback}/{path}", "rb")
+                content = gdal.VSIFReadL(1, stat.size, f)
+                gdal.VSIFCloseL(f)
+
+                return content
+
+    def send_response(self, request, filedata):
+        if filedata is None:
             request.send_response(404)
             request.end_headers()
         else:
-            filedata = self.dict[request.path]
             start = 0
             end = len(filedata)
             if "Range" in request.headers:
@@ -122,90 +169,61 @@ class FileHandler(object):
                     end = int(res[1]) + 1
                     if end > len(filedata):
                         end = len(filedata)
+            try:
+                data_slice = filedata[start:end]
+                request.send_response(200)
+                if "Range" in request.headers:
+                    request.send_header("Content-Range", "%d-%d" % (start, end - 1))
+                request.send_header("Content-Length", len(filedata))
+                if self.content_type:
+                    request.send_header("Content-Type", self.content_type)
+                request.end_headers()
+                request.wfile.write(data_slice)
+            except Exception as ex:
+                request.send_response(500)
+                request.end_headers()
+                request.wfile.write(str(ex).encode("utf8"))
+
+    def do_HEAD(self, request):
+        filedata = self.lookup(request.path, "GET")
+
+        if filedata is None:
+            request.send_response(404)
+            request.end_headers()
+        else:
             request.send_response(200)
-            if "Range" in request.headers:
-                request.send_header("Content-Range", "%d-%d" % (start, end - 1))
             request.send_header("Content-Length", len(filedata))
             request.end_headers()
-            request.wfile.write(filedata[start:end])
+
+    def do_GET(self, request):
+        filedata = self.lookup(request.path, "GET")
+        self.send_response(request, filedata)
+
+    def do_PUT(self, request):
+        filedata = self.lookup(request.path, "PUT")
+        self.send_response(request, filedata)
+
+    def do_POST(self, request):
+        content = request.rfile.read(int(request.headers["Content-Length"]))
+        filedata = self.lookup(request.path, "POST", post_body=content)
+        self.send_response(request, filedata)
+
+    def do_DELETE(self, request):
+        filedata = self.lookup(request.path, "DELETE")
+        self.send_response(request, filedata)
 
 
-class SequentialHandler(object):
-    def __init__(self):
-        self.req_count = 0
-        self.req_resp = []
-        self.req_resp_map = {}
-
-    def final_check(self):
-        assert self.req_count == len(self.req_resp), (
-            self.req_count,
-            len(self.req_resp),
-        )
-        assert not self.req_resp_map
-
-    def add(
-        self,
-        method,
-        path,
-        code=None,
-        headers=None,
-        body=None,
-        custom_method=None,
-        expected_headers=None,
-        expected_body=None,
-        add_content_length_header=True,
-        unexpected_headers=[],
-    ):
-        hdrs = {} if headers is None else headers
-        expected_hdrs = {} if expected_headers is None else expected_headers
-        assert not self.req_resp_map
-        self.req_resp.append(
-            RequestResponse(
-                method,
-                path,
-                code,
-                hdrs,
-                body,
-                custom_method,
-                expected_hdrs,
-                expected_body,
-                add_content_length_header,
-                unexpected_headers,
-            )
-        )
-
-    def add_unordered(
-        self,
-        method,
-        path,
-        code=None,
-        headers=None,
-        body=None,
-        custom_method=None,
-        expected_headers=None,
-        expected_body=None,
-        add_content_length_header=True,
-        unexpected_headers=[],
-    ):
-        hdrs = {} if headers is None else headers
-        expected_hdrs = {} if expected_headers is None else expected_headers
-        self.req_resp_map[(method, path)] = RequestResponse(
-            method,
-            path,
-            code,
-            hdrs,
-            body,
-            custom_method,
-            expected_hdrs,
-            expected_body,
-            add_content_length_header,
-            unexpected_headers,
-        )
-
+class BaseMockedHttpHandler(object):
     @staticmethod
     def _process_req_resp(req_resp, request):
         if req_resp.custom_method:
-            req_resp.custom_method(request)
+            if req_resp.silence_server_exception:
+                try:
+                    req_resp.custom_method(request)
+                except Exception:
+                    pass
+            else:
+                req_resp.custom_method(request)
         else:
 
             if req_resp.expected_headers:
@@ -242,10 +260,13 @@ class SequentialHandler(object):
             request.send_response(req_resp.code)
             for k in req_resp.headers:
                 request.send_header(k, req_resp.headers[k])
-            if req_resp.add_content_length_header:
+            if (
+                req_resp.add_content_length_header
+                and "Content-Length" not in req_resp.headers
+            ):
                 if req_resp.body:
                     request.send_header("Content-Length", len(req_resp.body))
-                elif "Content-Length" not in req_resp.headers:
+                else:
                     request.send_header("Content-Length", "0")
             request.end_headers()
             if req_resp.body:
@@ -253,26 +274,6 @@ class SequentialHandler(object):
                     request.wfile.write(req_resp.body)
                 except Exception:
                     request.wfile.write(req_resp.body.encode("ascii"))
-
-    def process(self, method, request):
-        if self.req_count < len(self.req_resp):
-            req_resp = self.req_resp[self.req_count]
-            if method == req_resp.method and request.path == req_resp.path:
-                self.req_count += 1
-                SequentialHandler._process_req_resp(req_resp, request)
-                return
-        else:
-            if (method, request.path) in self.req_resp_map:
-                req_resp = self.req_resp_map[(method, request.path)]
-                del self.req_resp_map[(method, request.path)]
-                SequentialHandler._process_req_resp(req_resp, request)
-                return
-
-        request.send_error(
-            500,
-            "Unexpected %s request for %s, req_count = %d"
-            % (method, request.path, self.req_count),
-        )
 
     def do_HEAD(self, request):
         self.process("HEAD", request)
@@ -291,6 +292,116 @@ class SequentialHandler(object):
 
     def do_DELETE(self, request):
         self.process("DELETE", request)
+
+
+class SequentialHandler(BaseMockedHttpHandler):
+    def __init__(self):
+        self.req_count = 0
+        self.req_resp = []
+
+    def final_check(self):
+        assert self.req_count == len(self.req_resp), (
+            self.req_count,
+            len(self.req_resp),
+        )
+
+    def add(
+        self,
+        method,
+        path,
+        code=None,
+        headers=None,
+        body=None,
+        custom_method=None,
+        expected_headers=None,
+        expected_body=None,
+        add_content_length_header=True,
+        unexpected_headers=[],
+        silence_server_exception=False,
+    ):
+        hdrs = {} if headers is None else headers
+        expected_hdrs = {} if expected_headers is None else expected_headers
+        self.req_resp.append(
+            RequestResponse(
+                method,
+                path,
+                code,
+                hdrs,
+                body,
+                custom_method,
+                expected_hdrs,
+                expected_body,
+                add_content_length_header,
+                unexpected_headers,
+                silence_server_exception,
+            )
+        )
+
+    def process(self, method, request):
+        if self.req_count < len(self.req_resp):
+            req_resp = self.req_resp[self.req_count]
+            if method == req_resp.method and request.path == req_resp.path:
+                self.req_count += 1
+                SequentialHandler._process_req_resp(req_resp, request)
+                return
+
+        request.send_error(
+            500,
+            "Unexpected %s request for %s, req_count = %d"
+            % (method, request.path, self.req_count),
+        )
+
+
+class NonSequentialMockedHttpHandler(BaseMockedHttpHandler):
+    def __init__(self):
+        self.req_resp_map = {}
+
+    def final_check(self):
+        assert not self.req_resp_map
+
+    def add(
+        self,
+        method,
+        path,
+        code=None,
+        headers=None,
+        body=None,
+        custom_method=None,
+        expected_headers=None,
+        expected_body=None,
+        add_content_length_header=True,
+        unexpected_headers=[],
+        silence_server_exception=False,
+    ):
+        hdrs = {} if headers is None else headers
+        expected_hdrs = {} if expected_headers is None else expected_headers
+        self.req_resp_map[(method, path)] = RequestResponse(
+            method,
+            path,
+            code,
+            hdrs,
+            body,
+            custom_method,
+            expected_hdrs,
+            expected_body,
+            add_content_length_header,
+            unexpected_headers,
+            silence_server_exception,
+        )
+
+    def process(self, method, request):
+
+        if (method, request.path) in self.req_resp_map:
+            req_resp = self.req_resp_map[(method, request.path)]
+            del self.req_resp_map[(method, request.path)]
+            SequentialHandler._process_req_resp(req_resp, request)
+            return
+
+        request.send_error(
+            500,
+            "Unexpected %s request for %s, req_count = %d"
+            % (method, request.path, len(self.req_resp_map)),
+        )
 
 
 class DispatcherHttpHandler(BaseHTTPRequestHandler):

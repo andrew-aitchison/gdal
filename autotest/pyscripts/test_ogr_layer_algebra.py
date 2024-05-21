@@ -34,13 +34,40 @@ import test_py_scripts
 
 from osgeo import ogr
 
-###############################################################################
+pytestmark = [
+    pytest.mark.skipif(
+        test_py_scripts.get_py_script("ogr_layer_algebra") is None,
+        reason="ogr_layer_algebra.py not available",
+    ),
+    pytest.mark.skipif(not ogrtest.have_geos(), reason="GEOS missing"),
+]
 
-# Skip if no geos
-@pytest.fixture(autouse=True, scope="module")
-def startup_and_cleanup():
-    if not ogrtest.have_geos():
-        pytest.skip()
+
+@pytest.fixture()
+def script_path():
+    return test_py_scripts.get_py_script("ogr_layer_algebra")
+
+
+###############################################################################
+#
+
+
+def test_ogr_layer_algebra_help(script_path):
+
+    assert "ERROR" not in test_py_scripts.run_py_script(
+        script_path, "ogr_layer_algebra", "--help"
+    )
+
+
+###############################################################################
+#
+
+
+def test_ogr_layer_algebra_version(script_path):
+
+    assert "ERROR" not in test_py_scripts.run_py_script(
+        script_path, "ogr_layer_algebra", "--version"
+    )
 
 
 ###############################################################################
@@ -48,16 +75,12 @@ def startup_and_cleanup():
 # Test Intersection
 
 
-def test_ogr_layer_algebra_intersection():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_intersection(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -98,11 +121,6 @@ def test_ogr_layer_algebra_intersection():
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
 
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
-
     assert featureCount == 2
 
 
@@ -111,16 +129,12 @@ def test_ogr_layer_algebra_intersection():
 # Test Union
 
 
-def test_ogr_layer_algebra_union():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_union(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -161,11 +175,6 @@ def test_ogr_layer_algebra_union():
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
 
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
-
     assert featureCount == 5
 
 
@@ -174,16 +183,12 @@ def test_ogr_layer_algebra_union():
 # Test Symmetric Difference
 
 
-def test_ogr_layer_algebra_symdifference():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_symdifference(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -229,11 +234,6 @@ def test_ogr_layer_algebra_symdifference():
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
 
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
-
     assert featureCount == 4
 
 
@@ -242,16 +242,12 @@ def test_ogr_layer_algebra_symdifference():
 # Test Identity
 
 
-def test_ogr_layer_algebra_identity():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_identity(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -297,11 +293,6 @@ def test_ogr_layer_algebra_identity():
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
 
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
-
     assert featureCount == 4
 
 
@@ -310,16 +301,12 @@ def test_ogr_layer_algebra_identity():
 # Test Update
 
 
-def test_ogr_layer_algebra_update():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_update(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -360,11 +347,6 @@ def test_ogr_layer_algebra_update():
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
 
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
-
     assert featureCount == 3
 
 
@@ -373,16 +355,12 @@ def test_ogr_layer_algebra_update():
 # Test Clip
 
 
-def test_ogr_layer_algebra_clip():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_clip(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -423,11 +401,6 @@ def test_ogr_layer_algebra_clip():
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
 
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
-
     assert featureCount == 2
 
 
@@ -436,16 +409,12 @@ def test_ogr_layer_algebra_clip():
 # Test Erase
 
 
-def test_ogr_layer_algebra_erase():
-
-    script_path = test_py_scripts.get_py_script("ogr_layer_algebra")
-    if script_path is None:
-        pytest.skip()
+def test_ogr_layer_algebra_erase(script_path, tmp_path):
 
     # Create input,method,output paths for intersection.
-    input_path = "tmp/input_layer.shp"
-    method_path = "tmp/method_layer.shp"
-    output_path = "tmp/output_layer.shp"
+    input_path = str(tmp_path / "input_layer.shp")
+    method_path = str(tmp_path / "method_layer.shp")
+    output_path = str(tmp_path / "output_layer.shp")
 
     # definition of input,method layers
     input_layer = ogr.GetDriverByName("ESRI Shapefile").CreateDataSource(input_path)
@@ -490,10 +459,5 @@ def test_ogr_layer_algebra_erase():
     dataSource = driver.Open(output_path, 0)
     layer = dataSource.GetLayer()
     featureCount = layer.GetFeatureCount()
-
-    # deleting shapefiles after test
-    driver.DeleteDataSource(input_path)
-    driver.DeleteDataSource(method_path)
-    driver.DeleteDataSource(output_path)
 
     assert featureCount == 2

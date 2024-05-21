@@ -522,9 +522,8 @@ OGRErr GNMFileNetwork::DeleteLayer(int nIndex)
 }
 
 OGRLayer *GNMFileNetwork::ICreateLayer(const char *pszName,
-                                       OGRSpatialReference * /* poSpatialRef */,
-                                       OGRwkbGeometryType eGType,
-                                       char **papszOptions)
+                                       const OGRGeomFieldDefn *poGeomFieldDefn,
+                                       CSLConstList papszOptions)
 {
     if (nullptr == m_poLayerDriver)
     {
@@ -532,6 +531,8 @@ OGRLayer *GNMFileNetwork::ICreateLayer(const char *pszName,
                  "The network storage format driver is not defined.");
         return nullptr;
     }
+
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
 
     // check if layer with such name exist
     for (int i = 0; i < GetLayerCount(); ++i)
@@ -635,7 +636,7 @@ CPLErr GNMFileNetwork::Create(const char *pszFilename, char **papszOptions)
             return CE_Failure;
         }
 
-        m_oSRS = spatialRef;
+        m_oSRS = std::move(spatialRef);
     }
 
     int nResult = CheckNetworkExist(pszFilename, papszOptions);

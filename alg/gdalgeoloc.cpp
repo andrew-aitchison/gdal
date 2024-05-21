@@ -69,8 +69,6 @@ constexpr float INVALID_BMXY = -10.0f;
 #warning "Remove me before committing"
 #endif
 
-CPL_CVSID("$Id$")
-
 CPL_C_START
 CPLXMLNode *GDALSerializeGeoLocTransformer(void *pTransformArg);
 void *GDALDeserializeGeoLocTransformer(CPLXMLNode *psTree);
@@ -173,7 +171,7 @@ inline double Clamp(double v, double minV, double maxV)
 /*! @cond Doxygen_Suppress */
 
 template <class Accessors>
-bool GDALGeoLoc<Accessors>::LoadGeolocFinish(
+void GDALGeoLoc<Accessors>::LoadGeolocFinish(
     GDALGeoLocTransformInfo *psTransform)
 {
     auto pAccessors = static_cast<Accessors *>(psTransform->pAccessors);
@@ -260,7 +258,7 @@ bool GDALGeoLoc<Accessors>::LoadGeolocFinish(
                     poRing->addPoint(x1 > 0 ? x1 : x1 + 360, y1);
                     poRing->addPoint(x0 > 0 ? x0 : x0 + 360, y0);
                     poPoly->addRingDirectly(poRing);
-                    auto poFeature = cpl::make_unique<OGRFeature>(poLayerDefn);
+                    auto poFeature = std::make_unique<OGRFeature>(poLayerDefn);
                     poFeature->SetField(0, static_cast<int>(iX));
                     poFeature->SetField(1, static_cast<int>(iY));
                     poFeature->SetGeometryDirectly(poPoly);
@@ -283,7 +281,7 @@ bool GDALGeoLoc<Accessors>::LoadGeolocFinish(
                 poRing->addPoint(x1, y1);
                 poRing->addPoint(x0, y0);
                 poPoly->addRingDirectly(poRing);
-                auto poFeature = cpl::make_unique<OGRFeature>(poLayerDefn);
+                auto poFeature = std::make_unique<OGRFeature>(poLayerDefn);
                 poFeature->SetField(0, static_cast<int>(iX));
                 poFeature->SetField(1, static_cast<int>(iY));
                 poFeature->SetGeometryDirectly(poPoly);
@@ -377,8 +375,6 @@ bool GDALGeoLoc<Accessors>::LoadGeolocFinish(
             UpdateMinMax(psTransform, dfGeoLocX, dfGeoLocY);
         }
     }
-
-    return true;
 }
 
 /************************************************************************/
@@ -946,6 +942,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
 
     return TRUE;
 }
+
 /*! @endcond */
 
 /************************************************************************/
@@ -974,9 +971,11 @@ void GDALInverseBilinearInterpolation(const double x, const double y,
     const double C = (x1 - x) * (y1 - y3) - (y1 - y) * (x1 - x3);
     const double denom = A - 2 * B + C;
     double s;
-    if (fabs(denom) <= 1e-12)
+    const double magnitudeOfValues = fabs(A) + fabs(B) + fabs(C);
+    if (fabs(denom) <= 1e-12 * magnitudeOfValues)
     {
         // Happens typically when the x_i,y_i points form a rectangle
+        // Can also happen when they form a triangle.
         s = A / (A - C);
     }
     else
@@ -991,14 +990,14 @@ void GDALInverseBilinearInterpolation(const double x, const double y,
     }
 
     const double t_denom_x = (1 - s) * (x0 - x2) + s * (x1 - x3);
-    if (fabs(t_denom_x) > 1e-12)
+    if (fabs(t_denom_x) > 1e-12 * magnitudeOfValues)
     {
         i += ((1 - s) * (x0 - x) + s * (x1 - x)) / t_denom_x;
     }
     else
     {
         const double t_denom_y = (1 - s) * (y0 - y2) + s * (y1 - y3);
-        if (fabs(t_denom_y) > 1e-12)
+        if (fabs(t_denom_y) > 1e-12 * magnitudeOfValues)
         {
             i += ((1 - s) * (y0 - y) + s * (y1 - y)) / t_denom_y;
         }
@@ -1509,6 +1508,7 @@ bool GDALGeoLoc<Accessors>::GenerateBackMap(
         int iX = -1;
         float bmX = 0;
     };
+
     std::vector<LastValidStruct> lastValid(TILE_SIZE);
     const auto reinitLine = [&lastValid]()
     {
@@ -1970,6 +1970,22 @@ void *GDALCreateGeoLocTransformerEx(GDALDatasetH hBaseDS,
 
     psTransform->nGeoLocXSize = nXSize;
     psTransform->nGeoLocYSize = nYSize;
+
+    if (hBaseDS && psTransform->dfPIXEL_OFFSET == 0 &&
+        psTransform->dfLINE_OFFSET == 0 && psTransform->dfPIXEL_STEP == 1 &&
+        psTransform->dfLINE_STEP == 1)
+    {
+        if (GDALGetRasterXSize(hBaseDS) > nXSize ||
+            GDALGetRasterYSize(hBaseDS) > nYSize)
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "Geolocation array is %d x %d large, "
+                     "whereas dataset is %d x %d large. Result might be "
+                     "incorrect due to lack of values in geolocation array.",
+                     nXSize, nYSize, GDALGetRasterXSize(hBaseDS),
+                     GDALGetRasterYSize(hBaseDS));
+        }
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Load the geolocation array.                                     */

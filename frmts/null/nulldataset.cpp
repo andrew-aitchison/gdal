@@ -49,12 +49,12 @@ class GDALNullDataset final : public GDALDataset
     {
         return m_nLayers;
     }
+
     virtual OGRLayer *GetLayer(int) override;
 
-    virtual OGRLayer *ICreateLayer(const char *pszLayerName,
-                                   OGRSpatialReference *poSRS,
-                                   OGRwkbGeometryType eType,
-                                   char **papszOptions) override;
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
 
     virtual int TestCapability(const char *) override;
 
@@ -93,10 +93,10 @@ class GDALNullRasterBand final : public GDALRasterBand
 class GDALNullLayer final : public OGRLayer
 {
     OGRFeatureDefn *poFeatureDefn;
-    OGRSpatialReference *poSRS;
+    OGRSpatialReference *poSRS = nullptr;
 
   public:
-    GDALNullLayer(const char *pszLayerName, OGRSpatialReference *poSRS,
+    GDALNullLayer(const char *pszLayerName, const OGRSpatialReference *poSRS,
                   OGRwkbGeometryType eType);
     virtual ~GDALNullLayer();
 
@@ -104,6 +104,7 @@ class GDALNullLayer final : public OGRLayer
     {
         return poFeatureDefn;
     }
+
     virtual OGRSpatialReference *GetSpatialRef() override
     {
         return poSRS;
@@ -112,6 +113,7 @@ class GDALNullLayer final : public OGRLayer
     virtual void ResetReading() override
     {
     }
+
     virtual int TestCapability(const char *) override;
 
     virtual OGRFeature *GetNextFeature() override
@@ -124,7 +126,7 @@ class GDALNullLayer final : public OGRLayer
         return OGRERR_NONE;
     }
 
-    virtual OGRErr CreateField(OGRFieldDefn *poField,
+    virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
 };
 
@@ -184,7 +186,8 @@ CPLErr GDALNullRasterBand::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
 CPLErr GDALNullRasterBand::IReadBlock(int, int, void *pData)
 {
     memset(pData, 0,
-           nBlockXSize * nBlockYSize * GDALGetDataTypeSizeBytes(eDataType));
+           static_cast<size_t>(nBlockXSize) * nBlockYSize *
+               GDALGetDataTypeSizeBytes(eDataType));
     return CE_None;
 }
 
@@ -222,9 +225,13 @@ GDALNullDataset::~GDALNullDataset()
 /************************************************************************/
 
 OGRLayer *GDALNullDataset::ICreateLayer(const char *pszLayerName,
-                                        OGRSpatialReference *poSRS,
-                                        OGRwkbGeometryType eType, char **)
+                                        const OGRGeomFieldDefn *poGeomFieldDefn,
+                                        CSLConstList /*papszOptions */)
 {
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+
     m_papoLayers = static_cast<OGRLayer **>(
         CPLRealloc(m_papoLayers, sizeof(OGRLayer *) * (m_nLayers + 1)));
     m_papoLayers[m_nLayers] = new GDALNullLayer(pszLayerName, poSRS, eType);
@@ -329,16 +336,16 @@ GDALDataset *GDALNullDataset::Create(const char *, int nXSize, int nYSize,
 /************************************************************************/
 
 GDALNullLayer::GDALNullLayer(const char *pszLayerName,
-                             OGRSpatialReference *poSRSIn,
+                             const OGRSpatialReference *poSRSIn,
                              OGRwkbGeometryType eType)
-    : poFeatureDefn(new OGRFeatureDefn(pszLayerName)), poSRS(poSRSIn)
+    : poFeatureDefn(new OGRFeatureDefn(pszLayerName))
 {
     SetDescription(poFeatureDefn->GetName());
     poFeatureDefn->SetGeomType(eType);
     poFeatureDefn->Reference();
 
-    if (poSRS)
-        poSRS->Reference();
+    if (poSRSIn)
+        poSRS = poSRSIn->Clone();
 }
 
 /************************************************************************/
@@ -371,7 +378,7 @@ int GDALNullLayer::TestCapability(const char *pszCap)
 /*                             CreateField()                            */
 /************************************************************************/
 
-OGRErr GDALNullLayer::CreateField(OGRFieldDefn *poField, int)
+OGRErr GDALNullLayer::CreateField(const OGRFieldDefn *poField, int)
 {
     poFeatureDefn->AddFieldDefn(poField);
     return OGRERR_NONE;

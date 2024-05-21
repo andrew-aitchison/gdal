@@ -351,7 +351,7 @@ const char *OGRCARTODataSource::GetAPIURL() const
 /*                             FetchSRSId()                             */
 /************************************************************************/
 
-int OGRCARTODataSource::FetchSRSId(OGRSpatialReference *poSRS)
+int OGRCARTODataSource::FetchSRSId(const OGRSpatialReference *poSRS)
 
 {
     const char *pszAuthorityName;
@@ -408,10 +408,10 @@ int OGRCARTODataSource::FetchSRSId(OGRSpatialReference *poSRS)
 /*                          ICreateLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRCARTODataSource::ICreateLayer(const char *pszNameIn,
-                                           OGRSpatialReference *poSpatialRef,
-                                           OGRwkbGeometryType eGType,
-                                           char **papszOptions)
+OGRLayer *
+OGRCARTODataSource::ICreateLayer(const char *pszNameIn,
+                                 const OGRGeomFieldDefn *poGeomFieldDefn,
+                                 CSLConstList papszOptions)
 {
     if (!bReadWrite)
     {
@@ -419,6 +419,10 @@ OGRLayer *OGRCARTODataSource::ICreateLayer(const char *pszNameIn,
                  "Operation not available in read-only mode");
         return nullptr;
     }
+
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSpatialRef =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     /* -------------------------------------------------------------------- */
     /*      Do we already have this layer?  If so, set it up for overwrite  */
@@ -454,7 +458,7 @@ OGRLayer *OGRCARTODataSource::ICreateLayer(const char *pszNameIn,
     CPLString osName(pszNameIn);
     if (CPLFetchBool(papszOptions, "LAUNDER", true))
     {
-        char *pszTmp = OGRPGCommonLaunderName(pszNameIn);
+        char *pszTmp = OGRPGCommonLaunderName(pszNameIn, "CARTO", false);
         osName = pszTmp;
         CPLFree(pszTmp);
     }
@@ -492,10 +496,10 @@ OGRLayer *OGRCARTODataSource::ICreateLayer(const char *pszNameIn,
 
     poLayer->SetLaunderFlag(CPLFetchBool(papszOptions, "LAUNDER", true));
 
-    OGRSpatialReference *poSRSClone = poSpatialRef;
-    if (poSRSClone)
+    OGRSpatialReference *poSRSClone = nullptr;
+    if (poSpatialRef)
     {
-        poSRSClone = poSRSClone->Clone();
+        poSRSClone = poSpatialRef->Clone();
         poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     poLayer->SetDeferredCreation(eGType, poSRSClone, bGeomNullable, bCartoify);

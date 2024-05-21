@@ -46,7 +46,7 @@ pytestmark = pytest.mark.require_driver("ADRG")
 def test_adrg_read_gen():
 
     tst = gdaltest.GDALTest("ADRG", "adrg/SMALL_ADRG/ABCDEF01.GEN", 1, 62833)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -56,7 +56,7 @@ def test_adrg_read_gen():
 def test_adrg_read_transh():
 
     tst = gdaltest.GDALTest("ADRG", "adrg/SMALL_ADRG/TRANSH01.THF", 1, 62833)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -72,7 +72,7 @@ def test_adrg_read_subdataset_img():
         62833,
         filename_absolute=1,
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -104,10 +104,9 @@ def test_adrg_2subdatasets():
     drv = gdal.GetDriverByName("ADRG")
     srcds = gdal.Open("data/adrg/SMALL_ADRG/ABCDEF01.GEN")
 
-    gdal.SetConfigOption("ADRG_SIMULATE_MULTI_IMG", "ON")
-    dstds = drv.CreateCopy("tmp/XXXXXX01.GEN", srcds)
-    del dstds
-    gdal.SetConfigOption("ADRG_SIMULATE_MULTI_IMG", "OFF")
+    with gdal.config_option("ADRG_SIMULATE_MULTI_IMG", "ON"):
+        dstds = drv.CreateCopy("tmp/XXXXXX01.GEN", srcds)
+        del dstds
 
     shutil.copy("tmp/XXXXXX01.IMG", "tmp/XXXXXX02.IMG")
 

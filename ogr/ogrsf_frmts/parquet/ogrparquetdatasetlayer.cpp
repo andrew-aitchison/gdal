@@ -45,10 +45,12 @@
 OGRParquetDatasetLayer::OGRParquetDatasetLayer(
     OGRParquetDataset *poDS, const char *pszLayerName,
     const std::shared_ptr<arrow::dataset::Scanner> &scanner,
-    const std::shared_ptr<arrow::Schema> &schema)
-    : OGRParquetLayerBase(poDS, pszLayerName), m_poScanner(scanner)
+    const std::shared_ptr<arrow::Schema> &schema, CSLConstList papszOpenOptions)
+    : OGRParquetLayerBase(poDS, pszLayerName, papszOpenOptions),
+      m_poScanner(scanner)
 {
-    EstablishFeatureDefn(schema);
+    m_poSchema = schema;
+    EstablishFeatureDefn();
     CPLAssert(static_cast<int>(m_aeGeomEncoding.size()) ==
               m_poFeatureDefn->GetGeomFieldCount());
 }
@@ -57,17 +59,18 @@ OGRParquetDatasetLayer::OGRParquetDatasetLayer(
 /*                        EstablishFeatureDefn()                        */
 /************************************************************************/
 
-void OGRParquetDatasetLayer::EstablishFeatureDefn(
-    const std::shared_ptr<arrow::Schema> &schema)
+void OGRParquetDatasetLayer::EstablishFeatureDefn()
 {
-    const auto &kv_metadata = schema->metadata();
+    const auto &kv_metadata = m_poSchema->metadata();
 
     LoadGeoMetadata(kv_metadata);
     const auto oMapFieldNameToGDALSchemaFieldDefn =
-        LoadGDALMetadata(kv_metadata.get());
+        LoadGDALSchema(kv_metadata.get());
 
-    const auto fields = schema->fields();
-    for (int i = 0; i < schema->num_fields(); ++i)
+    LoadGDALMetadata(kv_metadata.get());
+
+    const auto &fields = m_poSchema->fields();
+    for (int i = 0; i < m_poSchema->num_fields(); ++i)
     {
         const auto &field = fields[i];
 
@@ -93,16 +96,6 @@ void OGRParquetDatasetLayer::EstablishFeatureDefn(
 }
 
 /************************************************************************/
-/*                           ResetReading()                             */
-/************************************************************************/
-
-void OGRParquetDatasetLayer::ResetReading()
-{
-    m_poRecordBatchReader.reset();
-    OGRParquetLayerBase::ResetReading();
-}
-
-/************************************************************************/
 /*                           ReadNextBatch()                            */
 /************************************************************************/
 
@@ -125,24 +118,38 @@ bool OGRParquetDatasetLayer::ReadNextBatch()
             return false;
     }
 
-    ++m_iRecordBatch;
-
     std::shared_ptr<arrow::RecordBatch> poNextBatch;
-    auto status = m_poRecordBatchReader->ReadNext(&poNextBatch);
-    if (!status.ok())
+    do
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "ReadNext() failed: %s",
-                 status.message().c_str());
+        ++m_iRecordBatch;
+
         poNextBatch.reset();
-    }
-    if (poNextBatch == nullptr)
-    {
-        m_poBatch.reset();
-        return false;
-    }
+        auto status = m_poRecordBatchReader->ReadNext(&poNextBatch);
+        if (!status.ok())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "ReadNext() failed: %s",
+                     status.message().c_str());
+            poNextBatch.reset();
+        }
+        if (poNextBatch == nullptr)
+        {
+            m_poBatch.reset();
+            return false;
+        }
+    } while (poNextBatch->num_rows() == 0);
+
     SetBatch(poNextBatch);
 
     return true;
+}
+
+/************************************************************************/
+/*                     InvalidateCachedBatches()                        */
+/************************************************************************/
+
+void OGRParquetDatasetLayer::InvalidateCachedBatches()
+{
+    ResetReading();
 }
 
 /************************************************************************/
@@ -170,10 +177,10 @@ OGRErr OGRParquetDatasetLayer::GetExtent(OGREnvelope *psExtent, int bForce)
 }
 
 /************************************************************************/
-/*                         GetFastExtent()                              */
+/*                         FastGetExtent()                              */
 /************************************************************************/
 
-bool OGRParquetDatasetLayer::GetFastExtent(int iGeomField,
+bool OGRParquetDatasetLayer::FastGetExtent(int iGeomField,
                                            OGREnvelope *psExtent) const
 {
     const auto oIter = m_oMapExtents.find(iGeomField);
@@ -203,7 +210,7 @@ OGRErr OGRParquetDatasetLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
         return OGRERR_FAILURE;
     }
 
-    if (GetFastExtent(iGeomField, psExtent))
+    if (FastGetExtent(iGeomField, psExtent))
     {
         return OGRERR_NONE;
     }
@@ -221,7 +228,7 @@ OGRErr OGRParquetDatasetLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
             *psExtent = OGREnvelope();
             int nFragmentCount = 0;
             int nBBoxFragmentCount = 0;
-            for (auto oFragmentStatus : *statusFragments)
+            for (const auto &oFragmentStatus : *statusFragments)
             {
                 if (oFragmentStatus.ok())
                 {
@@ -240,20 +247,13 @@ OGRErr OGRParquetDatasetLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
                                 auto oRoot = oDoc.GetRoot();
                                 auto oColumns = oRoot.GetObj("columns");
                                 auto oCol = oColumns.GetObj(pszGeomFieldName);
-                                OGREnvelope sFragmentExtent;
+                                OGREnvelope3D sFragmentExtent;
                                 if (oCol.IsValid() &&
                                     GetExtentFromMetadata(
                                         oCol, &sFragmentExtent) == OGRERR_NONE)
                                 {
                                     nBBoxFragmentCount++;
-                                    psExtent->MinX = std::min(
-                                        psExtent->MinX, sFragmentExtent.MinX);
-                                    psExtent->MinY = std::min(
-                                        psExtent->MinY, sFragmentExtent.MinY);
-                                    psExtent->MaxX = std::max(
-                                        psExtent->MaxX, sFragmentExtent.MaxX);
-                                    psExtent->MaxY = std::max(
-                                        psExtent->MaxY, sFragmentExtent.MaxY);
+                                    psExtent->Merge(sFragmentExtent);
                                 }
                             }
                         }

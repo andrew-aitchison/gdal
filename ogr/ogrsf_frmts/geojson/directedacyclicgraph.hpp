@@ -26,6 +26,9 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
+#ifndef DIRECTEDACYCLICGRAPH_INCLUDED_H
+#define DIRECTEDACYCLICGRAPH_INCLUDED_H
+
 #include <algorithm>
 #include <list>
 #include <map>
@@ -42,12 +45,12 @@ namespace gdal
 // See https://en.wikipedia.org/wiki/Directed_acyclic_graph
 template <class T, class V = std::string> class DirectedAcyclicGraph
 {
-    std::set<T> nodes;
+    std::set<T> nodes{};
     std::map<T, std::set<T>>
-        incomingNodes;  // incomingNodes[j][i] means an edge from i to j
+        incomingNodes{};  // incomingNodes[j][i] means an edge from i to j
     std::map<T, std::set<T>>
-        outgoingNodes;  // outgoingNodes[i][j] means an edge from i to j
-    std::map<T, V> names;
+        outgoingNodes{};  // outgoingNodes[i][j] means an edge from i to j
+    std::map<T, V> names{};
 
   public:
     DirectedAcyclicGraph() = default;
@@ -59,11 +62,13 @@ template <class T, class V = std::string> class DirectedAcyclicGraph
         outgoingNodes.clear();
         names.clear();
     }
+
     void addNode(const T &i, const V &s)
     {
         nodes.insert(i);
         names[i] = s;
     }
+
     void removeNode(const T &i);
     const char *addEdge(const T &i, const T &j);
     const char *removeEdge(const T &i, const T &j);
@@ -242,7 +247,7 @@ std::vector<T> DirectedAcyclicGraph<T, V>::getTopologicalOrdering()
         if (iter != outgoingNodes.end())
         {
             // Need to take a copy as we remove edges during iteration
-            const auto myOutgoingNodes = iter->second;
+            const std::set<T> myOutgoingNodes = iter->second;
             for (const T &m : myOutgoingNodes)
             {
                 const char *retRemoveEdge = removeEdge(n, m);
@@ -264,3 +269,5 @@ std::vector<T> DirectedAcyclicGraph<T, V>::getTopologicalOrdering()
 }
 
 }  // namespace gdal
+
+#endif  // DIRECTEDACYCLICGRAPH_INCLUDED_H

@@ -15,6 +15,9 @@ add_gdal_driver(
   STRONG_CXX_WFLAGS
   BUILTIN)
 gdal_standard_includes(ogr_GeoPackage)
+
+check_sqlite3_rtree("GPKG")
+
 target_include_directories(
   ogr_GeoPackage PRIVATE $<TARGET_PROPERTY:alg,SOURCE_DIR> ${GDAL_RASTER_FORMAT_SOURCE_DIR}/mem
                          ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/sqlite  $<TARGET_PROPERTY:ogrsf_generic,SOURCE_DIR>)
@@ -25,4 +28,7 @@ if (SQLite3_HAS_COLUMN_METADATA)
 endif ()
 if (SQLite3_HAS_PROGRESS_HANDLER)
   target_compile_definitions(ogr_GeoPackage PRIVATE -DSQLITE_HAS_PROGRESS_HANDLER)
+endif()
+if (GDAL_USE_SPATIALITE)
+  target_compile_definitions(ogr_GeoPackage PRIVATE -DHAVE_SPATIALITE)
 endif()

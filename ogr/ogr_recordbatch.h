@@ -16,7 +16,7 @@
 // under the License.
 
 // This file is an extract
-// https://github.com/apache/arrow/blob/master/cpp/src/arrow/c/abi.h WARNING: DO
+// https://github.com/apache/arrow/blob/main/cpp/src/arrow/c/abi.h WARNING: DO
 // NOT MODIFY the content as it would break interoperability !
 
 #pragma once
@@ -68,6 +68,7 @@ extern "C"
         // Opaque producer-specific data
         void *private_data;
     };
+
     // EXPERIMENTAL: C stream interface
 
     struct ArrowArrayStream

@@ -79,14 +79,17 @@ class GDALXRefEntry
     int bFree = FALSE;
 
     GDALXRefEntry() = default;
+
     explicit GDALXRefEntry(vsi_l_offset nOffsetIn, int nGenIn = 0)
         : nOffset(nOffsetIn), nGen(nGenIn)
     {
     }
+
     GDALXRefEntry(const GDALXRefEntry &oOther)
         : nOffset(oOther.nOffset), nGen(oOther.nGen), bFree(oOther.bFree)
     {
     }
+
     GDALXRefEntry &operator=(const GDALXRefEntry &oOther)
     {
         nOffset = oOther.nOffset;
@@ -319,6 +322,7 @@ class GDALPDFUpdateWriter final : public GDALPDFBaseWriter
     {
         return m_nCatalogId;
     }
+
     int GetCatalogGen() const
     {
         return m_nCatalogGen;
@@ -369,14 +373,15 @@ class GDALPDFWriter final : public GDALPDFBaseWriter
                             const char *pszOGRLinkField,
                             int bWriteOGRAttributes);
 
-    GDALPDFLayerDesc StartOGRLayer(CPLString osLayerName,
+    GDALPDFLayerDesc StartOGRLayer(const std::string &osLayerName,
                                    int bWriteOGRAttributes);
     void EndOGRLayer(GDALPDFLayerDesc &osVectorDesc);
 
     int WriteOGRLayer(OGRDataSourceH hDS, int iLayer,
                       const char *pszOGRDisplayField,
-                      const char *pszOGRLinkField, CPLString osLayerName,
-                      int bWriteOGRAttributes, int &iObj);
+                      const char *pszOGRLinkField,
+                      const std::string &osLayerName, int bWriteOGRAttributes,
+                      int &iObj);
 
     int WriteOGRFeature(GDALPDFLayerDesc &osVectorDesc, OGRFeatureH hFeat,
                         OGRCoordinateTransformationH hCT,

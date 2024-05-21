@@ -31,6 +31,10 @@
 import os
 
 import gdaltest
+import pytest
+
+pytestmark = pytest.mark.require_driver("LOSLAS")
+
 
 ###############################################################################
 
@@ -47,6 +51,5 @@ def test_loslas_1():
         0.009716129862575248,
         0.008260044951413324,
     )
-    ret = tst.testOpen(check_gt=gt, check_stat=stats, check_prj="WGS84")
+    tst.testOpen(check_gt=gt, check_stat=stats, check_prj="WGS84")
     os.unlink("data/loslas/wyhpgn.los.aux.xml")
-    return ret

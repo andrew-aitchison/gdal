@@ -53,26 +53,55 @@ The driver supports creating only a single layer in a dataset.
 Layer creation options
 ----------------------
 
-- **COMPRESSION=string**: Compression method. Can be one of ``NONE``, ``ZSTD``
-  or ``LZ4``. Available values depend on how the Arrow library was compiled.
-  Defaults to LZ4 when available, otherwise NONE.
+|about-layer-creation-options|
+The following layer creation options are supported:
 
-- **FORMAT=FILE/STREAM**: Variant of the file format. See introduction paragraph
-  for the difference between both. Defaults to FILE, unless the filename is
-  "/vsistdout/" or its extension is ".arrows", in which case STREAM is used.
+- .. lco:: COMPRESSION
+     :choices: NONE, ZSTD, LZ4
 
-- **GEOMETRY_ENCODING=GEOARROW/WKB/WKT**: Geometry encoding. Defaults to GEOARROW.
+     Compression method.
+     Available values depend on how the Arrow library was compiled.
+     Defaults to LZ4 when available, otherwise NONE.
 
-- **BATCH_SIZE=integer**: Maximum number of rows per record batch. Default is 65536.
+- .. lco:: FORMAT
+     :choices: FILE, STREAM
 
-- **GEOMETRY_NAME=string**: Name of geometry column. Default is ``geometry``
+     Variant of the file format. See introduction paragraph
+     for the difference between both. Defaults to FILE, unless the filename is
+     "/vsistdout/" or its extension is ".arrows", in which case STREAM is used.
 
-- **FID=string**: Name of the FID (Feature Identifier) column to create. If
-  none is specified, no FID column is created. Note that if using ogr2ogr with
-  the Arrow driver as the target driver and a source layer that has a named
-  FID column, this FID column name will be automatically used to set the FID
-  layer creation option of the Arrow driver (unless ``-lco FID=`` is used to
-  set an empty name)
+- .. lco:: GEOMETRY_ENCODING
+     :choices: GEOARROW, WKB, WKT, GEOARROW_INTERLEAVED
+     :default: GEOARROW
+
+     Geometry encoding.
+     As of GDAL 3.9, GEOARROW uses the GeoArrow "struct" based
+     encodings (where points are modeled as a struct field with a x and y subfield,
+     lines are modeled as a list of such points, etc.).
+     The GEOARROW_INTERLEAVED option has been renamed in GDAL 3.9 from what was
+     named GEOARROW in previous versions, and uses an encoding where points uses
+     a FixedSizedList of (x,y), lines a variable-size list of such
+     FixedSizedList of points, etc.
+
+- .. lco:: BATCH_SIZE
+     :choices: <integer>
+     :default: 65536
+
+     Maximum number of rows per record batch.
+
+- .. lco:: GEOMETRY_NAME
+     :default: geometry
+
+     Name of geometry column.
+
+- .. lco:: FID
+
+     Name of the FID (Feature Identifier) column to create. If
+     none is specified, no FID column is created. Note that if using ogr2ogr with
+     the Arrow driver as the target driver and a source layer that has a named
+     FID column, this FID column name will be automatically used to set the FID
+     layer creation option of the Arrow driver (unless ``-lco FID=`` is used to
+     set an empty name)
 
 Conda-forge package
 -------------------

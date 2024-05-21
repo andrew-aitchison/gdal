@@ -70,6 +70,7 @@ typedef enum
 } Strategy;
 
 typedef struct _Request Request;
+
 struct _Request
 {
     int nXOff, nYOff, nXWin, nYWin;
@@ -78,6 +79,7 @@ struct _Request
 };
 
 typedef struct _Resource Resource;
+
 struct _Resource
 {
     GDALDataset *poDS;
@@ -101,6 +103,7 @@ static Resource *psGlobalResourceLast = nullptr;
  * implementation */
 /* RAND_MAX assumed to be 32767 */
 #define MYRAND_MAX 32767
+
 static int myrand_r(unsigned long *pseed)
 {
     *pseed = *pseed * 1103515245 + 12345;
@@ -459,7 +462,8 @@ TEST(testblockcache, test)
                          papszOptions);
         if (bCheck)
         {
-            GByte *pabyLine = (GByte *)VSIMalloc(nBands * nXSize);
+            GByte *pabyLine =
+                (GByte *)VSIMalloc(static_cast<size_t>(nBands) * nXSize);
             for (int iY = 0; iY < nYSize; iY++)
             {
                 for (int iX = 0; iX < nXSize; iX++)

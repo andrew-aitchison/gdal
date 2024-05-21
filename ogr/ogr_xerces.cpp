@@ -23,13 +23,13 @@
  * The above copyright notice and this permission notice shall be included
  * in all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- *MERCHANTABOGRXercesTY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- *IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- *DAMAGES OR OTHER LIABOGRXercesTY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
- *OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
- *OR OTHER DEALINGS IN THE SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
 #include "ogr_xerces.h"
@@ -95,7 +95,7 @@ struct LimitationStruct
 };
 }  // namespace
 
-static CPLMutex *hMutex = nullptr;
+static CPLMutex *hOGRXercesMutex = nullptr;
 static int nCounter = 0;
 static bool bXercesWasAlreadyInitializedBeforeUs = false;
 static OGRXercesStandardMemoryManager *gpExceptionMemoryManager = nullptr;
@@ -165,7 +165,7 @@ void *OGRXercesInstrumentedMemoryManager::allocate(XMLSize_t size)
 
     LimitationStruct *pLimitation = nullptr;
     {
-        CPLMutexHolderD(&hMutex);
+        CPLMutexHolderD(&hOGRXercesMutex);
 
         if (gpoMapThreadTimeout)
         {
@@ -258,7 +258,7 @@ void OGRXercesInstrumentedMemoryManager::deallocate(void *p)
 
         LimitationStruct *pLimitation = nullptr;
         {
-            CPLMutexHolderD(&hMutex);
+            CPLMutexHolderD(&hOGRXercesMutex);
 
             if (gpoMapThreadTimeout)
             {
@@ -271,7 +271,15 @@ void OGRXercesInstrumentedMemoryManager::deallocate(void *p)
         }
         if (pLimitation && pLimitation->maxMemAlloc > 0)
         {
-            pLimitation->totalAllocSize -= size;
+            // Memory allocations aren't necessarily paired within
+            // a OGRStartXercesLimitsForThisThread() /
+            // OGRStopXercesLimitsForThisThread() session. Probably due to
+            // some caching with Xerces. So handle this gracefully to avoid
+            // unsigned integer underflow.
+            if (pLimitation->totalAllocSize >= size)
+                pLimitation->totalAllocSize -= size;
+            else
+                pLimitation->totalAllocSize = 0;
         }
     }
 }
@@ -285,7 +293,7 @@ void OGRStartXercesLimitsForThisThread(size_t nMaxMemAlloc,
                                        double dfTimeoutSecond,
                                        const char *pszMsgTimeout)
 {
-    CPLMutexHolderD(&hMutex);
+    CPLMutexHolderD(&hOGRXercesMutex);
     if (gpoMapThreadTimeout == nullptr)
     {
         gpoMapThreadTimeout = new std::map<GIntBig, LimitationStruct>();
@@ -297,7 +305,7 @@ void OGRStartXercesLimitsForThisThread(size_t nMaxMemAlloc,
     limitation.timeOut = dfTimeoutSecond;
     if (pszMsgTimeout)
         limitation.osMsgTimeout = pszMsgTimeout;
-    (*gpoMapThreadTimeout)[CPLGetPID()] = limitation;
+    (*gpoMapThreadTimeout)[CPLGetPID()] = std::move(limitation);
 }
 
 /************************************************************************/
@@ -306,7 +314,7 @@ void OGRStartXercesLimitsForThisThread(size_t nMaxMemAlloc,
 
 void OGRStopXercesLimitsForThisThread()
 {
-    CPLMutexHolderD(&hMutex);
+    CPLMutexHolderD(&hOGRXercesMutex);
     (*gpoMapThreadTimeout).erase(CPLGetPID());
     if (gpoMapThreadTimeout->empty())
     {
@@ -334,6 +342,7 @@ class OGRXercesBinInputStream final : public BinInputStream
     XMLFilePos curPos() const override;
     XMLSize_t readBytes(XMLByte *const toFill,
                         const XMLSize_t maxToRead) override;
+
     const XMLCh *getContentType() const override
     {
         return &emptyString;
@@ -351,6 +360,7 @@ class OGRXercesNetAccessor final : public XMLNetAccessor
 
     BinInputStream *makeNew(const XMLURL &urlSource,
                             const XMLNetHTTPInfo *httpInfo) override;
+
     const XMLCh *getId() const override
     {
         return fgMyName;
@@ -386,7 +396,7 @@ OGRXercesNetAccessor::makeNew(const XMLURL &urlSource,
 
 bool OGRInitializeXerces()
 {
-    CPLMutexHolderD(&hMutex);
+    CPLMutexHolderD(&hOGRXercesMutex);
 
     if (nCounter > 0)
     {
@@ -443,7 +453,7 @@ bool OGRInitializeXerces()
 
 void OGRDeinitializeXerces()
 {
-    CPLMutexHolderD(&hMutex);
+    CPLMutexHolderD(&hOGRXercesMutex);
     if (nCounter == 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -473,9 +483,9 @@ void OGRDeinitializeXerces()
 
 void OGRCleanupXercesMutex()
 {
-    if (hMutex != nullptr)
-        CPLDestroyMutex(hMutex);
-    hMutex = nullptr;
+    if (hOGRXercesMutex != nullptr)
+        CPLDestroyMutex(hOGRXercesMutex);
+    hOGRXercesMutex = nullptr;
 }
 
 namespace OGR

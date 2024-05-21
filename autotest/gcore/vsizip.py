@@ -40,6 +40,7 @@ from osgeo import gdal
 # Test writing a ZIP with multiple files and directories
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_1():
 
     # We can keep the handle open during all the ZIP writing
@@ -62,9 +63,8 @@ def test_vsizip_1():
 
     # Test that we cannot read a zip file being written
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/subdir3/abcd", "rb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/subdir3/abcd", "rb")
     assert (
         gdal.GetLastErrorMsg() == "Cannot read a zip file being written"
     ), "expected error"
@@ -77,9 +77,8 @@ def test_vsizip_1():
 
     # Try creating a 3d file
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f4 = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/that_wont_work", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f4 = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/that_wont_work", "wb")
     assert (
         gdal.GetLastErrorMsg()
         == "Cannot create that_wont_work while another file is being written in the .zip"
@@ -93,7 +92,7 @@ def test_vsizip_1():
 
     # ERROR 6: Support only 1 file in archive file /vsimem/test.zip when no explicit in-archive filename is specified
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = gdal.VSIFOpenL("/vsizip/vsimem/test.zip", "rb")
     if f is not None:
         gdal.VSIFCloseL(f)
@@ -173,6 +172,7 @@ def test_vsizip_1():
 # Test writing 2 files in the ZIP by closing it completely between the 2
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_2():
 
     zip_name = "/vsimem/test2.zip"
@@ -191,9 +191,8 @@ def test_vsizip_2():
     gdal.VSIFWriteL("67890", 1, 5, fmain)
 
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    content = gdal.ReadDir("/vsizip/" + zip_name)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        content = gdal.ReadDir("/vsizip/" + zip_name)
     assert (
         gdal.GetLastErrorMsg() == "Cannot read a zip file being written"
     ), "expected error"
@@ -270,6 +269,9 @@ def test_vsizip_4():
         "uint16.tif",
     ], "bad content"
 
+    # Test with trailing slash too
+    assert gdal.ReadDirRecursive("/vsizip/data/testzip.zip/") == res
+
 
 ###############################################################################
 # Test ReadRecursive on deep zip
@@ -300,6 +302,7 @@ def test_vsizip_5():
 # Test writing 2 files with same name in a ZIP (#4785)
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_6():
 
     # Maintain ZIP file opened
@@ -310,9 +313,8 @@ def test_vsizip_6():
     gdal.VSIFCloseL(f)
     f = None
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
     if f is not None:
         gdal.VSIFCloseL(f)
         pytest.fail()
@@ -328,9 +330,8 @@ def test_vsizip_6():
     gdal.VSIFCloseL(f)
     f = None
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
     if f is not None:
         gdal.VSIFCloseL(f)
         pytest.fail()
@@ -414,9 +415,8 @@ def test_vsizip_9():
 
 def test_vsizip_10():
 
-    gdal.SetConfigOption("CPL_ZIP_ENCODING", "CP866")
-    content = gdal.ReadDir("/vsizip/data/cp866.zip")
-    gdal.SetConfigOption("CPL_ZIP_ENCODING", None)
+    with gdal.config_option("CPL_ZIP_ENCODING", "CP866"):
+        content = gdal.ReadDir("/vsizip/data/cp866.zip")
     ok = 0
     try:
         local_vars = {"content": content, "ok": ok}
@@ -553,7 +553,7 @@ def test_vsizip_14():
     except Exception:
         cp866_filename = "\u0430\u0431\u0432\u0433\u0434\u0435"
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = gdal.VSIFOpenL("/vsizip//vsimem/vsizip_14.zip/" + cp866_filename, "wb")
     if f is None:
         gdal.VSIFCloseL(fmain)
@@ -605,9 +605,10 @@ def test_vsizip_multi_thread():
 # Test multithreaded compression, with I/O error
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_multi_thread_error():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         with gdaltest.config_options(
             {"GDAL_NUM_THREADS": "ALL_CPUS", "CPL_VSIL_DEFLATE_CHUNK_SIZE": "16K"}
         ):
@@ -652,10 +653,8 @@ def test_vsizip_multi_thread_below_threshold():
 # data stream < 4 GB
 
 
+@pytest.mark.slow()
 def test_vsizip_create_zip64():
-
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
 
     niters = 1000
     s = "hello" * 1000 * 1000
@@ -686,10 +685,9 @@ def test_vsizip_create_zip64():
 # Test creating ZIP64 file: compressed data stream > 4 GB
 
 
+@pytest.mark.slow()
+@gdaltest.disable_exceptions()
 def test_vsizip_create_zip64_stream_larger_than_4G():
-
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
 
     zip_name = "tmp/vsizip_create_zip64_stream_larger_than_4G.zip"
 
@@ -724,3 +722,247 @@ def test_vsizip_byte_zip64_local_header_zeroed():
         "/vsizip/data/byte_zip64_local_header_zeroed.zip/byte.tif"
     ).size
     assert size == 736
+
+
+###############################################################################
+
+
+def test_vsizip_deflate64():
+
+    filename = "/vsizip/data/deflate64.zip/100k_lines.txt"
+    size = gdal.VSIStatL(filename).size
+    assert size == 2188890
+
+    f = gdal.VSIFOpenL(filename, "rb")
+    assert f
+    try:
+        data = gdal.VSIFReadL(1, size, f)
+        assert len(data) == size
+        assert len(gdal.VSIFReadL(1, 1, f)) == 0
+        assert gdal.VSIFSeekL(f, 0, 0) == 0
+        data2 = gdal.VSIFReadL(1, size, f)
+        len_data2 = len(data2)
+        assert len_data2 == size
+        assert data2 == data
+        for (pos, nread) in [
+            (10000, 1000),
+            (1, 1),
+            (size - 1, 1),
+            (size // 2, size // 2 + 10),
+        ]:
+            assert gdal.VSIFSeekL(f, pos, 0) == 0
+            data2 = gdal.VSIFReadL(1, nread, f)
+            len_data2 = len(data2)
+            assert len_data2 == min(nread, size - pos), (pos, nread)
+            assert data2 == data[pos : pos + len_data2], (pos, nread)
+    finally:
+        gdal.VSIFCloseL(f)
+
+
+###############################################################################
+
+
+@gdaltest.disable_exceptions()
+def test_vsizip_byte_copyfile_regular():
+
+    zipfilename = "/vsimem/test_vsizip_byte_copyfile_regular.zip"
+    dstfilename = f"/vsizip/{zipfilename}/test.tif"
+    try:
+        assert gdal.CopyFile("data/byte.tif", dstfilename) == 0
+        assert gdal.VSIStatL(dstfilename).size == gdal.VSIStatL("data/byte.tif").size
+
+        md = gdal.GetFileMetadata(dstfilename, "ZIP")
+        assert md is not None
+        assert md.keys() == {
+            "START_DATA_OFFSET",
+            "COMPRESSION_METHOD",
+            "COMPRESSED_SIZE",
+            "UNCOMPRESSED_SIZE",
+        }
+        assert md["START_DATA_OFFSET"] == "38"
+        assert md["COMPRESSION_METHOD"] == "8 (DEFLATE)"
+        assert md["UNCOMPRESSED_SIZE"] == str(gdal.VSIStatL(dstfilename).size)
+        assert int(md["COMPRESSED_SIZE"]) < int(md["UNCOMPRESSED_SIZE"])
+
+        # The file already exists:
+        with gdal.quiet_errors():
+            assert gdal.CopyFile("data/byte.tif", dstfilename) == -1
+    finally:
+        gdal.Unlink(zipfilename)
+
+
+###############################################################################
+def test_vsizip_byte_copyfile_srcfilename_is_none():
+
+    zipfilename = "/vsimem/test_vsizip_byte_copyfile_srcfilename_is_none.zip"
+    dstfilename = f"/vsizip/{zipfilename}/test.tif"
+    try:
+        srcfilename = "/vsimem/test.bin"
+        f = gdal.VSIFOpenL(srcfilename, "wb+")
+        gdal.VSIFTruncateL(f, 5 * 1000 * 1000)
+        assert gdal.CopyFile(None, dstfilename, f) == 0
+        gdal.VSIFCloseL(f)
+        gdal.Unlink(srcfilename)
+        assert gdal.VSIStatL(dstfilename).size == 5 * 1000 * 1000
+        md = gdal.GetFileMetadata(dstfilename, "ZIP")
+        assert md is not None
+        assert md.keys() == {
+            "START_DATA_OFFSET",
+            "COMPRESSION_METHOD",
+            "COMPRESSED_SIZE",
+            "UNCOMPRESSED_SIZE",
+            "SOZIP_FOUND",
+            "SOZIP_VERSION",
+            "SOZIP_OFFSET_SIZE",
+            "SOZIP_CHUNK_SIZE",
+            "SOZIP_START_DATA_OFFSET",
+            "SOZIP_VALID",
+        }
+        assert md["START_DATA_OFFSET"] == "38"
+        assert md["COMPRESSION_METHOD"] == "8 (DEFLATE)"
+        assert md["UNCOMPRESSED_SIZE"] == str(gdal.VSIStatL(dstfilename).size)
+        assert int(md["COMPRESSED_SIZE"]) < int(md["UNCOMPRESSED_SIZE"])
+        assert md["SOZIP_FOUND"] == "YES"
+        assert md["SOZIP_VALID"] == "YES"
+        assert md["SOZIP_VERSION"] == "1"
+        assert md["SOZIP_OFFSET_SIZE"] == "8"
+        assert md["SOZIP_CHUNK_SIZE"] == "32768"
+        assert int(md["SOZIP_START_DATA_OFFSET"]) > int(md["START_DATA_OFFSET"])
+
+    finally:
+        gdal.Unlink(zipfilename)
+
+
+###############################################################################
+def test_vsizip_byte_copyfile_progress_cbk():
+
+    zipfilename = "/vsimem/test_vsizip_byte_copyfile_progress_cbk.zip"
+    dstfilename = f"/vsizip/{zipfilename}/test.tif"
+    try:
+        # Test progress callback
+        srcfilename = "/vsimem/test.bin"
+        f = gdal.VSIFOpenL(srcfilename, "wb+")
+        gdal.VSIFTruncateL(f, 1000 * 1000)
+        gdal.VSIFCloseL(f)
+
+        def progress(pct, msg, user_data):
+            user_data.append(pct)
+            return 1
+
+        tab = []
+        assert (
+            gdal.CopyFile(
+                srcfilename, dstfilename, callback=progress, callback_data=tab
+            )
+            == 0
+        )
+        assert tab[-1] == 1.0
+        gdal.Unlink(srcfilename)
+        assert gdal.VSIStatL(dstfilename).size == 1000 * 1000
+    finally:
+        gdal.Unlink(zipfilename)
+
+
+###############################################################################
+def test_vsizip_byte_copyfile_progress_cbk_error():
+
+    zipfilename = "/vsimem/test_vsizip_byte_copyfile_progress_cbk_error.zip"
+    dstfilename = f"/vsizip/{zipfilename}/test.tif"
+    try:
+        srcfilename = "/vsimem/test.bin"
+        f = gdal.VSIFOpenL(srcfilename, "wb+")
+        gdal.VSIFTruncateL(f, 10 * 1000 * 1000)
+        gdal.VSIFCloseL(f)
+
+        def progress(pct, msg, user_data):
+            if pct > 0.5:
+                return 0
+            user_data.append(pct)
+            return 1
+
+        tab = []
+        assert (
+            gdal.CopyFile(
+                srcfilename, dstfilename, callback=progress, callback_data=tab
+            )
+            != 0
+        )
+        assert len(tab) == 0 or tab[-1] != 1.0
+        gdal.Unlink(srcfilename)
+        assert gdal.VSIStatL(dstfilename).size != 10 * 1000 * 1000
+    finally:
+        gdal.Unlink(zipfilename)
+
+
+###############################################################################
+def test_vsizip_byte_copyfile_file_already_open():
+
+    zipfilename = "/vsimem/test_vsizip_byte_copyfile_regular.zip"
+    dstfilename = f"/vsizip/{zipfilename}/test.tif"
+    dstfilename2 = f"/vsizip/{zipfilename}/test2.tif"
+    try:
+        fmain = gdal.VSIFOpenL(zipfilename, "wb")
+        assert gdal.CopyFile("data/byte.tif", dstfilename) == 0
+        assert gdal.VSIStatL(dstfilename).size == gdal.VSIStatL("data/byte.tif").size
+
+        assert gdal.CopyFile("data/uint16.tif", dstfilename2) == 0
+        assert gdal.VSIStatL(dstfilename2).size == gdal.VSIStatL("data/uint16.tif").size
+
+    finally:
+        gdal.VSIFCloseL(fmain)
+        gdal.Unlink(zipfilename)
+
+
+###############################################################################
+
+
+def test_vsizip_byte_sozip():
+
+    zipfilename = "/vsimem/test_vsizip_byte_sozip.zip"
+    dstfilename = f"/vsizip/{zipfilename}/test.tif"
+    try:
+        options = ["SOZIP_ENABLED=YES", "SOZIP_CHUNK_SIZE=128"]
+        assert gdal.CopyFile("data/byte.tif", dstfilename, options=options) == 0
+        assert gdal.VSIStatL(dstfilename).size == gdal.VSIStatL("data/byte.tif").size
+
+        md = gdal.GetFileMetadata(dstfilename, "ZIP")
+        assert md is not None
+        assert md["SOZIP_VALID"] == "YES"
+        assert md["SOZIP_CHUNK_SIZE"] == "128"
+        assert md["SOZIP_OFFSET_SIZE"] == "8"
+
+        ds = gdal.Open(dstfilename)
+        assert ds.GetRasterBand(1).Checksum() == 4672
+
+    finally:
+        gdal.Unlink(zipfilename)
+
+
+###############################################################################
+
+
+def test_vsizip_sozip_of_file_bigger_than_4GB():
+
+    md = gdal.GetFileMetadata(
+        "/vsizip/{data/zero_5GB_sozip_of_sozip.zip}/zero_5GB.bin.zip", "ZIP"
+    )
+    assert md["SOZIP_VALID"] == "YES"
+    assert md["SOZIP_CHUNK_SIZE"] == "32768"
+
+    md = gdal.GetFileMetadata(
+        "/vsizip/{/vsizip/{data/zero_5GB_sozip_of_sozip.zip}/zero_5GB.bin.zip}/zero_5GB.bin",
+        "ZIP",
+    )
+    assert md["SOZIP_VALID"] == "YES"
+    assert md["SOZIP_CHUNK_SIZE"] == "10485760"
+
+    f = gdal.VSIFOpenL(
+        "/vsizip/{/vsizip/{data/zero_5GB_sozip_of_sozip.zip}/zero_5GB.bin.zip}/zero_5GB.bin",
+        "rb",
+    )
+    assert f is not None
+    try:
+        assert gdal.VSIFSeekL(f, 5 * 1024 * 1024 * 1024 - 1, 0) == 0
+        assert gdal.VSIFReadL(1, 2, f) == b"\x00"
+    finally:
+        gdal.VSIFCloseL(f)

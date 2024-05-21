@@ -209,13 +209,13 @@ int OGRGPSBabelWriteDataSource::Create(const char *pszNameIn,
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRGPSBabelWriteDataSource::ICreateLayer(const char *pszLayerName,
-                                                   OGRSpatialReference *poSRS,
-                                                   OGRwkbGeometryType eType,
-                                                   char **papszOptions)
+OGRLayer *OGRGPSBabelWriteDataSource::ICreateLayer(
+    const char *pszLayerName, const OGRGeomFieldDefn *poGeomFieldDefn,
+    CSLConstList papszOptions)
 {
     if (poGPXDS)
-        return poGPXDS->CreateLayer(pszLayerName, poSRS, eType, papszOptions);
+        return poGPXDS->CreateLayer(pszLayerName, poGeomFieldDefn,
+                                    papszOptions);
     return nullptr;
 }
 

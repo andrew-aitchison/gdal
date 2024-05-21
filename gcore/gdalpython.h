@@ -77,6 +77,8 @@ extern void (*PyObject_Print)(PyObject *, FILE *, int);
 
 extern Py_ssize_t (*PyBytes_Size)(PyObject *);
 extern const char *(*PyBytes_AsString)(PyObject *);
+extern int *(*PyBytes_AsStringAndSize)(PyObject *, char **, Py_ssize_t *);
+extern PyObject *(*PyBytes_FromObject)(PyObject *);
 extern PyObject *(*PyBytes_FromStringAndSize)(const void *, size_t);
 
 extern PyObject *(*PyUnicode_FromString)(const char *);
@@ -105,6 +107,7 @@ typedef struct
     // cppcheck-suppress unusedStructMember
     char big_enough[256];
 } Py_buffer;
+
 extern int (*PyBuffer_FillInfo)(Py_buffer *view, PyObject *obj, void *buf,
                                 size_t len, int readonly, int infoflags);
 extern PyObject *(*PyMemoryView_FromBuffer)(Py_buffer *view);
@@ -112,6 +115,7 @@ extern PyObject *(*PyMemoryView_FromBuffer)(Py_buffer *view);
 typedef PyObject *(*PyCFunction)(PyObject *, PyObject *, PyObject *);
 
 typedef struct PyMethodDef PyMethodDef;
+
 struct PyMethodDef
 {
     const char *name;
@@ -119,6 +123,7 @@ struct PyMethodDef
     int flags;
     const char *help;
 };
+
 extern PyObject *(*PyModule_Create2)(struct PyModuleDef *, int);
 
 #define PYTHON_API_VERSION 1013
@@ -175,6 +180,7 @@ typedef struct PyModuleDef
 #define Py_file_input 257
 
 typedef int PyGILState_STATE;
+
 class GIL_Holder
 {
     bool m_bExclusiveLock;

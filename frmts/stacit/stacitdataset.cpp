@@ -80,7 +80,7 @@ class STACITDataset final : public VRTDataset
     bool SetupDataset(GDALOpenInfo *poOpenInfo,
                       const std::string &osSTACITFilename,
                       std::map<std::string, Collection> &oMapCollection);
-    bool
+    void
     SetSubdatasets(const std::string &osFilename,
                    const std::map<std::string, Collection> &oMapCollection);
 
@@ -148,7 +148,7 @@ static std::string SanitizeCRSValue(const std::string &v)
     bool lastWasAlphaNum = true;
     for (char ch : v)
     {
-        if (!isalnum(static_cast<int>(ch)))
+        if (!isalnum(static_cast<unsigned char>(ch)))
         {
             if (lastWasAlphaNum)
                 ret += '_';
@@ -218,15 +218,8 @@ static void ParseAsset(const CPLJSONObject &jAsset,
     };
 
     auto oProjEPSG = GetAssetOrFeatureProperty("proj:epsg");
-    if (!oProjEPSG.IsValid())
-    {
-        CPLDebug("STACIT",
-                 "Skipping asset %s that lacks the 'proj:epsg' member",
-                 osAssetName.c_str());
-        return;
-    }
     std::string osProjUserString;
-    if (oProjEPSG.GetType() != CPLJSONObject::Type::Null)
+    if (oProjEPSG.IsValid() && oProjEPSG.GetType() != CPLJSONObject::Type::Null)
     {
         osProjUserString = "EPSG:" + oProjEPSG.ToString();
     }
@@ -295,6 +288,10 @@ static void ParseAsset(const CPLJSONObject &jAsset,
         for (const auto &oItem : oProjTransform)
             transform.push_back(oItem.ToDouble());
         CPLAssert(transform.size() == 6 || transform.size() == 9);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
         if (transform[0] <= 0 || transform[1] != 0 || transform[3] != 0 ||
             transform[4] >= 0 ||
             (transform.size() == 9 &&
@@ -307,6 +304,9 @@ static void ParseAsset(const CPLJSONObject &jAsset,
                 osAssetName.c_str());
             return;
         }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     }
 
     if (bIsBBOXValid && bIsShapeValid)
@@ -370,7 +370,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
     {
         Collection collection;
         collection.osName = osCollection;
-        oMapCollection[osCollection] = collection;
+        oMapCollection[osCollection] = std::move(collection);
     }
     auto &collection = oMapCollection[osCollection];
 
@@ -381,7 +381,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
         asset.osName = osAssetName;
         asset.eoBands = jAsset.GetArray("eo:bands");
 
-        collection.assets[osAssetName] = asset;
+        collection.assets[osAssetName] = std::move(asset);
     }
     auto &asset = collection.assets[osAssetName];
 
@@ -390,7 +390,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
     {
         AssetSetByProjection assetByProj;
         assetByProj.osProjUserString = osProjUserString;
-        asset.assets[osProjUserString] = assetByProj;
+        asset.assets[osProjUserString] = std::move(assetByProj);
     }
     auto &assets = asset.assets[osProjUserString];
 
@@ -519,6 +519,16 @@ bool STACITDataset::SetupDataset(
                 osRet += osFilename;
             }
         }
+        else if (STARTS_WITH(osFilename.c_str(), "file://"))
+        {
+            osRet = osFilename.substr(strlen("file://"));
+        }
+        else if (STARTS_WITH(osFilename.c_str(), "s3://"))
+        {
+            osRet = "/vsis3/";
+            osRet += osFilename.substr(strlen("s3://"));
+        }
+
         else
         {
             osRet = osFilename;
@@ -635,7 +645,7 @@ bool STACITDataset::SetupDataset(
 /*                         SetSubdatasets()                             */
 /************************************************************************/
 
-bool STACITDataset::SetSubdatasets(
+void STACITDataset::SetSubdatasets(
     const std::string &osFilename,
     const std::map<std::string, Collection> &oMapCollection)
 {
@@ -685,7 +695,6 @@ bool STACITDataset::SetSubdatasets(
         }
     }
     GDALDataset::SetMetadata(aosSubdatasets.List(), "SUBDATASETS");
-    return true;
 }
 
 /************************************************************************/
@@ -879,7 +888,8 @@ bool STACITDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         // If there's more than one asset type or more than one SRS, expose
         // subdatasets.
-        return SetSubdatasets(osFilename, oMapCollection);
+        SetSubdatasets(osFilename, oMapCollection);
+        return true;
     }
     else
     {
@@ -895,7 +905,7 @@ GDALDataset *STACITDataset::OpenStatic(GDALOpenInfo *poOpenInfo)
 {
     if (!Identify(poOpenInfo))
         return nullptr;
-    auto poDS = cpl::make_unique<STACITDataset>();
+    auto poDS = std::make_unique<STACITDataset>();
     if (!poDS->Open(poOpenInfo))
         return nullptr;
     return poDS.release();

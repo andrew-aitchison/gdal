@@ -48,6 +48,20 @@
 #include <utility>
 #include <memory>
 
+#include <mutex>
+// c++17 or VS2017
+#if defined(HAVE_SHARED_MUTEX) || _MSC_VER >= 1910
+#include <shared_mutex>
+#define CPL_SHARED_MUTEX_TYPE std::shared_mutex
+#define CPL_SHARED_LOCK std::shared_lock<std::shared_mutex>
+#define CPL_EXCLUSIVE_LOCK std::unique_lock<std::shared_mutex>
+#else
+// Poor-man implementation of std::shared_mutex with an exclusive mutex
+#define CPL_SHARED_MUTEX_TYPE std::mutex
+#define CPL_SHARED_LOCK std::lock_guard<std::mutex>
+#define CPL_EXCLUSIVE_LOCK std::lock_guard<std::mutex>
+#endif
+
 #include "cpl_atomic_ops.h"
 #include "cpl_conv.h"
 #include "cpl_error.h"
@@ -65,10 +79,7 @@
 ** want to create and read different files at the same time and so might
 ** collide access oFileList without the mutex.
 **
-** VSIMemFile: In theory we could allow different threads to update the
-** the same memory file, but for simplicity we restrict to single writer,
-** multiple reader as an expectation on the application code (not enforced
-** here), which means we don't need to do any protection of this class.
+** VSIMemFile: A mutex protects accesses to the file
 **
 ** VSIMemHandle: This is essentially a "current location" representing
 ** on accessor to a file, and is inherently intended only to be used in
@@ -77,10 +88,8 @@
 ** In General:
 **
 ** Multiple threads accessing the memory filesystem are ok as long as
-**  1) A given VSIMemHandle (i.e. FILE * at app level) isn't used by multiple
-**     threads at once.
-**  2) A given memory file isn't accessed by more than one thread unless
-**     all threads are just reading.
+** a given VSIMemHandle (i.e. FILE * at app level) isn't used by multiple
+** threads at once.
 */
 
 /************************************************************************/
@@ -105,6 +114,7 @@ class VSIMemFile
     vsi_l_offset nMaxLength = GUINTBIG_MAX;
 
     time_t mTime = 0;
+    CPL_SHARED_MUTEX_TYPE m_oMutex{};
 
     VSIMemFile();
     virtual ~VSIMemFile();
@@ -144,6 +154,7 @@ class VSIMemHandle final : public VSIVirtualHandle
     {
         return true;
     }
+
     size_t PRead(void * /*pBuffer*/, size_t /* nSize */,
                  vsi_l_offset /*nOffset*/) const override;
 };
@@ -156,13 +167,18 @@ class VSIMemHandle final : public VSIVirtualHandle
 
 class VSIMemFilesystemHandler final : public VSIFilesystemHandler
 {
+    const std::string m_osPrefix;
     CPL_DISALLOW_COPY_ASSIGN(VSIMemFilesystemHandler)
 
   public:
     std::map<CPLString, std::shared_ptr<VSIMemFile>> oFileList{};
     CPLMutex *hMutex = nullptr;
 
-    VSIMemFilesystemHandler() = default;
+    explicit VSIMemFilesystemHandler(const char *pszPrefix)
+        : m_osPrefix(pszPrefix)
+    {
+    }
+
     ~VSIMemFilesystemHandler() override;
 
     // TODO(schwehr): Fix VSIFileFromMemBuffer so that using is not needed.
@@ -183,6 +199,11 @@ class VSIMemFilesystemHandler final : public VSIFilesystemHandler
     static std::string NormalizePath(const std::string &in);
 
     int Unlink_unlocked(const char *pszFilename);
+
+    VSIFilesystemHandler *Duplicate(const char *pszPrefix) override
+    {
+        return new VSIMemFilesystemHandler(pszPrefix);
+    }
 };
 
 /************************************************************************/
@@ -214,6 +235,7 @@ VSIMemFile::~VSIMemFile()
 /*                             SetLength()                              */
 /************************************************************************/
 
+// Must be called under exclusive lock
 bool VSIMemFile::SetLength(vsi_l_offset nNewLength)
 
 {
@@ -318,6 +340,8 @@ int VSIMemHandle::Close()
 int VSIMemHandle::Seek(vsi_l_offset nOffset, int nWhence)
 
 {
+    CPL_SHARED_LOCK oLock(poFile->m_oMutex);
+
     bExtendFileAtNextWrite = false;
     if (nWhence == SEEK_CUR)
     {
@@ -371,6 +395,8 @@ vsi_l_offset VSIMemHandle::Tell()
 size_t VSIMemHandle::Read(void *pBuffer, size_t nSize, size_t nCount)
 
 {
+    CPL_SHARED_LOCK oLock(poFile->m_oMutex);
+
     size_t nBytesToRead = nSize * nCount;
     if (nBytesToRead == 0)
         return 0;
@@ -408,6 +434,8 @@ size_t VSIMemHandle::Read(void *pBuffer, size_t nSize, size_t nCount)
 size_t VSIMemHandle::PRead(void *pBuffer, size_t nSize,
                            vsi_l_offset nOffset) const
 {
+    CPL_SHARED_LOCK oLock(poFile->m_oMutex);
+
     if (nOffset < poFile->nLength)
     {
         const size_t nToCopy = static_cast<size_t>(
@@ -427,6 +455,8 @@ size_t VSIMemHandle::PRead(void *pBuffer, size_t nSize,
 size_t VSIMemHandle::Write(const void *pBuffer, size_t nSize, size_t nCount)
 
 {
+    CPL_EXCLUSIVE_LOCK oLock(poFile->m_oMutex);
+
     if (!bUpdate)
     {
         errno = EACCES;
@@ -457,6 +487,10 @@ size_t VSIMemHandle::Write(const void *pBuffer, size_t nSize, size_t nCount)
 
     if (nBytesToWrite)
         memcpy(poFile->pabyData + m_nOffset, pBuffer, nBytesToWrite);
+    // Coverity seems to be confused by the fact that we access m_nOffset
+    // under a shared lock in most places, except here under an exclusive lock
+    // which is fine
+    // coverity[missing_lock]
     m_nOffset += nBytesToWrite;
 
     time(&poFile->mTime);
@@ -471,6 +505,7 @@ size_t VSIMemHandle::Write(const void *pBuffer, size_t nSize, size_t nCount)
 int VSIMemHandle::Eof()
 
 {
+    CPL_SHARED_LOCK oLock(poFile->m_oMutex);
     return bEOF;
 }
 
@@ -487,6 +522,8 @@ int VSIMemHandle::Truncate(vsi_l_offset nNewSize)
     }
 
     bExtendFileAtNextWrite = false;
+
+    CPL_EXCLUSIVE_LOCK oLock(poFile->m_oMutex);
     if (poFile->SetLength(nNewSize))
         return 0;
 
@@ -541,7 +578,9 @@ VSIVirtualHandle *VSIMemFilesystemHandler::Open(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     std::shared_ptr<VSIMemFile> poFile = nullptr;
     if (oFileList.find(osFilename) != oFileList.end())
+    {
         poFile = oFileList[osFilename];
+    }
 
     // If no file and opening in read, error out.
     if (strstr(pszAccess, "w") == nullptr &&
@@ -558,6 +597,19 @@ VSIVirtualHandle *VSIMemFilesystemHandler::Open(const char *pszFilename,
     // Create.
     if (poFile == nullptr)
     {
+        const char *pszFileDir = CPLGetPath(osFilename.c_str());
+        if (VSIMkdirRecursive(pszFileDir, 0755) == -1)
+        {
+            if (bSetError)
+            {
+                VSIError(VSIE_FileError,
+                         "Could not create directory %s for writing",
+                         pszFileDir);
+            }
+            errno = ENOENT;
+            return nullptr;
+        }
+
         poFile = std::make_shared<VSIMemFile>();
         poFile->osFilename = osFilename;
         oFileList[poFile->osFilename] = poFile;
@@ -570,6 +622,7 @@ VSIVirtualHandle *VSIMemFilesystemHandler::Open(const char *pszFilename,
     // Overwrite
     else if (strstr(pszAccess, "w"))
     {
+        CPL_EXCLUSIVE_LOCK oLock(poFile->m_oMutex);
         poFile->SetLength(0);
         poFile->nMaxLength = nMaxLength;
     }
@@ -596,7 +649,10 @@ VSIVirtualHandle *VSIMemFilesystemHandler::Open(const char *pszFilename,
              pszFilename, static_cast<int>(poFile.use_count()));
 #endif
     if (strstr(pszAccess, "a"))
+    {
+        CPL_SHARED_LOCK oLock(poFile->m_oMutex);
         poHandle->m_nOffset = poFile->nLength;
+    }
 
     return poHandle;
 }
@@ -615,23 +671,25 @@ int VSIMemFilesystemHandler::Stat(const char *pszFilename,
 
     memset(pStatBuf, 0, sizeof(VSIStatBufL));
 
-    if (osFilename == "/vsimem" || osFilename == "/vsimem/")
+    if (osFilename + '/' == m_osPrefix || osFilename == m_osPrefix)
     {
         pStatBuf->st_size = 0;
         pStatBuf->st_mode = S_IFDIR;
         return 0;
     }
 
-    if (oFileList.find(osFilename) == oFileList.end())
+    auto oIter = oFileList.find(osFilename);
+    if (oIter == oFileList.end())
     {
         errno = ENOENT;
         return -1;
     }
 
-    std::shared_ptr<VSIMemFile> poFile = oFileList[osFilename];
+    std::shared_ptr<VSIMemFile> poFile = oIter->second;
 
     memset(pStatBuf, 0, sizeof(VSIStatBufL));
 
+    CPL_SHARED_LOCK oLock(poFile->m_oMutex);
     if (poFile->bIsDirectory)
     {
         pStatBuf->st_size = 0;
@@ -667,18 +725,19 @@ int VSIMemFilesystemHandler::Unlink_unlocked(const char *pszFilename)
 {
     const CPLString osFilename = NormalizePath(pszFilename);
 
-    if (oFileList.find(osFilename) == oFileList.end())
+    auto oIter = oFileList.find(osFilename);
+    if (oIter == oFileList.end())
     {
         errno = ENOENT;
         return -1;
     }
 
 #ifdef DEBUG_VERBOSE
-    std::shared_ptr<VSIMemFile> poFile = oFileList[osFilename];
+    std::shared_ptr<VSIMemFile> poFile = oIter->second;
     CPLDebug("VSIMEM", "Unlink %s: ref_count=%d (before)", pszFilename,
              static_cast<int>(poFile.use_count()));
 #endif
-    oFileList.erase(oFileList.find(osFilename));
+    oFileList.erase(oIter);
 
     return 0;
 }
@@ -708,6 +767,7 @@ int VSIMemFilesystemHandler::Mkdir(const char *pszPathname, long /* nMode */)
     CPLDebug("VSIMEM", "Mkdir on %s: ref_count=%d", pszPathname,
              static_cast<int>(poFile.use_count()));
 #endif
+    CPL_IGNORE_RET_VAL(poFile);
     return 0;
 }
 
@@ -786,7 +846,7 @@ int VSIMemFilesystemHandler::Rename(const char *pszOldPath,
 
     const CPLString osOldPath = NormalizePath(pszOldPath);
     const CPLString osNewPath = NormalizePath(pszNewPath);
-    if (!STARTS_WITH(pszNewPath, "/vsimem/"))
+    if (!STARTS_WITH(pszNewPath, m_osPrefix.c_str()))
         return -1;
 
     if (osOldPath.compare(osNewPath) == 0)
@@ -831,7 +891,15 @@ std::string VSIMemFilesystemHandler::NormalizePath(const std::string &in)
     s.replaceAll("//", '/');
     if (!s.empty() && s.back() == '/')
         s.resize(s.size() - 1);
+#if __GNUC__ >= 13
+    // gcc 13 complains about below explicit std::move()
+    return s;
+#else
+    // Android NDK (and probably other compilers) warn about
+    // "warning: local variable 's' will be copied despite being returned by name [-Wreturn-std-move]"
+    // if not specifying std::move()
     return std::move(s);
+#endif
 }
 
 /************************************************************************/
@@ -901,7 +969,8 @@ GIntBig VSIMemFilesystemHandler::GetDiskFreeSpace(const char * /*pszDirname*/)
 
 void VSIInstallMemFileHandler()
 {
-    VSIFileManager::InstallHandler("/vsimem/", new VSIMemFilesystemHandler);
+    VSIFileManager::InstallHandler("/vsimem/",
+                                   new VSIMemFilesystemHandler("/vsimem/"));
 }
 
 /************************************************************************/
@@ -945,6 +1014,26 @@ VSILFILE *VSIFileFromMemBuffer(const char *pszFilename, GByte *pabyData,
     const CPLString osFilename =
         pszFilename ? VSIMemFilesystemHandler::NormalizePath(pszFilename)
                     : std::string();
+    if (osFilename == "/vsimem/")
+    {
+        CPLDebug("VSIMEM", "VSIFileFromMemBuffer(): illegal filename: %s",
+                 pszFilename);
+        return nullptr;
+    }
+
+    // Try to create the parent directory, if needed, before taking
+    // ownership of pabyData.
+    if (!osFilename.empty())
+    {
+        const char *pszFileDir = CPLGetPath(osFilename.c_str());
+        if (VSIMkdirRecursive(pszFileDir, 0755) == -1)
+        {
+            VSIError(VSIE_FileError,
+                     "Could not create directory %s for writing", pszFileDir);
+            errno = ENOENT;
+            return nullptr;
+        }
+    }
 
     std::shared_ptr<VSIMemFile> poFile = std::make_shared<VSIMemFile>();
 
@@ -971,9 +1060,9 @@ VSILFILE *VSIFileFromMemBuffer(const char *pszFilename, GByte *pabyData,
     /* -------------------------------------------------------------------- */
     VSIMemHandle *poHandle = new VSIMemHandle;
 
-    poHandle->poFile = poFile;
+    poHandle->poFile = std::move(poFile);
     poHandle->bUpdate = true;
-    return reinterpret_cast<VSILFILE *>(poHandle);
+    return poHandle;
 }
 
 /************************************************************************/

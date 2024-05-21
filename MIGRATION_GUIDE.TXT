@@ -1,3 +1,66 @@
+MIGRATION GUIDE FROM GDAL 3.8 to GDAL 3.9
+-----------------------------------------
+
+- Out-of-tree vector drivers:
+  * OGRLayer::CreateField() now takes a const OGRFieldDefn* instead of a
+    OGRFieldDefn*.
+  * OGRLayer::CreateGeomField() now takes a const OGRGeomFieldDefn* instead of
+    a OGRGeomFieldDefn*.
+  * OGRLayer::ICreateLayer() has a new prototype, due to RFC 99 "Geometry
+    coordinate precision" changes.
+
+    The fastest migration path is from:
+
+    OGRLayer *
+         MyDataset::ICreateLayer(const char* pszLayerName,
+                                 const OGRSpatialReference *poSpatialRef,
+                                 OGRwkbGeometryType eGType, char **papszOptions)
+    {
+        ...
+    }
+
+    to
+
+    OGRLayer *
+         MyDataset::ICreateLayer(const char *pszLayerName,
+                                 const OGRGeomFieldDefn *poGeomFieldDefn,
+                                 CSLConstList papszOptions)
+    {
+        const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+        const auto poSpatialRef =
+            poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+        ...
+    }
+
+- Sealed feature and field definition (RFC 97). A number of drivers now "seal"
+  their layer definition, which might cause issue to user code currently
+  mis-using setters of OGRFeatureDefn, OGRFieldDefn or OGRGeomFieldDefn on such
+  instances.
+  The drivers that have been updated to seal their layer definition are:
+  GeoPackage, PostgreSQL, Shapefile, OpenFileGDB, MITAB, Memory, GeoJSON, JSONFG,
+  TopoJSON, ESRIJSON, ODS, XLSX.
+
+- OGRLayer::SetIgnoredFields() now accepts a ``CSLConstList papszIgnoredFields``
+  instead of a ``const char** papszIgnoredFields``
+
+MIGRATION GUIDE FROM GDAL 3.7 to GDAL 3.8
+-----------------------------------------
+
+- Out-of-tree vector drivers:
+  * GDALDataset::ICreateLayer() now takes a const OGRSpatialReference* instead
+    of a OGRSpatialReference*. Drivers should clone the passed SRS if they need
+    to keep it.
+
+- The /vsimem virtual file system is modified to automatically create parent
+  directories when a file is created. (e.g., creating /vsimem/parent/child.txt
+  would cause the directory /vsimem/parent to be created.) If the parent
+  directory cannot be created because the file /vsimem/parent exists, file
+  creation will now fail.
+
+- In SWIG bindings, the function FileFromMemBuffer now returns an error code
+  if the file could not be created.
+
+
 MIGRATION GUIDE FROM GDAL 3.6 to GDAL 3.7
 -----------------------------------------
 
@@ -17,6 +80,29 @@ MIGRATION GUIDE FROM GDAL 3.6 to GDAL 3.7
   FILE* depending whether DEBUG is defined, especially with the C++ API, for
   people building their plugins with DEBUG and running them against a non-DEBUG
   GDAL build, or the reverse.
+
+- GDALFlushCache() and GDALDataset::FlushCache() are modified to return a CPLErr
+  error code instead of void. Affects out-of-tree drivers.
+
+- A Close() virtual method is added to GDALDataset per RFC 91. Out-of-tree
+  drivers with write support are encouraged to implement it for error
+  propagation.
+
+- Pansharpening now requires that panchromatic and multispectral bands have
+  valid geotransform (in early versions, it was assumed in the case of missing
+  geotransform that they covered the same geospatial extent).
+  The undocumented VRT pansharpened MSShiftX and MSShiftY options (and the
+  corresponding C++ GDALPansharpenOptions::dfMSShiftX and dfMSShiftY members)
+  have been removed, due to using the inverted convention as one would expect,
+  and being sub-par solution compared to using geotransform to correlate pixels
+  of panchromatic and multispectral bands.
+
+- OGRCoordinateTransformation::GetSourceCS() and GetTargetCS() now returns
+  a const OGRSpatialReference*
+
+- OGRGeometry::getSpatialReference() now returns a const OGRSpatialReference*
+
+- OGRGeomFieldDefn::GetSpatialRef() now returns a const OGRSpatialReference*
 
 MIGRATION GUIDE FROM GDAL 3.5 to GDAL 3.6
 -----------------------------------------

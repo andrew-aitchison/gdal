@@ -292,10 +292,10 @@ int OGRGeoconceptDataSource::Create(const char *pszName, char **papszOptions)
 /*   FEATURETYPE : TYPE.SUBTYPE                                         */
 /************************************************************************/
 
-OGRLayer *OGRGeoconceptDataSource::ICreateLayer(
-    const char *pszLayerName, OGRSpatialReference *poSRS /* = NULL */,
-    OGRwkbGeometryType eType /* = wkbUnknown */,
-    char **papszOptions /* = NULL */)
+OGRLayer *
+OGRGeoconceptDataSource::ICreateLayer(const char *pszLayerName,
+                                      const OGRGeomFieldDefn *poGeomFieldDefn,
+                                      CSLConstList papszOptions)
 
 {
     if (_hGXT == nullptr)
@@ -305,6 +305,8 @@ OGRLayer *OGRGeoconceptDataSource::ICreateLayer(
         return nullptr;
     }
 
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
     if (poSRS == nullptr && !_bUpdate)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -349,6 +351,7 @@ OGRLayer *OGRGeoconceptDataSource::ICreateLayer(
     GCTypeKind gcioFeaType;
     GCDim gcioDim = v2D_GCIO;
 
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
     if (eType == wkbUnknown)
         gcioFeaType = vUnknownItemType_GCIO;
     else if (eType == wkbPoint)
@@ -517,7 +520,11 @@ OGRLayer *OGRGeoconceptDataSource::ICreateLayer(
     /*      Assign the coordinate system (if provided)                      */
     /* -------------------------------------------------------------------- */
     if (poSRS != nullptr)
-        poFile->SetSpatialRef(poSRS);
+    {
+        auto poSRSClone = poSRS->Clone();
+        poFile->SetSpatialRef(poSRSClone);
+        poSRSClone->Release();
+    }
 
     return poFile;
 }

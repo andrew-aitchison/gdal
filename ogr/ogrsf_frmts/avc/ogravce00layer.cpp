@@ -35,8 +35,6 @@
 
 #include <cstdlib>
 
-constexpr int SERIAL_ACCESS_FID = INT_MIN;
-
 /************************************************************************/
 /*                           OGRAVCE00Layer()                           */
 /************************************************************************/
@@ -341,9 +339,8 @@ bool OGRAVCE00Layer::FormPolygonGeometry(OGRFeature *poFeature, AVCPal *psPAL)
     }
 
     OGRErr eErr;
-    OGRGeometry *poPolygon =
-        reinterpret_cast<OGRGeometry *>(OGRBuildPolygonFromEdges(
-            reinterpret_cast<OGRGeometryH>(&oArcs), TRUE, FALSE, 0.0, &eErr));
+    OGRGeometry *poPolygon = OGRGeometry::FromHandle(OGRBuildPolygonFromEdges(
+        OGRGeometry::ToHandle(&oArcs), TRUE, FALSE, 0.0, &eErr));
     if (poPolygon != nullptr)
     {
         poPolygon->assignSpatialReference(GetSpatialRef());

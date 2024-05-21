@@ -5,7 +5,7 @@
 # Public domain
 # or licensed under MIT (LICENSE.TXT) Copyright 2019 Even Rouault <even.rouault@spatialys.com>
 
-ARG ALPINE_VERSION=3.17
+ARG ALPINE_VERSION=3.19
 FROM alpine:${ALPINE_VERSION} as builder
 
 # Derived from osgeo/proj by Howard Butler <howard@hobu.co>
@@ -18,7 +18,7 @@ RUN apk add --no-cache wget curl unzip make libtool autoconf automake pkgconfig 
 RUN apk add --no-cache \
     linux-headers \
     curl-dev tiff-dev \
-    zlib-dev zstd-dev lz4-dev libdeflate-dev \
+    zlib-dev zstd-dev lz4-dev libdeflate-dev libarchive-dev \
     libjpeg-turbo-dev libpng-dev libwebp-dev expat-dev postgresql-dev openjpeg-dev
 
 # Build openjpeg
@@ -69,11 +69,12 @@ RUN mkdir proj \
         export PROJ_DB_CACHE_DIR="$HOME/.ccache"; \
         ccache -M 100M; \
     fi \
+    # IPO disabled since it crashes with gcc 13.2.1
     && cmake . \
         -DBUILD_SHARED_LIBS=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DENABLE_IPO=ON \
+        -DENABLE_IPO=OFF \
         -DBUILD_TESTING=OFF \
     && make -j$(nproc) \
     && make install \
@@ -127,6 +128,7 @@ RUN if test "${GDAL_VERSION}" = "master"; then \
         -DCMAKE_BUILD_TYPE=Release \
         -DGDAL_USE_TIFF_INTERNAL=ON \
         -DGDAL_USE_GEOTIFF_INTERNAL=ON \
+        -DBUILD_TESTING=OFF \
     && make -j$(nproc) \
     && make install DESTDIR="/build" \
     && cd .. \
@@ -147,19 +149,6 @@ RUN if test "${GDAL_VERSION}" = "master"; then \
     && mv /build/usr/bin                    /build_gdal_version_changing/usr \
     && for i in /build_gdal_version_changing/usr/lib/*; do strip -s $i 2>/dev/null || /bin/true; done \
     && for i in /build_gdal_version_changing/usr/bin/*; do strip -s $i 2>/dev/null || /bin/true; done \
-    # Remove resource files of uncompiled drivers
-    && (for i in \
-            # BAG driver
-            /build/usr/share/gdal/bag*.xml \
-            # unused
-            /build/usr/share/gdal/*.svg \
-            # unused
-            /build/usr/share/gdal/*.png \
-            # GMLAS driver
-            /build/usr/share/gdal/gmlas* \
-            # netCDF driver
-            /build/usr/share/gdal/netcdf_config.xsd \
-       ;do rm $i; done)\
     && apk del cmake
 
 # Build final image
@@ -171,7 +160,7 @@ RUN apk add --no-cache \
         libstdc++ \
         sqlite-libs \
         libcurl tiff \
-        zlib zstd-libs lz4-libs libdeflate \
+        zlib zstd-libs lz4-libs libdeflate libarchive \
         libjpeg-turbo libpng openjpeg libwebp expat libpq \
     # libturbojpeg.so is not used by GDAL. Only libjpeg.so*
     && rm -f /usr/lib/libturbojpeg.so* \

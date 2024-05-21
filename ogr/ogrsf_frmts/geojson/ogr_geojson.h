@@ -83,14 +83,21 @@ class OGRGeoJSONLayer final : public OGRMemLayer
     OGRErr ISetFeature(OGRFeature *poFeature) override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
     virtual OGRErr DeleteFeature(GIntBig nFID) override;
-    virtual OGRErr CreateField(OGRFieldDefn *poField,
+    virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
     virtual OGRErr DeleteField(int iField) override;
     virtual OGRErr ReorderFields(int *panMap) override;
     virtual OGRErr AlterFieldDefn(int iField, OGRFieldDefn *poNewFieldDefn,
                                   int nFlags) override;
-    virtual OGRErr CreateGeomField(OGRGeomFieldDefn *poGeomField,
+    virtual OGRErr CreateGeomField(const OGRGeomFieldDefn *poGeomField,
                                    int bApproxOK = TRUE) override;
+    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
+    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
+                             int bForce = TRUE) override;
+    virtual OGRErr GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
+                               int bForce = TRUE) override;
+
+    GDALDataset *GetDataset() override;
 
     //
     // OGRGeoJSONLayer Interface
@@ -98,17 +105,25 @@ class OGRGeoJSONLayer final : public OGRMemLayer
     void SetFIDColumn(const char *pszFIDColumn);
     void AddFeature(OGRFeature *poFeature);
     void DetectGeometryType();
+
     void IncFeatureCount()
     {
         nTotalFeatureCount_++;
     }
+
     void UnsetReader()
     {
         poReader_ = nullptr;
     }
+
     void InvalidateFeatureCount()
     {
         nTotalFeatureCount_ = -1;
+    }
+
+    void SetWriteOptions(const OGRGeoJSONWriteOptions &options)
+    {
+        oWriteOptions_ = options;
     }
 
   private:
@@ -116,14 +131,17 @@ class OGRGeoJSONLayer final : public OGRMemLayer
     OGRGeoJSONReader *poReader_;
     bool bHasAppendedFeatures_;
     CPLString sFIDColumn_;
-    bool bUpdated_;
     bool bOriginalIdModified_;
     GIntBig nTotalFeatureCount_;
     GIntBig nFeatureReadSinceReset_ = 0;
-    GIntBig nNextFID_;
+
+    //! Write options used by ICreateFeature() in append scenarios
+    OGRGeoJSONWriteOptions oWriteOptions_;
 
     bool IngestAll();
     void TerminateAppendSession();
+
+    CPL_DISALLOW_COPY_ASSIGN(OGRGeoJSONLayer)
 };
 
 /************************************************************************/
@@ -134,7 +152,7 @@ class OGRGeoJSONWriteLayer final : public OGRLayer
 {
   public:
     OGRGeoJSONWriteLayer(const char *pszName, OGRwkbGeometryType eGType,
-                         char **papszOptions, bool bWriteFC_BBOXIn,
+                         CSLConstList papszOptions, bool bWriteFC_BBOXIn,
                          OGRCoordinateTransformation *poCT,
                          OGRGeoJSONDataSource *poDS);
     ~OGRGeoJSONWriteLayer();
@@ -146,6 +164,7 @@ class OGRGeoJSONWriteLayer final : public OGRLayer
     {
         return poFeatureDefn_;
     }
+
     OGRSpatialReference *GetSpatialRef() override
     {
         return nullptr;
@@ -154,14 +173,17 @@ class OGRGeoJSONWriteLayer final : public OGRLayer
     void ResetReading() override
     {
     }
+
     OGRFeature *GetNextFeature() override
     {
         return nullptr;
     }
+
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK) override;
+    OGRErr CreateField(const OGRFieldDefn *poField, int bApproxOK) override;
     int TestCapability(const char *pszCap) override;
     OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
+
     OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent, int bForce) override
     {
         return iGeomField == 0
@@ -169,24 +191,36 @@ class OGRGeoJSONWriteLayer final : public OGRLayer
                    : OGRERR_FAILURE;
     }
 
+    OGRErr SyncToDisk() override;
+
+    GDALDataset *GetDataset() override;
+
   private:
     OGRGeoJSONDataSource *poDS_;
     OGRFeatureDefn *poFeatureDefn_;
     int nOutCounter_;
+    /** Offset at which the '] }' terminating sequence has already been
+     * written by SyncToDisk(). 0 if it has not been written.
+     */
+    vsi_l_offset m_nPositionBeforeFCClosed = 0;
 
     bool bWriteBBOX;
     bool bBBOX3D;
     bool bWriteFC_BBOX;
     OGREnvelope3D sEnvelopeLayer;
 
-    int nCoordPrecision_;
     int nSignificantFigures_;
 
     bool bRFC7946_;
     bool bWrapDateLine_ = false;
+    std::string osForeignMembers_{};
     OGRCoordinateTransformation *poCT_;
     OGRGeometryFactory::TransformWithOptionsCache oTransformCache_;
     OGRGeoJSONWriteOptions oWriteOptions_;
+
+    CPL_DISALLOW_COPY_ASSIGN(OGRGeoJSONWriteLayer)
+
+    void FinishWriting();
 };
 
 /************************************************************************/
@@ -208,9 +242,8 @@ class OGRGeoJSONDataSource final : public OGRDataSource
     int GetLayerCount() override;
     OGRLayer *GetLayer(int nLayer) override;
     OGRLayer *ICreateLayer(const char *pszName,
-                           OGRSpatialReference *poSRS = nullptr,
-                           OGRwkbGeometryType eGType = wkbUnknown,
-                           char **papszOptions = nullptr) override;
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
     int TestCapability(const char *pszCap) override;
 
     void AddLayer(OGRGeoJSONLayer *poLayer);
@@ -219,6 +252,7 @@ class OGRGeoJSONDataSource final : public OGRDataSource
     // OGRGeoJSONDataSource Interface
     //
     int Create(const char *pszName, char **papszOptions);
+
     VSILFILE *GetOutputFile() const
     {
         return fpOut_;
@@ -244,24 +278,30 @@ class OGRGeoJSONDataSource final : public OGRDataSource
     {
         return bFpOutputIsSeekable_;
     }
+
     int GetBBOXInsertLocation() const
     {
         return nBBOXInsertLocation_;
     }
+
     int HasOtherPages() const
     {
         return bOtherPages_;
     }
+
     bool IsUpdatable() const
     {
         return bUpdatable_;
     }
+
     const CPLString &GetJSonFlavor() const
     {
         return osJSonFlavor_;
     }
 
-    virtual void FlushCache(bool bAtClosing) override;
+    virtual CPLErr FlushCache(bool bAtClosing) override;
+
+    CPLErr Close() override;
 
     static const size_t SPACE_FOR_BBOX = 130;
 
@@ -294,7 +334,7 @@ class OGRGeoJSONDataSource final : public OGRDataSource
     //
     // Private utility functions
     //
-    void Clear();
+    bool Clear();
     int ReadFromFile(GDALOpenInfo *poOpenInfo, const char *pszUnprefixed);
     int ReadFromService(GDALOpenInfo *poOpenInfo, const char *pszSource);
     void LoadLayers(GDALOpenInfo *poOpenInfo, GeoJSONSourceType nSrcType,
@@ -303,6 +343,8 @@ class OGRGeoJSONDataSource final : public OGRDataSource
                             OGRGeoJSONReader *poReader);
     void CheckExceededTransferLimit(json_object *poObj);
     void RemoveJSonPStuff();
+
+    CPL_DISALLOW_COPY_ASSIGN(OGRGeoJSONDataSource)
 };
 
 #endif  // OGR_GEOJSON_H_INCLUDED

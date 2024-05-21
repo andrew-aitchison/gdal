@@ -302,6 +302,8 @@ void RegisterOGRCSV()
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE_FIELD, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_DELETE_FIELD, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_REORDER_FIELDS, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "WidthPrecision");
     poDriver->SetMetadataItem(GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
                               "Name Type WidthPrecision");
 
@@ -314,6 +316,10 @@ void RegisterOGRCSV()
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSIONS, "csv tsv psv");
     poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/vector/csv.html");
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
+    poDriver->SetMetadataItem(GDAL_DMD_NUMERIC_FIELD_WIDTH_INCLUDES_SIGN,
+                              "YES");
+    poDriver->SetMetadataItem(
+        GDAL_DMD_NUMERIC_FIELD_WIDTH_INCLUDES_DECIMAL_SEPARATOR, "YES");
 
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST,
                               "<CreationOptionList>"
@@ -333,7 +339,7 @@ void RegisterOGRCSV()
         "    <Value>TAB</Value>"
         "    <Value>SPACE</Value>"
         "  </Option>"
-#ifdef WIN32
+#ifdef _WIN32
         "  <Option name='LINEFORMAT' type='string-select' "
         "description='end-of-line sequence' default='CRLF'>"
 #else
@@ -369,15 +375,15 @@ void RegisterOGRCSV()
     poDriver->SetMetadataItem(
         GDAL_DMD_OPENOPTIONLIST,
         "<OpenOptionList>"
-#if 0
-"  <Option name='SEPARATOR' type='string-select' description='field separator' default='AUTO'>"
-"    <Value>AUTO</Value>"
-"    <Value>COMMA</Value>"
-"    <Value>SEMICOLON</Value>"
-"    <Value>TAB</Value>"
-"    <Value>SPACE</Value>"
-"  </Option>"
-#endif
+        "  <Option name='SEPARATOR' type='string-select' "
+        "description='field separator' default='AUTO'>"
+        "    <Value>AUTO</Value>"
+        "    <Value>COMMA</Value>"
+        "    <Value>SEMICOLON</Value>"
+        "    <Value>TAB</Value>"
+        "    <Value>SPACE</Value>"
+        "    <Value>PIPE</Value>"
+        "  </Option>"
         "  <Option name='MERGE_SEPARATOR' type='boolean' description='whether "
         "to merge consecutive separators' default='NO'/>"
         "  <Option name='AUTODETECT_TYPE' type='boolean' description='whether "
@@ -435,6 +441,7 @@ void RegisterOGRCSV()
                               "StringList");
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
                               "Boolean Int16 Float32");
+    poDriver->SetMetadataItem(GDAL_DCAP_HONOR_GEOM_COORDINATE_PRECISION, "YES");
 
     poDriver->pfnOpen = OGRCSVDriverOpen;
     poDriver->pfnIdentify = OGRCSVDriverIdentify;

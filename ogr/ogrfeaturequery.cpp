@@ -49,6 +49,7 @@
 /************************************************************************/
 /*     Support for special attributes (feature query and selection)     */
 /************************************************************************/
+extern const swq_field_type SpecialFieldTypes[SPECIAL_FIELD_COUNT];
 
 const char *const SpecialFieldNames[SPECIAL_FIELD_COUNT] = {
     "FID", "OGR_GEOMETRY", "OGR_STYLE", "OGR_GEOM_WKT", "OGR_GEOM_AREA"};
@@ -59,7 +60,9 @@ const swq_field_type SpecialFieldTypes[SPECIAL_FIELD_COUNT] = {
 /*                          OGRFeatureQuery()                           */
 /************************************************************************/
 
-OGRFeatureQuery::OGRFeatureQuery() : poTargetDefn(nullptr), pSWQExpr(nullptr)
+OGRFeatureQuery::OGRFeatureQuery()
+    : poTargetDefn(nullptr), pSWQExpr(nullptr),
+      m_psContext(new swq_evaluation_context())
 {
 }
 
@@ -70,6 +73,7 @@ OGRFeatureQuery::OGRFeatureQuery() : poTargetDefn(nullptr), pSWQExpr(nullptr)
 OGRFeatureQuery::~OGRFeatureQuery()
 
 {
+    delete m_psContext;
     delete static_cast<swq_expr_node *>(pSWQExpr);
 }
 
@@ -83,6 +87,8 @@ OGRFeatureQuery::Compile(OGRLayer *poLayer, const char *pszExpression,
                          swq_custom_func_registrar *poCustomFuncRegistrar)
 
 {
+    if (poLayer->TestCapability(OLCStringsAsUTF8))
+        m_psContext->bUTF8Strings = true;
     return Compile(poLayer, poLayer->GetLayerDefn(), pszExpression, bCheck,
                    poCustomFuncRegistrar);
 }
@@ -143,6 +149,11 @@ OGRFeatureQuery::Compile(OGRLayer *poLayer, OGRFeatureDefn *poDefn,
     for (int iField = 0; iField < poDefn->GetFieldCount(); iField++)
     {
         OGRFieldDefn *poField = poDefn->GetFieldDefn(iField);
+        if (!poField)
+        {
+            CPLAssert(0);
+            break;
+        }
 
         papszFieldNames[iField] = const_cast<char *>(poField->GetNameRef());
 
@@ -318,7 +329,7 @@ int OGRFeatureQuery::Evaluate(OGRFeature *poFeature)
         return FALSE;
 
     swq_expr_node *poResult = static_cast<swq_expr_node *>(pSWQExpr)->Evaluate(
-        OGRFeatureFetcher, poFeature);
+        OGRFeatureFetcher, poFeature, *m_psContext);
 
     if (poResult == nullptr)
         return FALSE;
@@ -349,7 +360,7 @@ int OGRFeatureQuery::CanUseIndex(OGRLayer *poLayer)
     return CanUseIndex(psExpr, poLayer);
 }
 
-int OGRFeatureQuery::CanUseIndex(swq_expr_node *psExpr, OGRLayer *poLayer)
+int OGRFeatureQuery::CanUseIndex(const swq_expr_node *psExpr, OGRLayer *poLayer)
 {
     // Does the expression meet our requirements?
     if (psExpr == nullptr || psExpr->eNodeType != SNT_OPERATION)
@@ -548,7 +559,7 @@ static GIntBig *OGRANDGIntBigArray(GIntBig panFIDList1[], GIntBig nFIDCount1,
     return panFIDList;
 }
 
-GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
+GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(const swq_expr_node *psExpr,
                                                  OGRLayer *poLayer,
                                                  GIntBig &nFIDCount)
 {
@@ -589,8 +600,8 @@ GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
         psExpr->nSubExprCount < 2)
         return nullptr;
 
-    swq_expr_node *poColumn = psExpr->papoSubExpr[0];
-    swq_expr_node *poValue = psExpr->papoSubExpr[1];
+    const swq_expr_node *poColumn = psExpr->papoSubExpr[0];
+    const swq_expr_node *poValue = psExpr->papoSubExpr[1];
 
     if (poColumn->eNodeType != SNT_COLUMN || poValue->eNodeType != SNT_CONSTANT)
         return nullptr;
@@ -604,7 +615,8 @@ GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
 
     // Have an index, now we need to query it.
     OGRField sValue;
-    OGRFieldDefn *poFieldDefn = poLayer->GetLayerDefn()->GetFieldDefn(nIdx);
+    const OGRFieldDefn *poFieldDefn =
+        poLayer->GetLayerDefn()->GetFieldDefn(nIdx);
 
     // Handle the case of an IN operation.
     if (psExpr->nOperation == SWQ_IN)
@@ -742,7 +754,14 @@ char **OGRFeatureQuery::FieldCollector(void *pBareOp, char **papszList)
         }
         else if (nIdx >= 0 && nIdx < poTargetDefn->GetFieldCount())
         {
-            pszFieldName = poTargetDefn->GetFieldDefn(nIdx)->GetNameRef();
+            auto poFieldDefn = poTargetDefn->GetFieldDefn(nIdx);
+            if (!poFieldDefn)
+            {
+                CPLAssert(false);
+                CSLDestroy(papszList);
+                return nullptr;
+            }
+            pszFieldName = poFieldDefn->GetNameRef();
         }
         else
         {

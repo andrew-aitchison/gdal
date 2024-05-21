@@ -29,33 +29,13 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import json
-import os
+import pathlib
 import struct
 
+import gdaltest
 import pytest
 
 from osgeo import gdal, osr
-
-###############################################################################
-# Validate against schema
-
-
-def _validate(res):
-    try:
-        import jsonschema
-    except ImportError:
-        return
-
-    if isinstance(res, str):
-        res = json.loads(res)
-
-    schema_filename = "../../gdal/data/gdalmdiminfo_output.schema.json"
-    if not os.path.exists(schema_filename):
-        return
-
-    jsonschema.validate(res, json.loads(open(schema_filename, "rt").read()))
-
 
 ###############################################################################
 # Test with non multidim dataset
@@ -68,7 +48,7 @@ def test_gdalmdiminfo_lib_non_multidim_dataset():
     with pytest.raises(TypeError):
         gdal.MultiDimInfo(ds)
 
-    with pytest.raises(TypeError):
+    with pytest.raises(Exception):
         gdal.MultiDimInfo("../gcore/data/byte.tif")
 
 
@@ -81,7 +61,7 @@ def test_gdalmdiminfo_lib_empty_mem_dataset():
     drv = gdal.GetDriverByName("MEM")
     ds = drv.CreateMultiDimensional("")
     ret = gdal.MultiDimInfo(ds)
-    _validate(ret)
+    gdaltest.validate_json(ret, "gdalmdiminfo_output.schema.json")
 
     assert ret == {"type": "group", "driver": "MEM", "name": "/"}
 
@@ -128,7 +108,7 @@ def test_gdalmdiminfo_lib_mem_dataset():
     attr.WriteString("bar")
 
     ret = gdal.MultiDimInfo(ds, detailed=True, as_text=True)
-    _validate(ret)
+    gdaltest.validate_json(ret, "gdalmdiminfo_output.schema.json")
 
     expected = """{
   "type": "group",
@@ -224,7 +204,7 @@ def test_gdalmdiminfo_lib_mem_dataset():
     assert ret == expected
 
     ret = gdal.MultiDimInfo(ds, array="ar_compound", detailed=True, as_text=True)
-    _validate(ret)
+    gdaltest.validate_json(ret, "gdalmdiminfo_output.schema.json")
 
     expected = """{
   "type": "array",
@@ -272,10 +252,8 @@ def test_gdalmdiminfo_lib_mem_dataset():
 # Test arrayoption
 
 
+@pytest.mark.require_driver("netCDF")
 def test_gdalmdiminfo_lib_arrayoption():
-
-    if gdal.GetDriverByName("netCDF") is None:
-        pytest.skip("netCDF driver not enabled")
 
     ret = gdal.MultiDimInfo("../gdrivers/data/netcdf/with_bounds.nc")
     assert len(ret["arrays"]) == 2
@@ -284,6 +262,17 @@ def test_gdalmdiminfo_lib_arrayoption():
         "../gdrivers/data/netcdf/with_bounds.nc", arrayoptions=["SHOW_BOUNDS=NO"]
     )
     assert len(ret["arrays"]) == 1
+
+
+###############################################################################
+# Test path argument
+
+
+@pytest.mark.require_driver("netCDF")
+def test_gdalmdiminfo_lib_path_input():
+
+    ret = gdal.MultiDimInfo(pathlib.Path("../gdrivers/data/netcdf/with_bounds.nc"))
+    assert ret is not None
 
 
 ###############################################################################

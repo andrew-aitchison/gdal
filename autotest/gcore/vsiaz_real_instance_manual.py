@@ -35,9 +35,13 @@ import pytest
 
 from osgeo import gdal
 
-pytestmark = pytest.mark.skipif(
-    not gdaltest.built_against_curl(), reason="GDAL not built against curl"
-)
+pytestmark = pytest.mark.require_curl()
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 def open_for_read(uri):
@@ -52,9 +56,6 @@ def open_for_read(uri):
 
 
 def test_vsiaz_extra_1():
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     az_resource = gdal.GetConfigOption("AZ_RESOURCE")
     if az_resource is None:
@@ -187,7 +188,7 @@ def test_vsiaz_extra_1():
         # Invalid bucket : "The specified bucket does not exist"
         gdal.ErrorReset()
         f = open_for_read("/vsiaz/not_existing_bucket/foo")
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             gdal.VSIFReadL(1, 1, f)
         gdal.VSIFCloseL(f)
         assert gdal.VSIGetLastErrorMsg() != ""

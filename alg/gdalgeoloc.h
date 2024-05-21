@@ -39,7 +39,7 @@
 
 template <class Accessors> struct GDALGeoLoc
 {
-    static bool LoadGeolocFinish(GDALGeoLocTransformInfo *psTransform);
+    static void LoadGeolocFinish(GDALGeoLocTransformInfo *psTransform);
 
     static bool GenerateBackMap(GDALGeoLocTransformInfo *psTransform);
 
@@ -62,6 +62,7 @@ template <class Accessors> struct GDALGeoLoc
                          double *padfX, double *padfY, double * /* padfZ */,
                          int *panSuccess);
 };
+
 /*! @endcond */
 
 bool GDALGeoLocExtractSquare(const GDALGeoLocTransformInfo *psTransform, int nX,

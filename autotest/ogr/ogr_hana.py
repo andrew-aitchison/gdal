@@ -41,7 +41,16 @@ try:
 except ImportError:
     pytest.skip("hdbcli not available", allow_module_level=True)
 
-pytestmark = pytest.mark.require_driver("HANA")
+pytestmark = [
+    pytest.mark.require_driver("HANA"),
+    pytest.mark.random_order(disabled=True),
+]
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -142,11 +151,8 @@ def test_ogr_hana_2():
 
         assert read_feat.GetFieldCount() == field_count, "Field count does not match"
 
-        assert (
-            ogrtest.check_feature_geometry(
-                read_feat, orig_feat.GetGeometryRef(), max_error=0.001
-            )
-            == 0
+        ogrtest.check_feature_geometry(
+            read_feat, orig_feat.GetGeometryRef(), max_error=0.001
         )
         for fld in range(field_count - 1):
             assert orig_feat.GetField(fld) == read_feat.GetField(fld), (
@@ -164,12 +170,10 @@ def test_ogr_hana_3():
     ds = open_datasource()
     layer = ds.GetLayerByName("tpoly")
 
-    layer.SetAttributeFilter("EAS_ID > 160 AND EAS_ID < 170")
-    tr = ogrtest.check_features_against_list(layer, "EAS_ID", [168, 169, 166, 165])
+    with ogrtest.attribute_filter(layer, "EAS_ID > 160 AND EAS_ID < 170"):
+        ogrtest.check_features_against_list(layer, "EAS_ID", [168, 169, 166, 165])
 
-    check_feature_count(layer, 4)
-
-    assert tr
+        check_feature_count(layer, 4)
 
 
 ###############################################################################
@@ -185,7 +189,7 @@ def test_ogr_hana_4():
 
     check_feature_count(layer, 1)
 
-    assert ogrtest.check_features_against_list(layer, "EAS_ID", [158])
+    ogrtest.check_features_against_list(layer, "EAS_ID", [158])
 
 
 ###############################################################################
@@ -269,10 +273,7 @@ def test_ogr_hana_9():
 
         feat_read = layer.GetNextFeature()
 
-        if ogrtest.check_feature_geometry(feat_read, geom) != 0:
-            print(item)
-            print(wkt)
-            pytest.fail(geom)
+        ogrtest.check_feature_geometry(feat_read, geom)
 
     layer.ResetReading()
 
@@ -285,7 +286,7 @@ def test_ogr_hana_10():
     ds = open_datasource()
     layer = ds.ExecuteSQL("SELECT EAS_ID FROM tpoly WHERE EAS_ID IN (158, 170) ")
     check_feature_count(layer, 2)
-    assert ogrtest.check_features_against_list(layer, "EAS_ID", [158, 170])
+    ogrtest.check_features_against_list(layer, "EAS_ID", [158, 170])
 
 
 ###############################################################################
@@ -294,14 +295,13 @@ def test_ogr_hana_10():
 
 def test_ogr_hana_11():
     ds = open_datasource()
-    layer = ds.ExecuteSQL("SELECT DISTINCT EAS_ID FROM TPOLY ORDER BY EAS_ID DESC")
-    check_feature_count(layer, 10)
+    with ds.ExecuteSQL(
+        "SELECT DISTINCT EAS_ID FROM TPOLY ORDER BY EAS_ID DESC"
+    ) as layer:
+        check_feature_count(layer, 10)
 
-    expected = [179, 173, 172, 171, 170, 169, 168, 166, 165, 158]
-    tr = ogrtest.check_features_against_list(layer, "EAS_ID", expected)
-    ds.ReleaseResultSet(layer)
-
-    assert tr
+        expected = [179, 173, 172, 171, 170, 169, 168, 166, 165, 158]
+        ogrtest.check_features_against_list(layer, "EAS_ID", expected)
 
 
 ###############################################################################
@@ -327,7 +327,7 @@ def test_ogr_hana_12():
 def test_ogr_hana_13():
     ds = open_datasource()
     layer = ds.ExecuteSQL('SELECT EAS_ID FROM "TPOLY" WHERE EAS_ID IN (158, 170) ')
-    assert ogrtest.check_features_against_list(layer, "EAS_ID", [158, 170])
+    ogrtest.check_features_against_list(layer, "EAS_ID", [158, 170])
 
 
 ###############################################################################
@@ -448,9 +448,7 @@ def test_ogr_hana_18():
         "SetFeature() did not update SHORTNAME, got %s." % shortname
     )
 
-    if ogrtest.check_feature_geometry(feat, "POINT(5 6 7)") != 0:
-        print(feat.GetGeometryRef())
-        pytest.fail("Geometry update failed")
+    ogrtest.check_feature_geometry(feat, "POINT(5 6 7)")
 
     feat.SetGeometryDirectly(None)
     assert layer.SetFeature(feat) == 0, "SetFeature() method failed."
@@ -688,7 +686,7 @@ def test_ogr_hana_21():
         get_test_name(), geom_type=ogr.wkbNone, options=["FID=fid", "LAUNDER=NO"]
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert layer.CreateField(ogr.FieldDefn("str", ogr.OFTString)) == 0
         assert layer.CreateField(ogr.FieldDefn("fid", ogr.OFTString)) != 0
         assert layer.CreateField(ogr.FieldDefn("fid", ogr.OFTInteger)) != 0
@@ -709,7 +707,7 @@ def test_ogr_hana_22():
 
     layer = ds.GetLayerByName("TPOLY")
     layer.SetAttributeFilter(query)
-    assert ogrtest.check_features_against_list(layer, "eas_id", [169])
+    ogrtest.check_features_against_list(layer, "eas_id", [169])
 
 
 ###############################################################################
@@ -775,7 +773,7 @@ def test_ogr_hana_25(ogrsf_path):
 def test_ogr_hana_26():
     ds = open_datasource()
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         layer = ds.ExecuteSQL("SELECT FROM")
     assert gdal.GetLastErrorMsg() != ""
     assert layer is None
@@ -858,7 +856,7 @@ def test_ogr_hana_28():
 def test_ogr_hana_29():
     ds_ro = open_datasource(0)
     layer = ds_ro.GetLayerByName("TPOLY")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             layer.CreateGeomField(ogr.GeomFieldDefn("GEOM_FIELD", ogr.wkbPoint))
             == ogr.OGRERR_FAILURE
@@ -869,7 +867,7 @@ def test_ogr_hana_29():
     create_tpoly_table(ds_rw, layer_name)
 
     layer = ds_rw.GetLayerByName(layer_name)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         # unsupported geometry type
         assert (
             layer.CreateGeomField(ogr.GeomFieldDefn("GEOM_FIELD", ogr.wkbCompoundCurve))
@@ -957,7 +955,7 @@ def test_ogr_hana_32():
     ds = open_datasource(1)
     layer_name = get_test_name() + "_TABLE_\U0001f608"
     sql = "CREATE COLUMN TABLE %s (A INT, B INT)" % layer_name
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds.ExecuteSQL(sql)
 
     ds = open_datasource(0)
@@ -1005,7 +1003,7 @@ def test_ogr_hana_33():
 
 def test_ogr_hana_34():
     def test_connection(conn_str, expected_param):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ds = ogr.Open("HANA:" + conn_str, update=1)
         assert ds is None
         expected_msg = (
@@ -1101,7 +1099,7 @@ def test_ogr_hana_36():
     assert ds.TestCapability(ogr.ODsCTransactions) == 1
 
     # test data source
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.StartTransaction() == 0
         assert ds.CommitTransaction() == 0
 
@@ -1119,7 +1117,7 @@ def test_ogr_hana_36():
     layer_name = get_test_name()
     create_tpoly_table(ds, layer_name)
     layer = ds.GetLayerByName(layer_name)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert layer.StartTransaction() == 0
         assert layer.CommitTransaction() == 0
 
@@ -1177,7 +1175,7 @@ def test_ogr_hana_37():
 
 
 def create_tpoly_table(ds, layer_name="TPOLY"):
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds.ExecuteSQL("DELLAYER:%s" % layer_name)
 
     shp_ds = ogr.Open("data/poly.shp")
@@ -1252,16 +1250,20 @@ def get_connection_str():
     if uri is not None:
         conn_str = uri + ";ENCRYPT=YES;SSL_VALIDATE_CERTIFICATE=false;CHAR_AS_UTF8=1"
     else:
-        conn_str = "HANA:autotest"
+        pytest.skip("OGR_HANA_CONNECTION_STRING not set")
 
     return conn_str
 
 
 def create_connection():
     conn_str = get_connection_str()
-    conn_params = dict(item.split("=") for item in conn_str.split(";"))
 
-    with gdaltest.error_handler():
+    try:
+        conn_params = dict(item.split("=") for item in conn_str.split(";"))
+    except ValueError as e:
+        raise ValueError(f"Failed to parse connection params {conn_str} ({e})")
+
+    with gdal.quiet_errors():
         conn = dbapi.connect(
             address=conn_params["HOST"],
             port=conn_params["PORT"],

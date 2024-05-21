@@ -42,9 +42,10 @@ typedef struct
 {
     int state; /* state flags */
 
-    int lossless;   /* TRUE (default) or FALSE */
-    int effort;     /* 3 to 9. default: 7 */
-    float distance; /* 0 to 15. default: 1.0 */
+    int lossless;         /* TRUE (default) or FALSE */
+    int effort;           /* 3 to 9. default: 7 */
+    float distance;       /* 0 to 15. default: 1.0 */
+    float alpha_distance; /* 0 to 15. default: -1.0 (same as distance) */
 
     uint32_t segment_width;
     uint32_t segment_height;
@@ -101,6 +102,7 @@ static int GetJXLDataType(TIFF *tif)
                   "Unsupported combination of SampleFormat and BitsPerSample");
     return -1;
 }
+
 static int GetJXLDataTypeSize(JxlDataType dtype)
 {
     switch (dtype)
@@ -367,8 +369,8 @@ static int JXLPreDecode(TIFF *tif, uint16_t s)
         }
     }
     uint32_t nFirstExtraChannel = (bAlphaEmbedded) ? 1 : 0;
-    size_t main_buffer_size = sp->uncompressed_size;
-    size_t channel_size = main_buffer_size / td->td_samplesperpixel;
+    unsigned int main_buffer_size = sp->uncompressed_size;
+    unsigned int channel_size = main_buffer_size / td->td_samplesperpixel;
     uint8_t *extra_channel_buffer = NULL;
 
     int nBytesPerSample = GetJXLDataTypeSize(format.data_type);
@@ -402,7 +404,7 @@ static int JXLPreDecode(TIFF *tif, uint16_t s)
             {
                 TIFFErrorExtR(tif, module,
                               "JxlDecoderExtraChannelBufferSize returned %ld, "
-                              "expecting %ld",
+                              "expecting %u",
                               buffer_size, channel_size);
                 _TIFFfreeExt(tif, extra_channel_buffer);
                 return 0;
@@ -513,29 +515,139 @@ static int JXLPreDecode(TIFF *tif, uint16_t s)
     if (nFirstExtraChannel < info.num_extra_channels)
     {
         // first reorder the main buffer
-        int nMainChannels = bAlphaEmbedded ? info.num_color_channels + 1
-                                           : info.num_color_channels;
-        int mainPixSize = nMainChannels * nBytesPerSample;
-        int fullPixSize = td->td_samplesperpixel * nBytesPerSample;
+        const int nMainChannels = bAlphaEmbedded ? info.num_color_channels + 1
+                                                 : info.num_color_channels;
+        const unsigned int mainPixSize = nMainChannels * nBytesPerSample;
+        const unsigned int fullPixSize =
+            td->td_samplesperpixel * nBytesPerSample;
+        assert(fullPixSize > mainPixSize);
+
+        /* Find min value of k such that k * fullPixSize >= (k + 1) * mainPixSize:
+         * ==> k = ceil(mainPixSize / (fullPixSize - mainPixSize))
+         * ==> k = (mainPixSize + (fullPixSize - mainPixSize) - 1) / (fullPixSize - mainPixSize)
+         * ==> k = (fullPixSize - 1) / (fullPixSize - mainPixSize)
+         */
+        const unsigned int nNumPixels = info.xsize * info.ysize;
         unsigned int outOff = sp->uncompressed_size - fullPixSize;
-        int inOff = main_buffer_size - mainPixSize;
-        for (; inOff >= 0; inOff -= mainPixSize, outOff -= fullPixSize)
+        unsigned int inOff = main_buffer_size - mainPixSize;
+        const unsigned int kThreshold =
+            (fullPixSize - 1) / (fullPixSize - mainPixSize);
+        if (mainPixSize == 1)
         {
-            memcpy(sp->uncompressed_buffer + outOff,
-                   sp->uncompressed_buffer + inOff, mainPixSize);
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, /*mainPixSize=*/1);
+                inOff -= /*mainPixSize=*/1;
+                outOff -= fullPixSize;
+            }
+        }
+        else if (mainPixSize == 2)
+        {
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, /*mainPixSize=*/2);
+                inOff -= /*mainPixSize=*/2;
+                outOff -= fullPixSize;
+            }
+        }
+        else if (mainPixSize == 3)
+        {
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, /*mainPixSize=*/3);
+                inOff -= /*mainPixSize=*/3;
+                outOff -= fullPixSize;
+            }
+        }
+        else if (mainPixSize == 4)
+        {
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, /*mainPixSize=*/4);
+                inOff -= /*mainPixSize=*/4;
+                outOff -= fullPixSize;
+            }
+        }
+        else if (mainPixSize == 3 * 2)
+        {
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, /*mainPixSize=*/3 * 2);
+                inOff -= /*mainPixSize=*/3 * 2;
+                outOff -= fullPixSize;
+            }
+        }
+        else if (mainPixSize == 4 * 2)
+        {
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, /*mainPixSize=*/4 * 2);
+                inOff -= /*mainPixSize=*/4 * 2;
+                outOff -= fullPixSize;
+            }
+        }
+        else
+        {
+            for (unsigned int k = kThreshold; k < nNumPixels; ++k)
+            {
+                memcpy(sp->uncompressed_buffer + outOff,
+                       sp->uncompressed_buffer + inOff, mainPixSize);
+                inOff -= mainPixSize;
+                outOff -= fullPixSize;
+            }
+        }
+        /* Last iterations need memmove() because of overlapping between */
+        /* source and target regions. */
+        for (unsigned int k = kThreshold; k > 1;)
+        {
+            --k;
+            memmove(sp->uncompressed_buffer + outOff,
+                    sp->uncompressed_buffer + inOff, mainPixSize);
+            inOff -= mainPixSize;
+            outOff -= fullPixSize;
         }
         // then copy over the data from the extra_channel_buffer
-        int nExtraChannelsToExtract =
+        const int nExtraChannelsToExtract =
             info.num_extra_channels - nFirstExtraChannel;
         for (int i = 0; i < nExtraChannelsToExtract; ++i)
         {
             outOff = (i + nMainChannels) * nBytesPerSample;
             uint8_t *channel_buffer = extra_channel_buffer + i * channel_size;
-            for (; outOff < sp->uncompressed_size;
-                 outOff += fullPixSize, channel_buffer += nBytesPerSample)
+            if (nBytesPerSample == 1)
             {
-                memcpy(sp->uncompressed_buffer + outOff, channel_buffer,
-                       nBytesPerSample);
+                for (; outOff < sp->uncompressed_size;
+                     outOff += fullPixSize,
+                     channel_buffer += /*nBytesPerSample=*/1)
+                {
+                    memcpy(sp->uncompressed_buffer + outOff, channel_buffer,
+                           /*nBytesPerSample=*/1);
+                }
+            }
+            else if (nBytesPerSample == 2)
+            {
+                for (; outOff < sp->uncompressed_size;
+                     outOff += fullPixSize,
+                     channel_buffer += /*nBytesPerSample=*/2)
+                {
+                    memcpy(sp->uncompressed_buffer + outOff, channel_buffer,
+                           /*nBytesPerSample=*/2);
+                }
+            }
+            else
+            {
+                assert(nBytesPerSample == 4);
+                for (; outOff < sp->uncompressed_size;
+                     outOff += fullPixSize, channel_buffer += nBytesPerSample)
+                {
+                    memcpy(sp->uncompressed_buffer + outOff, channel_buffer,
+                           nBytesPerSample);
+                }
             }
         }
         _TIFFfreeExt(tif, extra_channel_buffer);
@@ -669,7 +781,7 @@ static int JXLPostEncode(TIFF *tif)
     JxlEncoderUseContainer(enc, JXL_FALSE);
 
 #ifdef HAVE_JxlEncoderFrameSettingsCreate
-    JxlEncoderOptions *opts = JxlEncoderFrameSettingsCreate(enc, NULL);
+    JxlEncoderFrameSettings *opts = JxlEncoderFrameSettingsCreate(enc, NULL);
 #else
     JxlEncoderOptions *opts = JxlEncoderOptionsCreate(enc, NULL);
 #endif
@@ -707,6 +819,19 @@ static int JXLPostEncode(TIFF *tif)
     }
 
     int bAlphaEmbedded = 0;
+    const int bAlphaDistanceSameAsMainChannel =
+        (sp->alpha_distance < 0.0f) ||
+        ((sp->lossless && sp->alpha_distance == 0.0f) ||
+         (!sp->lossless && sp->alpha_distance == sp->distance));
+#ifndef HAVE_JxlEncoderSetExtraChannelDistance
+    if (!bAlphaDistanceSameAsMainChannel)
+    {
+        TIFFWarningExtR(tif, module,
+                        "AlphaDistance ignored due to "
+                        "JxlEncoderSetExtraChannelDistance() not being "
+                        "available. Please upgrade libjxl to > 0.8.1");
+    }
+#endif
 
     if (td->td_planarconfig == PLANARCONFIG_SEPARATE)
     {
@@ -721,7 +846,8 @@ static int JXLPostEncode(TIFF *tif)
         if (td->td_photometric == PHOTOMETRIC_MINISBLACK &&
             td->td_extrasamples > 0 &&
             td->td_extrasamples == td->td_samplesperpixel - 1 &&
-            td->td_sampleinfo[0] == EXTRASAMPLE_UNASSALPHA)
+            td->td_sampleinfo[0] == EXTRASAMPLE_UNASSALPHA &&
+            bAlphaDistanceSameAsMainChannel)
         {  // gray with alpha
             format.num_channels = 2;
             basic_info.num_color_channels = 1;
@@ -734,8 +860,9 @@ static int JXLPostEncode(TIFF *tif)
         else if (td->td_photometric == PHOTOMETRIC_RGB &&
                  td->td_extrasamples > 0 &&
                  td->td_extrasamples == td->td_samplesperpixel - 3 &&
-                 td->td_sampleinfo[0] == EXTRASAMPLE_UNASSALPHA)
-        {  // rgb with alpha
+                 td->td_sampleinfo[0] == EXTRASAMPLE_UNASSALPHA &&
+                 bAlphaDistanceSameAsMainChannel)
+        {  // rgb with alpha, and same distance for alpha vs non-alpha channels
             format.num_channels = 4;
             basic_info.num_color_channels = 3;
             basic_info.num_extra_channels = td->td_samplesperpixel - 3;
@@ -748,8 +875,10 @@ static int JXLPostEncode(TIFF *tif)
                  ((td->td_extrasamples == 0) ||
                   (td->td_extrasamples > 0 &&
                    td->td_extrasamples == td->td_samplesperpixel - 3 &&
-                   td->td_sampleinfo[0] != EXTRASAMPLE_UNASSALPHA)))
-        {  // rgb without alpha
+                   (td->td_sampleinfo[0] != EXTRASAMPLE_UNASSALPHA ||
+                    !bAlphaDistanceSameAsMainChannel))))
+        {  // rgb without alpha, or differente distance for alpha vs non-alpha
+            // channels
             format.num_channels = 3;
             basic_info.num_color_channels = 3;
             basic_info.num_extra_channels = td->td_samplesperpixel - 3;
@@ -779,7 +908,11 @@ static int JXLPostEncode(TIFF *tif)
 
     if (sp->lossless)
     {
+#ifdef HAVE_JxlEncoderSetFrameLossless
+        JxlEncoderSetFrameLossless(opts, TRUE);
+#else
         JxlEncoderOptionsSetLossless(opts, TRUE);
+#endif
 #ifdef HAVE_JxlEncoderSetFrameDistance
         JxlEncoderSetFrameDistance(opts, 0);
 #else
@@ -888,6 +1021,23 @@ static int JXLPostEncode(TIFF *tif)
                 _TIFFfreeExt(tif, main_buffer);
                 return 0;
             }
+#if HAVE_JxlEncoderSetExtraChannelDistance
+            if (channelType == JXL_CHANNEL_ALPHA && sp->alpha_distance >= 0.0f)
+            {
+                if (JXL_ENC_SUCCESS !=
+                    JxlEncoderSetExtraChannelDistance(opts, iExtraChannel,
+                                                      sp->alpha_distance))
+                {
+                    TIFFErrorExtR(
+                        tif, module,
+                        "JxlEncoderSetExtraChannelDistance(%d) failed",
+                        iChannel);
+                    JxlEncoderDestroy(enc);
+                    _TIFFfreeExt(tif, main_buffer);
+                    return 0;
+                }
+            }
+#endif
         }
     }
 #endif
@@ -1004,6 +1154,8 @@ static const TIFFField JXLFields[] = {
      TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "Effort", NULL},
     {TIFFTAG_JXL_DISTANCE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_FLOAT,
      TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "Distance", NULL},
+    {TIFFTAG_JXL_ALPHA_DISTANCE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_FLOAT,
+     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "AlphaDistance", NULL},
 };
 
 static int JXLVSetField(TIFF *tif, uint32_t tag, va_list ap)
@@ -1055,6 +1207,21 @@ static int JXLVSetField(TIFF *tif, uint32_t tag, va_list ap)
             return 1;
         }
 
+        case TIFFTAG_JXL_ALPHA_DISTANCE:
+        {
+            float alpha_distance = (float)va_arg(ap, double);
+            if (alpha_distance != -1 &&
+                (alpha_distance < 0 || alpha_distance > 15))
+            {
+                TIFFErrorExtR(tif, module,
+                              "Invalid value for AlphaDistance: %f",
+                              alpha_distance);
+                return 0;
+            }
+            sp->alpha_distance = alpha_distance;
+            return 1;
+        }
+
         default:
         {
             return (*sp->vsetparent)(tif, tag, ap);
@@ -1077,6 +1244,9 @@ static int JXLVGetField(TIFF *tif, uint32_t tag, va_list ap)
             break;
         case TIFFTAG_JXL_DISTANCE:
             *va_arg(ap, float *) = sp->distance;
+            break;
+        case TIFFTAG_JXL_ALPHA_DISTANCE:
+            *va_arg(ap, float *) = sp->alpha_distance;
             break;
         default:
             return (*sp->vgetparent)(tif, tag, ap);
@@ -1141,6 +1311,7 @@ int TIFFInitJXL(TIFF *tif, int scheme)
     sp->lossless = TRUE;
     sp->effort = 5;
     sp->distance = 1.0;
+    sp->alpha_distance = -1.0;
 
     return 1;
 bad:

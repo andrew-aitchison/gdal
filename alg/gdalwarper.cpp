@@ -53,8 +53,6 @@
 #include <emmintrin.h>
 #endif
 
-CPL_CVSID("$Id$")
-
 /************************************************************************/
 /*                         GDALReprojectImage()                         */
 /************************************************************************/
@@ -1166,12 +1164,14 @@ CPLErr GDALWarpDstAlphaMasker(void *pMaskFuncArg, int nBandCount,
  *
  * <li>OPTIMIZE_SIZE: This defaults to FALSE, but may be set to TRUE
  * typically when writing to a compressed dataset (GeoTIFF with
- * COMPRESSED creation option set for example) for achieving a smaller
+ * COMPRESS creation option set for example) for achieving a smaller
  * file size. This is achieved by writing at once data aligned on full
  * blocks of the target dataset, which avoids partial writes of
  * compressed blocks and lost space when they are rewritten at the end
  * of the file. However sticking to target block size may cause major
- * processing slowdown for some particular reprojections.</li>
+ * processing slowdown for some particular reprojections. Starting
+ * with GDAL 3.8, OPTIMIZE_SIZE mode is automatically enabled when it is safe
+ * to do so.</li>
  *
  * <li>NUM_THREADS: (GDAL >= 1.10) Can be set to a numeric value or ALL_CPUS to
  * set the number of threads to use to parallelize the computation part of the
@@ -1234,7 +1234,10 @@ CPLErr GDALWarpDstAlphaMasker(void *pMaskFuncArg, int nBandCount,
  * <li>SAMPLE_STEPS: Modifies the density of the sampling grid.  The default
  * number of steps is 21.   Increasing this can increase the computational
  * cost, but improves the accuracy with which the source region is
- * computed.</li>
+ * computed.
+ * Starting with GDAL 3.7, this can be set to ALL to mean to sample
+ * along all edge points of the destination region (if SAMPLE_GRID=NO or not
+ * specified), or all points of the destination region if SAMPLE_GRID=YES.</li>
  *
  * <li>SOURCE_EXTRA: This is a number of extra pixels added around the source
  * window for a given request, and by default it is 1 to take care of rounding
@@ -1246,6 +1249,34 @@ CPLErr GDALWarpDstAlphaMasker(void *pMaskFuncArg, int nBandCount,
  * an explicit source and target SRS.</li>
  * <li>MULT_FACTOR_VERTICAL_SHIFT: Multiplication factor for the vertical
  * shift. Default 1.0</li>
+ *
+ * <li>EXCLUDED_VALUES: (GDAL >= 3.9) Comma-separated tuple of values
+ * (thus typically "R,G,B"), that are ignored as contributing source
+ * pixels during resampling. The number of values in the tuple must be the same
+ * as the number of bands, excluding the alpha band.
+ * Several tuples of excluded values may be specified using the
+ * "(R1,G1,B2),(R2,G2,B2)" syntax.
+ * Only taken into account by Average currently.
+ * This concept is a bit similar to nodata/alpha, but the main difference is
+ * that pixels matching one of the excluded value tuples are still considered
+ * as valid, when determining the target pixel validity/density.
+ * </li>
+ *
+ * <li>EXCLUDED_VALUES_PCT_THRESHOLD=[0-100]: (GDAL >= 3.9) Minimum percentage
+ * of source pixels that must be set at one of the EXCLUDED_VALUES to cause
+ * the excluded value, that is in majority among source pixels, to be used as the
+ * target pixel value. Default value is 50 (%).
+ * Only taken into account by Average currently.</li>
+ *
+ * <li>NODATA_VALUES_PCT_THRESHOLD=[0-100]: (GDAL >= 3.9) Minimum percentage
+ * of source pixels that must be at nodata (or alpha=0 or any other way to express
+ * transparent pixel) to cause the target pixel value to not be set. Default
+ * value is 100 (%), which means that a target pixel is not set only if all
+ * contributing source pixels are not set.
+ * Note that NODATA_VALUES_PCT_THRESHOLD is taken into account before
+ * EXCLUDED_VALUES_PCT_THRESHOLD.
+ * Only taken into account by Average currently.</li>
+ *
  * </ul>
  */
 
@@ -1293,8 +1324,7 @@ void CPL_STDCALL GDALDestroyWarpOptions(GDALWarpOptions *psOptions)
     CPLFree(psOptions->papSrcPerBandValidityMaskFuncArg);
 
     if (psOptions->hCutline != nullptr)
-        OGR_G_DestroyGeometry(
-            reinterpret_cast<OGRGeometryH>(psOptions->hCutline));
+        delete static_cast<OGRGeometry *>(psOptions->hCutline);
 
     CPLFree(psOptions);
 }
@@ -1346,7 +1376,7 @@ GDALCloneWarpOptions(const GDALWarpOptions *psSrcOptions)
 
     if (psSrcOptions->hCutline != nullptr)
         psDstOptions->hCutline =
-            OGR_G_Clone(reinterpret_cast<OGRGeometryH>(psSrcOptions->hCutline));
+            OGR_G_Clone(static_cast<OGRGeometryH>(psSrcOptions->hCutline));
     psDstOptions->dfCutlineBlendDist = psSrcOptions->dfCutlineBlendDist;
 
     return psDstOptions;
@@ -1515,7 +1545,8 @@ void CPL_STDCALL GDALWarpResolveWorkingDataType(GDALWarpOptions *psOptions)
                                       GDALGetRasterDataType(hDstBand));
             }
         }
-        else if (psOptions->hSrcDS != nullptr)
+
+        if (psOptions->hSrcDS != nullptr)
         {
             GDALRasterBandH hSrcBand = GDALGetRasterBand(
                 psOptions->hSrcDS, psOptions->panSrcBands[iBand]);
@@ -1827,7 +1858,7 @@ CPLXMLNode *CPL_STDCALL GDALSerializeWarpOptions(const GDALWarpOptions *psWO)
     if (psWO->hCutline != nullptr)
     {
         char *pszWKT = nullptr;
-        if (OGR_G_ExportToWkt(reinterpret_cast<OGRGeometryH>(psWO->hCutline),
+        if (OGR_G_ExportToWkt(static_cast<OGRGeometryH>(psWO->hCutline),
                               &pszWKT) == OGRERR_NONE)
         {
             CPLCreateXMLElementAndValue(psTree, "Cutline", pszWKT);
@@ -2101,8 +2132,9 @@ GDALWarpOptions *CPL_STDCALL GDALDeserializeWarpOptions(CPLXMLNode *psTree)
     if (pszWKT)
     {
         char *pszWKTTemp = const_cast<char *>(pszWKT);
-        OGR_G_CreateFromWkt(&pszWKTTemp, nullptr,
-                            reinterpret_cast<OGRGeometryH *>(&psWO->hCutline));
+        OGRGeometryH hCutline = nullptr;
+        OGR_G_CreateFromWkt(&pszWKTTemp, nullptr, &hCutline);
+        psWO->hCutline = hCutline;
     }
 
     psWO->dfCutlineBlendDist =

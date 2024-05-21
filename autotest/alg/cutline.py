@@ -32,7 +32,6 @@
 
 
 import gdaltest
-import ogrtest
 import pytest
 
 from osgeo import gdal
@@ -43,40 +42,34 @@ from osgeo import gdal
 def test_cutline_1():
 
     tst = gdaltest.GDALTest("VRT", "cutline_noblend.vrt", 1, 11409)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 
 
+@pytest.mark.require_geos
 def test_cutline_2():
 
-    if not ogrtest.have_geos():
-        pytest.skip()
-
     tst = gdaltest.GDALTest("VRT", "cutline_blend.vrt", 1, 21395)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 
 
+@pytest.mark.require_geos
 def test_cutline_3():
 
-    if not ogrtest.have_geos():
-        pytest.skip()
-
     tst = gdaltest.GDALTest("VRT", "cutline_multipolygon.vrt", 1, 20827)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 
 
+@pytest.mark.require_geos
 def test_cutline_4():
-
-    if not ogrtest.have_geos():
-        pytest.skip()
 
     ds = gdal.Translate("/vsimem/utmsmall.tif", "../gcore/data/utmsmall.tif")
     ds.BuildOverviews("NEAR", [2])

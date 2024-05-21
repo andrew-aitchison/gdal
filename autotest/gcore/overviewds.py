@@ -29,11 +29,9 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import os
 import shutil
 import struct
 
-import gdaltest
 import pytest
 
 from osgeo import gdal
@@ -43,8 +41,8 @@ from osgeo import gdal
 
 
 def test_overviewds_1():
-    ds = gdal.OpenEx("data/byte.tif", open_options=["OVERVIEW_LEVEL=0"])
-    assert ds is None
+    with pytest.raises(Exception):
+        gdal.OpenEx("data/byte.tif", open_options=["OVERVIEW_LEVEL=0"])
 
 
 ###############################################################################
@@ -150,10 +148,10 @@ def test_overviewds_2(tmp_path, externalOverviews):
 # Test GCP
 
 
-def test_overviewds_3():
+def test_overviewds_3(tmp_path):
 
     src_ds = gdal.Open("data/byte.tif")
-    ds = gdal.GetDriverByName("GTiff").CreateCopy("tmp/byte.tif", src_ds)
+    ds = gdal.GetDriverByName("GTiff").CreateCopy(tmp_path / "byte.tif", src_ds)
     ds.SetGeoTransform([0, 1, 0, 0, 0, 1])  # cancel geotransform
     gcp1 = gdal.GCP()
     gcp1.GCPPixel = 0
@@ -179,7 +177,7 @@ def test_overviewds_3():
     ds.BuildOverviews("NEAR", overviewlist=[2, 4])
     ds = None
 
-    ds = gdal.OpenEx("tmp/byte.tif", open_options=["OVERVIEW_LEVEL=0"])
+    ds = gdal.OpenEx(tmp_path / "byte.tif", open_options=["OVERVIEW_LEVEL=0"])
     gcps = ds.GetGCPs()
     for i in range(3):
         assert (
@@ -209,11 +207,11 @@ def myfloat(s):
     return float(s)
 
 
-def test_overviewds_4():
+def test_overviewds_4(tmp_path):
 
-    shutil.copy("data/byte.tif", "tmp/byte.tif")
-    shutil.copy("data/test_rpc.txt", "tmp/byte_rpc.txt")
-    ds = gdal.Open("tmp/byte.tif")
+    shutil.copy("data/byte.tif", tmp_path)
+    shutil.copy("data/test_rpc.txt", tmp_path / "byte_rpc.txt")
+    ds = gdal.Open(tmp_path / "byte.tif")
     rpc_md = ds.GetMetadata("RPC")
 
     tr = gdal.Transformer(ds, None, ["METHOD=RPC"])
@@ -222,7 +220,7 @@ def test_overviewds_4():
     ds.BuildOverviews("NEAR", overviewlist=[2, 4])
     ds = None
 
-    ds = gdal.OpenEx("tmp/byte.tif", open_options=["OVERVIEW_LEVEL=0"])
+    ds = gdal.OpenEx(tmp_path / "byte.tif", open_options=["OVERVIEW_LEVEL=0"])
     got_md = ds.GetMetadata("RPC")
 
     for key in rpc_md:
@@ -248,22 +246,17 @@ def test_overviewds_4():
 
     ds = None
 
-    try:
-        os.remove("tmp/byte_rpc.txt")
-    except OSError:
-        pass
-
 
 ###############################################################################
 # Test GEOLOCATION
 
 
-def test_overviewds_5():
+def test_overviewds_5(tmp_path):
 
-    shutil.copy("data/sstgeo.tif", "tmp/sstgeo.tif")
-    shutil.copy("data/sstgeo.vrt", "tmp/sstgeo.vrt")
+    shutil.copy("data/sstgeo.tif", tmp_path)
+    shutil.copy("data/sstgeo.vrt", tmp_path)
 
-    ds = gdal.Open("tmp/sstgeo.vrt")
+    ds = gdal.Open(tmp_path / "sstgeo.vrt")
     geoloc_md = ds.GetMetadata("GEOLOCATION")
 
     tr = gdal.Transformer(ds, None, ["METHOD=GEOLOC_ARRAY"])
@@ -272,7 +265,7 @@ def test_overviewds_5():
     ds.BuildOverviews("NEAR", overviewlist=[2, 4])
     ds = None
 
-    ds = gdal.OpenEx("tmp/sstgeo.vrt", open_options=["OVERVIEW_LEVEL=0"])
+    ds = gdal.OpenEx(tmp_path / "sstgeo.vrt", open_options=["OVERVIEW_LEVEL=0"])
     got_md = ds.GetMetadata("GEOLOCATION")
 
     for key in geoloc_md:
@@ -304,20 +297,20 @@ def test_overviewds_5():
 # Test VRT
 
 
-def test_overviewds_6():
+def test_overviewds_6(tmp_path):
 
-    shutil.copy("data/byte.tif", "tmp")
-    ds = gdal.Open("tmp/byte.tif")
+    shutil.copy("data/byte.tif", tmp_path)
+    ds = gdal.Open(tmp_path / "byte.tif")
     ds.BuildOverviews("NEAR", overviewlist=[2, 4])
     ds = None
 
-    src_ds = gdal.OpenEx("tmp/byte.tif", open_options=["OVERVIEW_LEVEL=0"])
+    src_ds = gdal.OpenEx(tmp_path / "byte.tif", open_options=["OVERVIEW_LEVEL=0"])
     expected_cs = src_ds.GetRasterBand(1).Checksum()
-    ds = gdal.GetDriverByName("VRT").CreateCopy("tmp/byte.vrt", src_ds)
+    ds = gdal.GetDriverByName("VRT").CreateCopy(tmp_path / "byte.vrt", src_ds)
     ds = None
     src_ds = None
 
-    ds = gdal.Open("tmp/byte.vrt")
+    ds = gdal.Open(tmp_path / "byte.vrt")
     assert ds.RasterXSize == 10 and ds.RasterYSize == 10 and ds.RasterCount == 1
     got_cs = ds.GetRasterBand(1).Checksum()
     assert got_cs == expected_cs
@@ -328,16 +321,15 @@ def test_overviewds_6():
 # Dataset with a mask
 
 
-def test_overviewds_mask():
+def test_overviewds_mask(tmp_vsimem):
 
-    with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-        src_ds = gdal.GetDriverByName("GTiff").Create("/vsimem/test.tif", 4, 4)
-        src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-        src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 4, b"\xFF" * 8)
-        src_ds.BuildOverviews("NEAR", [2, 4])
-        src_ds = None
+    src_ds = gdal.GetDriverByName("GTiff").Create(tmp_vsimem / "test.tif", 4, 4)
+    src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 4, b"\xFF" * 8)
+    src_ds.BuildOverviews("NEAR", [2, 4])
+    src_ds = None
 
-    ovr_ds = gdal.OpenEx("/vsimem/test.tif", open_options=["OVERVIEW_LEVEL=0"])
+    ovr_ds = gdal.OpenEx(tmp_vsimem / "test.tif", open_options=["OVERVIEW_LEVEL=0"])
     assert ovr_ds
     assert ovr_ds.GetRasterBand(1).GetMaskFlags() == gdal.GMF_PER_DATASET
     ovrmaskband = ovr_ds.GetRasterBand(1).GetMaskBand()
@@ -358,28 +350,3 @@ def test_overviewds_mask():
     assert struct.unpack("B" * 1, ovrofovrmaskband.ReadRaster()) == (255,)
 
     ovr_ds = None
-
-    gdal.GetDriverByName("GTiff").Delete("/vsimem/test.tif")
-
-
-###############################################################################
-# Cleanup
-
-
-def test_overviewds_cleanup():
-
-    gdal.GetDriverByName("GTiff").Delete("tmp/byte.tif")
-    try:
-        os.remove("tmp/byte_rpc.txt")
-    except OSError:
-        pass
-    try:
-        os.remove("tmp/sstgeo.tif")
-        os.remove("tmp/sstgeo.vrt")
-        os.remove("tmp/sstgeo.vrt.ovr")
-    except OSError:
-        pass
-    try:
-        os.remove("tmp/byte.vrt")
-    except OSError:
-        pass

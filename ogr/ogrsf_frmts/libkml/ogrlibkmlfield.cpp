@@ -603,17 +603,21 @@ void field2kml(OGRFeature *poOgrFeat, OGRLIBKMLLayer *poOgrLayer,
                 }
 
                 /***** other *****/
+                const char *pszVal =
+                    type == OFTDateTime
+                        ? poOgrFeat->GetFieldAsISO8601DateTime(i, nullptr)
+                        : poOgrFeat->GetFieldAsString(i);
                 if (bUseSimpleField)
                 {
                     poKmlSimpleData = poKmlFactory->CreateSimpleData();
                     poKmlSimpleData->set_name(name);
-                    poKmlSimpleData->set_text(poOgrFeat->GetFieldAsString(i));
+                    poKmlSimpleData->set_text(pszVal);
                 }
                 else
                 {
                     poKmlData = poKmlFactory->CreateData();
                     poKmlData->set_name(name);
-                    poKmlData->set_value(poOgrFeat->GetFieldAsString(i));
+                    poKmlData->set_value(pszVal);
                 }
 
                 break;
@@ -818,7 +822,14 @@ void field2kml(OGRFeature *poOgrFeat, OGRLIBKMLLayer *poOgrLayer,
         {
             if (!poKmlExtendedData)
                 poKmlExtendedData = poKmlFactory->CreateExtendedData();
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
             poKmlExtendedData->add_data(poKmlData);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         }
     }
 
@@ -1273,7 +1284,7 @@ void kml2field(OGRFeature *poOgrFeat, FeaturePtr poKmlFeature)
             GxTrackPtr poKmlGxTrack = AsGxTrack(poKmlGeometry);
             if (poKmlGxTrack)
             {
-                size_t nCoords = poKmlGxTrack->get_gx_coord_array_size();
+                const size_t nCoords = poKmlGxTrack->get_when_array_size();
                 if (nCoords > 0)
                 {
                     kmldatetime2ogr(poOgrFeat, oFC.beginfield,
@@ -1293,28 +1304,35 @@ void kml2field(OGRFeature *poOgrFeat, FeaturePtr poKmlFeature)
             GxMultiTrackPtr poKmlGxMultiTrack = AsGxMultiTrack(poKmlGeometry);
             if (poKmlGxMultiTrack)
             {
-                size_t nGeom = poKmlGxMultiTrack->get_gx_track_array_size();
+                const size_t nGeom =
+                    poKmlGxMultiTrack->get_gx_track_array_size();
                 if (nGeom >= 1)
                 {
-                    GxTrackPtr poKmlGxTrack =
-                        poKmlGxMultiTrack->get_gx_track_array_at(0);
-                    size_t nCoords = poKmlGxTrack->get_gx_coord_array_size();
-                    if (nCoords > 0)
                     {
-                        kmldatetime2ogr(
-                            poOgrFeat, oFC.beginfield,
-                            poKmlGxTrack->get_when_array_at(0).c_str());
+                        GxTrackPtr poKmlGxTrack =
+                            poKmlGxMultiTrack->get_gx_track_array_at(0);
+                        const size_t nCoords =
+                            poKmlGxTrack->get_when_array_size();
+                        if (nCoords > 0)
+                        {
+                            kmldatetime2ogr(
+                                poOgrFeat, oFC.beginfield,
+                                poKmlGxTrack->get_when_array_at(0).c_str());
+                        }
                     }
 
-                    poKmlGxTrack =
-                        poKmlGxMultiTrack->get_gx_track_array_at(nGeom - 1);
-                    nCoords = poKmlGxTrack->get_gx_coord_array_size();
-                    if (nCoords > 0)
                     {
-                        kmldatetime2ogr(
-                            poOgrFeat, oFC.endfield,
-                            poKmlGxTrack->get_when_array_at(nCoords - 1)
-                                .c_str());
+                        GxTrackPtr poKmlGxTrack =
+                            poKmlGxMultiTrack->get_gx_track_array_at(nGeom - 1);
+                        const size_t nCoords =
+                            poKmlGxTrack->get_when_array_size();
+                        if (nCoords > 0)
+                        {
+                            kmldatetime2ogr(
+                                poOgrFeat, oFC.endfield,
+                                poKmlGxTrack->get_when_array_at(nCoords - 1)
+                                    .c_str());
+                        }
                     }
                 }
             }
@@ -1533,8 +1551,8 @@ void kml2field(OGRFeature *poOgrFeat, FeaturePtr poKmlFeature)
  function create a simplefield from a FieldDefn
 ******************************************************************************/
 
-SimpleFieldPtr FieldDef2kml(OGRFieldDefn *poOgrFieldDef,
-                            KmlFactory *poKmlFactory)
+SimpleFieldPtr FieldDef2kml(const OGRFieldDefn *poOgrFieldDef,
+                            KmlFactory *poKmlFactory, bool bApproxOK)
 {
     /***** Get the field config. *****/
     struct fieldconfig oFC;
@@ -1615,6 +1633,11 @@ SimpleFieldPtr FieldDef2kml(OGRFieldDefn *poOgrFieldDef,
         case OFTDate:
         case OFTTime:
         case OFTDateTime:
+            if (bApproxOK)
+            {
+                poKmlSimpleField->set_type("string");
+                return poKmlSimpleField;
+            }
             break;
 
         default:

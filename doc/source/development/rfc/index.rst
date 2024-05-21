@@ -96,3 +96,13 @@ RFC list
     rfc87_signed_int8
     rfc88_googletest
     rfc89_sql_logging_callback
+    rfc90_read_compressed_data
+    rfc91_dataset_close
+    rfc92_wkb_only_geometries
+    rfc93_update_feature
+    rfc94_field_precision_width_metadata
+    rfc95_standard_int_types
+    rfc96_deferred_plugin_loading
+    rfc97_feature_and_fielddefn_sealing
+    rfc98_build_requirements_gdal_3_9
+    rfc99_geometry_coordinate_precision

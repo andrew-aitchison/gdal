@@ -76,6 +76,7 @@ class TILRasterBand final : public GDALPamRasterBand
 
   public:
     TILRasterBand(TILDataset *, int, VRTSourcedRasterBand *);
+
     virtual ~TILRasterBand()
     {
     }
@@ -308,7 +309,7 @@ GDALDataset *TILDataset::Open(GDALOpenInfo *poOpenInfo)
 
     CPLString osFilename = CPLFormFilename(osDirname, pszFilename, nullptr);
     GDALDataset *poTemplateDS =
-        reinterpret_cast<GDALDataset *>(GDALOpen(osFilename, GA_ReadOnly));
+        GDALDataset::FromHandle(GDALOpen(osFilename, GA_ReadOnly));
     if (poTemplateDS == nullptr || poTemplateDS->GetRasterCount() == 0)
     {
         delete poDS;

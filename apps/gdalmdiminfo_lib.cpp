@@ -33,8 +33,16 @@
 #include "cpl_json.h"
 #include "cpl_json_streaming_writer.h"
 #include "gdal_priv.h"
+#include "gdalargumentparser.h"
 #include <limits>
 #include <set>
+
+static void DumpArray(const std::shared_ptr<GDALGroup> &rootGroup,
+                      const std::shared_ptr<GDALMDArray> &array,
+                      CPLJSonStreamingWriter &serializer,
+                      const GDALMultiDimInfoOptions *psOptions,
+                      std::set<std::string> &alreadyDumpedDimensions,
+                      bool bOutputObjType, bool bOutputName);
 
 /************************************************************************/
 /*                       GDALMultiDimInfoOptions                        */
@@ -530,7 +538,7 @@ static void DumpArrayRec(std::shared_ptr<GDALMDArray> array,
         auto arrayContext(serializer.MakeArrayContext());
         if (nCurDim + 1 == dimSizes.size())
         {
-            const auto dt(array->GetDataType());
+            const auto &dt(array->GetDataType());
             const auto nDTSize(dt.GetSize());
             const auto lambdaDumpValue =
                 [&serializer, &dt, nDTSize](std::vector<GByte> &abyTmp,
@@ -631,9 +639,10 @@ static void DumpArrayRec(std::shared_ptr<GDALMDArray> array,
 /************************************************************************/
 
 static void
-DumpDimensions(const std::vector<std::shared_ptr<GDALDimension>> &dims,
+DumpDimensions(const std::shared_ptr<GDALGroup> &rootGroup,
+               const std::vector<std::shared_ptr<GDALDimension>> &dims,
                CPLJSonStreamingWriter &serializer,
-               const GDALMultiDimInfoOptions *,
+               const GDALMultiDimInfoOptions *psOptions,
                std::set<std::string> &alreadyDumpedDimensions)
 {
     auto arrayContext(serializer.MakeArrayContext());
@@ -678,7 +687,23 @@ DumpDimensions(const std::vector<std::shared_ptr<GDALDimension>> &dims,
         if (poIndexingVariable)
         {
             serializer.AddObjKey("indexing_variable");
-            serializer.Add(poIndexingVariable->GetFullName());
+            if (rootGroup->OpenMDArray(poIndexingVariable->GetFullName()))
+            {
+                serializer.Add(poIndexingVariable->GetFullName());
+            }
+            else
+            {
+                std::set<std::string> alreadyDumpedDimensionsLocal(
+                    alreadyDumpedDimensions);
+                alreadyDumpedDimensionsLocal.insert(osFullname);
+
+                auto indexingVariableContext(serializer.MakeObjectContext());
+                serializer.AddObjKey(poIndexingVariable->GetName());
+                DumpArray(rootGroup, poIndexingVariable, serializer, psOptions,
+                          alreadyDumpedDimensionsLocal,
+                          /* bOutputObjType = */ false,
+                          /* bOutputName = */ false);
+            }
         }
     }
 }
@@ -691,21 +716,20 @@ static void DumpStructuralInfo(CSLConstList papszStructuralInfo,
                                CPLJSonStreamingWriter &serializer)
 {
     auto objectContext(serializer.MakeObjectContext());
-    for (int i = 0; papszStructuralInfo && papszStructuralInfo[i]; ++i)
+    int i = 1;
+    for (const auto &[pszKey, pszValue] : cpl::IterateNameValue(
+             papszStructuralInfo, /* bReturnNullKeyIfNotNameValue = */ true))
     {
-        char *pszKey = nullptr;
-        const char *pszValue =
-            CPLParseNameValue(papszStructuralInfo[i], &pszKey);
         if (pszKey)
         {
             serializer.AddObjKey(pszKey);
         }
         else
         {
-            serializer.AddObjKey(CPLSPrintf("metadata_%d", i + 1));
+            serializer.AddObjKey(CPLSPrintf("metadata_%d", i));
+            ++i;
         }
         serializer.Add(pszValue);
-        CPLFree(pszKey);
     }
 }
 
@@ -713,7 +737,8 @@ static void DumpStructuralInfo(CSLConstList papszStructuralInfo,
 /*                             DumpArray()                              */
 /************************************************************************/
 
-static void DumpArray(std::shared_ptr<GDALMDArray> array,
+static void DumpArray(const std::shared_ptr<GDALGroup> &rootGroup,
+                      const std::shared_ptr<GDALMDArray> &array,
                       CPLJSonStreamingWriter &serializer,
                       const GDALMultiDimInfoOptions *psOptions,
                       std::set<std::string> &alreadyDumpedDimensions,
@@ -732,14 +757,15 @@ static void DumpArray(std::shared_ptr<GDALMDArray> array,
     }
 
     serializer.AddObjKey("datatype");
-    const auto dt(array->GetDataType());
+    const auto &dt(array->GetDataType());
     DumpDataType(dt, serializer);
 
     auto dims = array->GetDimensions();
     if (!dims.empty())
     {
         serializer.AddObjKey("dimensions");
-        DumpDimensions(dims, serializer, psOptions, alreadyDumpedDimensions);
+        DumpDimensions(rootGroup, dims, serializer, psOptions,
+                       alreadyDumpedDimensions);
 
         serializer.AddObjKey("dimension_size");
         auto arrayContext(serializer.MakeArrayContext());
@@ -779,7 +805,7 @@ static void DumpArray(std::shared_ptr<GDALMDArray> array,
         DumpAttrs(attrs, serializer, psOptions);
     }
 
-    auto unit = array->GetUnit();
+    const auto &unit = array->GetUnit();
     if (!unit.empty())
     {
         serializer.AddObjKey("unit");
@@ -896,7 +922,8 @@ static void DumpArray(std::shared_ptr<GDALMDArray> array,
 /*                            DumpArrays()                              */
 /************************************************************************/
 
-static void DumpArrays(std::shared_ptr<GDALGroup> group,
+static void DumpArrays(const std::shared_ptr<GDALGroup> &rootGroup,
+                       const std::shared_ptr<GDALGroup> &group,
                        const std::vector<std::string> &arrayNames,
                        CPLJSonStreamingWriter &serializer,
                        const GDALMultiDimInfoOptions *psOptions,
@@ -913,8 +940,8 @@ static void DumpArrays(std::shared_ptr<GDALGroup> group,
         if (array)
         {
             serializer.AddObjKey(array->GetName());
-            DumpArray(array, serializer, psOptions, alreadyDumpedDimensions,
-                      false, false);
+            DumpArray(rootGroup, array, serializer, psOptions,
+                      alreadyDumpedDimensions, false, false);
         }
     }
 }
@@ -923,7 +950,8 @@ static void DumpArrays(std::shared_ptr<GDALGroup> group,
 /*                             DumpGroup()                              */
 /************************************************************************/
 
-static void DumpGroup(std::shared_ptr<GDALGroup> group,
+static void DumpGroup(const std::shared_ptr<GDALGroup> &rootGroup,
+                      const std::shared_ptr<GDALGroup> &group,
                       const char *pszDriverName,
                       CPLJSonStreamingWriter &serializer,
                       const GDALMultiDimInfoOptions *psOptions,
@@ -968,7 +996,8 @@ static void DumpGroup(std::shared_ptr<GDALGroup> group,
     if (!dims.empty())
     {
         serializer.AddObjKey("dimensions");
-        DumpDimensions(dims, serializer, psOptions, alreadyDumpedDimensions);
+        DumpDimensions(rootGroup, dims, serializer, psOptions,
+                       alreadyDumpedDimensions);
     }
 
     CPLStringList aosOptionsGetArray(psOptions->aosArrayOptions);
@@ -978,7 +1007,7 @@ static void DumpGroup(std::shared_ptr<GDALGroup> group,
     if (!arrayNames.empty())
     {
         serializer.AddObjKey("arrays");
-        DumpArrays(group, arrayNames, serializer, psOptions,
+        DumpArrays(rootGroup, group, arrayNames, serializer, psOptions,
                    alreadyDumpedDimensions);
     }
 
@@ -1002,8 +1031,8 @@ static void DumpGroup(std::shared_ptr<GDALGroup> group,
                 if (subgroup)
                 {
                     serializer.AddObjKey(subgroupName);
-                    DumpGroup(subgroup, nullptr, serializer, psOptions,
-                              alreadyDumpedDimensions, false, false);
+                    DumpGroup(rootGroup, subgroup, nullptr, serializer,
+                              psOptions, alreadyDumpedDimensions, false, false);
                 }
             }
         }
@@ -1015,8 +1044,8 @@ static void DumpGroup(std::shared_ptr<GDALGroup> group,
                 auto subgroup = group->OpenGroup(subgroupName);
                 if (subgroup)
                 {
-                    DumpGroup(subgroup, nullptr, serializer, psOptions,
-                              alreadyDumpedDimensions, false, true);
+                    DumpGroup(rootGroup, subgroup, nullptr, serializer,
+                              psOptions, alreadyDumpedDimensions, false, true);
                 }
             }
         }
@@ -1030,6 +1059,98 @@ static void DumpGroup(std::shared_ptr<GDALGroup> group,
 static void WriteToStdout(const char *pszText, void *)
 {
     printf("%s", pszText);
+}
+
+static std::unique_ptr<GDALArgumentParser> GDALMultiDimInfoAppOptionsGetParser(
+    GDALMultiDimInfoOptions *psOptions,
+    GDALMultiDimInfoOptionsForBinary *psOptionsForBinary)
+{
+    auto argParser = std::make_unique<GDALArgumentParser>(
+        "gdalmdiminfo", /* bForBinary=*/psOptionsForBinary != nullptr);
+
+    argParser->add_description(
+        _("Lists various information about a GDAL multidimensional dataset."));
+
+    argParser->add_epilog(_("For more details, consult "
+                            "https://gdal.org/programs/gdalmdiminfo.html"));
+
+    argParser->add_argument("-detailed")
+        .flag()
+        .store_into(psOptions->bDetailed)
+        .help(_("Most verbose output. Report attribute data types and array "
+                "values."));
+
+    argParser->add_inverted_logic_flag(
+        "-nopretty", &psOptions->bPretty,
+        _("Outputs on a single line without any indentation."));
+
+    argParser->add_argument("-array")
+        .metavar("<array_name>")
+        .store_into(psOptions->osArrayName)
+        .help(_("Name of the array, used to restrict the output to the "
+                "specified array."));
+
+    argParser->add_argument("-limit")
+        .metavar("<number>")
+        .scan<'i', int>()
+        .store_into(psOptions->nLimitValuesByDim)
+        .help(_("Number of values in each dimension that is used to limit the "
+                "display of array values."));
+
+    if (psOptionsForBinary)
+    {
+        argParser->add_open_options_argument(
+            psOptionsForBinary->aosOpenOptions);
+
+        argParser->add_input_format_argument(
+            &psOptionsForBinary->aosAllowInputDrivers);
+
+        argParser->add_argument("dataset_name")
+            .metavar("<dataset_name>")
+            .store_into(psOptionsForBinary->osFilename)
+            .help("Input dataset.");
+    }
+
+    argParser->add_argument("-arrayoption")
+        .metavar("<NAME>=<VALUE>")
+        .append()
+        .action([psOptions](const std::string &s)
+                { psOptions->aosArrayOptions.AddString(s.c_str()); })
+        .help(_("Option passed to GDALGroup::GetMDArrayNames() to filter "
+                "reported arrays."));
+
+    argParser->add_argument("-stats")
+        .flag()
+        .store_into(psOptions->bStats)
+        .help(_("Read and display image statistics."));
+
+    // Only used by gdalmdiminfo binary to write output to stdout instead of in a string, in JSON mode
+    argParser->add_argument("-stdout").flag().hidden().store_into(
+        psOptions->bStdoutOutput);
+
+    return argParser;
+}
+
+/************************************************************************/
+/*                  GDALMultiDimInfoAppGetParserUsage()                 */
+/************************************************************************/
+
+std::string GDALMultiDimInfoAppGetParserUsage()
+{
+    try
+    {
+        GDALMultiDimInfoOptions sOptions;
+        GDALMultiDimInfoOptionsForBinary sOptionsForBinary;
+        auto argParser =
+            GDALMultiDimInfoAppOptionsGetParser(&sOptions, &sOptionsForBinary);
+        return argParser->usage();
+    }
+    catch (const std::exception &err)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Unexpected exception: %s",
+                 err.what());
+        return std::string();
+    }
 }
 
 /************************************************************************/
@@ -1082,7 +1203,7 @@ char *GDALMultiDimInfo(GDALDatasetH hDataset,
             auto poDriver = poDS->GetDriver();
             if (poDriver)
                 pszDriverName = poDriver->GetDescription();
-            DumpGroup(group, pszDriverName, serializer, psOptions,
+            DumpGroup(group, group, pszDriverName, serializer, psOptions,
                       alreadyDumpedDimensions, true, true);
         }
         else
@@ -1099,7 +1220,7 @@ char *GDALMultiDimInfo(GDALDatasetH hDataset,
                              "Cannot find group %s", aosTokens[i]);
                     return nullptr;
                 }
-                curGroup = curGroupNew;
+                curGroup = std::move(curGroupNew);
             }
             const char *pszArrayName = aosTokens[aosTokens.size() - 1];
             auto array(curGroup->OpenMDArray(pszArrayName));
@@ -1109,8 +1230,8 @@ char *GDALMultiDimInfo(GDALDatasetH hDataset,
                          pszArrayName);
                 return nullptr;
             }
-            DumpArray(array, serializer, psOptions, alreadyDumpedDimensions,
-                      true, true);
+            DumpArray(group, array, serializer, psOptions,
+                      alreadyDumpedDimensions, true, true);
         }
     }
     catch (const std::exception &e)
@@ -1152,88 +1273,35 @@ GDALMultiDimInfoOptions *
 GDALMultiDimInfoOptionsNew(char **papszArgv,
                            GDALMultiDimInfoOptionsForBinary *psOptionsForBinary)
 {
-    bool bGotFilename = false;
-    GDALMultiDimInfoOptions *psOptions = new GDALMultiDimInfoOptions;
+    auto psOptions = std::make_unique<GDALMultiDimInfoOptions>();
 
     /* -------------------------------------------------------------------- */
     /*      Parse arguments.                                                */
     /* -------------------------------------------------------------------- */
-    for (int i = 0; papszArgv != nullptr && papszArgv[i] != nullptr; i++)
+
+    CPLStringList aosArgv;
+
+    if (papszArgv)
     {
-        if (EQUAL(papszArgv[i], "-oo") && papszArgv[i + 1] != nullptr)
-        {
-            i++;
-            if (psOptionsForBinary)
-            {
-                psOptionsForBinary->aosOpenOptions.AddString(papszArgv[i]);
-            }
-        }
-        /* Not documented: used by gdalinfo_bin.cpp only */
-        else if (EQUAL(papszArgv[i], "-stdout"))
-            psOptions->bStdoutOutput = true;
-        else if (EQUAL(papszArgv[i], "-detailed"))
-            psOptions->bDetailed = true;
-        else if (EQUAL(papszArgv[i], "-nopretty"))
-            psOptions->bPretty = false;
-        else if (EQUAL(papszArgv[i], "-array") && papszArgv[i + 1] != nullptr)
-        {
-            ++i;
-            psOptions->osArrayName = papszArgv[i];
-        }
-        else if (EQUAL(papszArgv[i], "-arrayoption") &&
-                 papszArgv[i + 1] != nullptr)
-        {
-            ++i;
-            psOptions->aosArrayOptions.AddString(papszArgv[i]);
-        }
-        else if (EQUAL(papszArgv[i], "-limit") && papszArgv[i + 1] != nullptr)
-        {
-            ++i;
-            psOptions->nLimitValuesByDim = atoi(papszArgv[i]);
-        }
-        else if (EQUAL(papszArgv[i], "-stats"))
-        {
-            psOptions->bStats = true;
-        }
-
-        else if (EQUAL(papszArgv[i], "-if") && papszArgv[i + 1] != nullptr)
-        {
-            i++;
-            if (psOptionsForBinary)
-            {
-                if (GDALGetDriverByName(papszArgv[i]) == nullptr)
-                {
-                    CPLError(CE_Warning, CPLE_AppDefined,
-                             "%s is not a recognized driver", papszArgv[i]);
-                }
-                psOptionsForBinary->aosAllowInputDrivers.AddString(
-                    papszArgv[i]);
-            }
-        }
-
-        else if (papszArgv[i][0] == '-')
-        {
-            CPLError(CE_Failure, CPLE_NotSupported, "Unknown option name '%s'",
-                     papszArgv[i]);
-            GDALMultiDimInfoOptionsFree(psOptions);
-            return nullptr;
-        }
-        else if (!bGotFilename)
-        {
-            bGotFilename = true;
-            if (psOptionsForBinary)
-                psOptionsForBinary->osFilename = papszArgv[i];
-        }
-        else
-        {
-            CPLError(CE_Failure, CPLE_NotSupported,
-                     "Too many command options '%s'", papszArgv[i]);
-            GDALMultiDimInfoOptionsFree(psOptions);
-            return nullptr;
-        }
+        const int nArgc = CSLCount(papszArgv);
+        for (int i = 0; i < nArgc; i++)
+            aosArgv.AddString(papszArgv[i]);
     }
 
-    return psOptions;
+    try
+    {
+        auto argParser = GDALMultiDimInfoAppOptionsGetParser(
+            psOptions.get(), psOptionsForBinary);
+        argParser->parse_args_without_binary_name(aosArgv);
+    }
+    catch (const std::exception &err)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Unexpected exception: %s",
+                 err.what());
+        return nullptr;
+    }
+
+    return psOptions.release();
 }
 
 /************************************************************************/

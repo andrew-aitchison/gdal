@@ -57,7 +57,13 @@
 #endif
 
 #if defined(__linux) && defined(CPL_MULTIPROC_PTHREAD)
+#ifndef HAVE_5ARGS_MREMAP
+// FIXME? gcore/virtualmem.py tests fail/crash when HAVE_5ARGS_MREMAP
+// is not defined.
+#warning "HAVE_5ARGS_MREMAP not found. Disabling HAVE_VIRTUAL_MEM_VMA"
+#else
 #define HAVE_VIRTUAL_MEM_VMA
+#endif
 #endif
 
 #if defined(HAVE_MMAP) || defined(HAVE_VIRTUAL_MEM_VMA)
@@ -106,9 +112,6 @@ struct CPLVirtualMem
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-
-// FIXME? gcore/virtualmem.py tests fail/crash when HAVE_5ARGS_MREMAP
-// is not defined.
 
 #ifndef HAVE_5ARGS_MREMAP
 #include "cpl_atomic_ops.h"
@@ -1620,7 +1623,6 @@ static void CPLVirtualMemManagerSIGSEGVHandler(int the_signal,
     memset(&msg, 0, sizeof(msg));
     msg.pFaultAddr = the_info->si_addr;
     msg.hRequesterThread = pthread_self();
-    msg.opType = OP_UNKNOWN;
 
 #if defined(__x86_64__) || defined(__i386__)
     ucontext_t *the_ucontext = static_cast<ucontext_t *>(the_ctxt);
@@ -1668,6 +1670,8 @@ static void CPLVirtualMemManagerSIGSEGVHandler(int the_signal,
         }
     }
 #endif
+#else
+    msg.opType = OP_UNKNOWN;
 #endif
 
 #if defined DEBUG_VIRTUALMEM && defined DEBUG_VERBOSE

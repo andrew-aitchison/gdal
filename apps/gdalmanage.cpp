@@ -38,14 +38,16 @@
 /*                               Usage()                                */
 /************************************************************************/
 
-static void Usage()
+static void Usage(bool bIsError)
 
 {
-    printf("Usage: gdalmanage identify [-r|-fr] [-u] files*\n"
-           "    or gdalmanage copy [-f driver] oldname newname\n"
-           "    or gdalmanage rename [-f driver] oldname newname\n"
-           "    or gdalmanage delete [-f driver] datasetname\n");
-    exit(1);
+    fprintf(bIsError ? stderr : stdout,
+            "Usage: gdalmanage [--help] [--help-general]\n"
+            "    or gdalmanage identify [-r|-fr] [-u] <files>*\n"
+            "    or gdalmanage copy [-f <driver>] <oldname> <newname>\n"
+            "    or gdalmanage rename [-f <driver>] <oldname> <newname>\n"
+            "    or gdalmanage delete [-f <driver>] <datasetname>\n");
+    exit(bIsError ? 1 : 0);
 }
 
 /************************************************************************/
@@ -103,33 +105,29 @@ static void Identify(int nArgc, char **papszArgv)
     bool bForceRecurse = false;
     bool bReportFailures = false;
 
-    while (nArgc > 0 && papszArgv[0][0] == '-')
+    int i = 0;
+    for (; i < nArgc && papszArgv[i][0] == '-'; ++i)
     {
-        if (EQUAL(papszArgv[0], "-r"))
+        if (EQUAL(papszArgv[i], "-r"))
             bRecursive = true;
-        else if (EQUAL(papszArgv[0], "-fr"))
+        else if (EQUAL(papszArgv[i], "-fr"))
         {
             bForceRecurse = true;
             bRecursive = true;
         }
-        else if (EQUAL(papszArgv[0], "-u"))
+        else if (EQUAL(papszArgv[i], "-u"))
             bReportFailures = true;
         else
-            Usage();
-
-        papszArgv++;
-        nArgc--;
+            Usage(true);
     }
 
     /* -------------------------------------------------------------------- */
     /*      Process given files.                                            */
     /* -------------------------------------------------------------------- */
-    while (nArgc > 0)
+    for (; i < nArgc; ++i)
     {
-        ProcessIdentifyTarget(papszArgv[0], nullptr, bRecursive,
+        ProcessIdentifyTarget(papszArgv[i], nullptr, bRecursive,
                               bReportFailures, bForceRecurse);
-        nArgc--;
-        papszArgv++;
     }
 }
 
@@ -141,7 +139,7 @@ static void Delete(GDALDriverH hDriver, int nArgc, char **papszArgv)
 
 {
     if (nArgc != 1)
-        Usage();
+        Usage(true);
 
     GDALDeleteDataset(hDriver, papszArgv[0]);
 }
@@ -155,7 +153,7 @@ static void Copy(GDALDriverH hDriver, int nArgc, char **papszArgv,
 
 {
     if (nArgc != 2)
-        Usage();
+        Usage(true);
 
     if (EQUAL(pszOperation, "copy"))
         GDALCopyDatasetFiles(hDriver, papszArgv[1], papszArgv[0]);
@@ -191,16 +189,23 @@ MAIN_START(argc, argv)
     if (argc < 1)
         exit(-argc);
 
-    if (argc < 3)
-        Usage();
-
-    if (EQUAL(argv[1], "--utility_version"))
+    for (int i = 0; i < argc; i++)
     {
-        printf(
-            "%s was compiled against GDAL %s and is running against GDAL %s\n",
-            argv[0], GDAL_RELEASE_NAME, GDALVersionInfo("RELEASE_NAME"));
-        return 0;
+        if (EQUAL(argv[i], "--utility_version"))
+        {
+            printf("%s was compiled against GDAL %s and is running against "
+                   "GDAL %s\n",
+                   argv[0], GDAL_RELEASE_NAME, GDALVersionInfo("RELEASE_NAME"));
+            return 0;
+        }
+        else if (EQUAL(argv[i], "--help"))
+        {
+            Usage(false);
+        }
     }
+
+    if (argc < 3)
+        Usage(true);
 
     /* -------------------------------------------------------------------- */
     /*      Do we have a driver specifier?                                  */
@@ -241,7 +246,7 @@ MAIN_START(argc, argv)
         Delete(hDriver, nRemainingArgc, papszRemainingArgv);
 
     else
-        Usage();
+        Usage(true);
 
     /* -------------------------------------------------------------------- */
     /*      Cleanup                                                         */
@@ -251,4 +256,5 @@ MAIN_START(argc, argv)
 
     exit(0);
 }
+
 MAIN_END

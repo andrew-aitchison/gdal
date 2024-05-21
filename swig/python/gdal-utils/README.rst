@@ -41,7 +41,7 @@ Packaging
 ---------
 
 Starting March 2022 installing gdal-utils with pip will use Setuptools'
-_console_scripts_, which turn the the scripts into native platform
+_console_scripts_, which turn the scripts into native platform
 executables that call the script using the appropriate platform interpreter.
 This means you no longer need to something similar as a post-install step.
 If this causes problems with your distribution please file an issue on
@@ -86,9 +86,9 @@ When called without arguments script should return a message prefixed
 'Usage: ` and use return code ``2``.::
 
     » gdal_edit
-    Usage: gdal_edit [--help-general] [-ro] [-a_srs srs_def]
+    Usage: gdal_edit [--help-general] [-ro] [-a_srs <srs_def>]
         ...
-        [-unsetmd] [-oo NAME=VALUE]* [-mo "META-TAG=VALUE"]*  datasetname
+        [-unsetmd] [-oo <NAME>=<VALUE>]... [-mo <META-TAG>=<VALUE>]... <datasetname>
 
     Edit in place various information of an existing GDAL dataset.
 

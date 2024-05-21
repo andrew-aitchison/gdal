@@ -26,6 +26,7 @@ add_library(
   ogrsf_generic OBJECT
   ogrsfdriverregistrar.cpp
   ogrlayer.cpp
+  ogrlayerarrow.cpp
   ogrdatasource.cpp
   ogrsfdriver.cpp
   # handled in parent directory. ogrregisterall.cpp
@@ -46,22 +47,3 @@ add_dependencies(ogrsf_generic generate_gdal_version_h)
 target_compile_options(ogrsf_generic PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
 target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:ogrsf_generic>)
 set_property(TARGET ogrsf_generic PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
-
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-  set_property(SOURCE ogr_gensql.cpp PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
-endif ()
-
-if (FALSE)
-  # the following are not installed by current autoconf builds
-  include(TargetPublicHeader)
-  target_public_header(
-    TARGET
-    gdal
-    HEADERS
-    ogr_gensql.h
-    ogreditablelayer.h
-    ogremulatedtransaction.h
-    ogrmutexeddatasource.h
-    ogrmutexedlayer.h
-    ogrwarpedlayer.h)
-endif ()

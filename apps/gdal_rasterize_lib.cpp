@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 #include "commonutils.h"
@@ -51,10 +52,10 @@
 #include "ogr_srs_api.h"
 
 /************************************************************************/
-/*                            ArgIsNumeric()                            */
+/*                       ArgIsNumericRasterize()                        */
 /************************************************************************/
 
-static bool ArgIsNumeric(const char *pszArg)
+static bool ArgIsNumericRasterize(const char *pszArg)
 
 {
     char *pszEnd = nullptr;
@@ -70,7 +71,7 @@ static void InvertGeometries(GDALDatasetH hDstDS,
                              std::vector<OGRGeometryH> &ahGeometries)
 
 {
-    OGRGeometryH hInvertMultiPolygon = OGR_G_CreateGeometry(wkbMultiPolygon);
+    OGRMultiPolygon *poInvertMP = new OGRMultiPolygon();
 
     /* -------------------------------------------------------------------- */
     /*      Create a ring that is a bit outside the raster dataset.         */
@@ -81,46 +82,83 @@ static void InvertGeometries(GDALDatasetH hDstDS,
     double adfGeoTransform[6] = {};
     GDALGetGeoTransform(hDstDS, adfGeoTransform);
 
-    OGRGeometryH hUniverseRing = OGR_G_CreateGeometry(wkbLinearRing);
+    OGRLinearRing *poUniverseRing = new OGRLinearRing();
 
-    OGR_G_AddPoint_2D(
-        hUniverseRing,
+    poUniverseRing->addPoint(
         adfGeoTransform[0] + -2 * adfGeoTransform[1] + -2 * adfGeoTransform[2],
         adfGeoTransform[3] + -2 * adfGeoTransform[4] + -2 * adfGeoTransform[5]);
 
-    OGR_G_AddPoint_2D(hUniverseRing,
-                      adfGeoTransform[0] + brx * adfGeoTransform[1] +
-                          -2 * adfGeoTransform[2],
-                      adfGeoTransform[3] + brx * adfGeoTransform[4] +
-                          -2 * adfGeoTransform[5]);
+    poUniverseRing->addPoint(adfGeoTransform[0] + brx * adfGeoTransform[1] +
+                                 -2 * adfGeoTransform[2],
+                             adfGeoTransform[3] + brx * adfGeoTransform[4] +
+                                 -2 * adfGeoTransform[5]);
 
-    OGR_G_AddPoint_2D(hUniverseRing,
-                      adfGeoTransform[0] + brx * adfGeoTransform[1] +
-                          bry * adfGeoTransform[2],
-                      adfGeoTransform[3] + brx * adfGeoTransform[4] +
-                          bry * adfGeoTransform[5]);
+    poUniverseRing->addPoint(adfGeoTransform[0] + brx * adfGeoTransform[1] +
+                                 bry * adfGeoTransform[2],
+                             adfGeoTransform[3] + brx * adfGeoTransform[4] +
+                                 bry * adfGeoTransform[5]);
 
-    OGR_G_AddPoint_2D(hUniverseRing,
-                      adfGeoTransform[0] + -2 * adfGeoTransform[1] +
-                          bry * adfGeoTransform[2],
-                      adfGeoTransform[3] + -2 * adfGeoTransform[4] +
-                          bry * adfGeoTransform[5]);
+    poUniverseRing->addPoint(adfGeoTransform[0] + -2 * adfGeoTransform[1] +
+                                 bry * adfGeoTransform[2],
+                             adfGeoTransform[3] + -2 * adfGeoTransform[4] +
+                                 bry * adfGeoTransform[5]);
 
-    OGR_G_AddPoint_2D(
-        hUniverseRing,
+    poUniverseRing->addPoint(
         adfGeoTransform[0] + -2 * adfGeoTransform[1] + -2 * adfGeoTransform[2],
         adfGeoTransform[3] + -2 * adfGeoTransform[4] + -2 * adfGeoTransform[5]);
 
-    OGRGeometryH hUniversePoly = OGR_G_CreateGeometry(wkbPolygon);
-    OGR_G_AddGeometryDirectly(hUniversePoly, hUniverseRing);
+    OGRPolygon *poUniversePoly = new OGRPolygon();
+    poUniversePoly->addRingDirectly(poUniverseRing);
+    poInvertMP->addGeometryDirectly(poUniversePoly);
 
-    OGR_G_AddGeometryDirectly(hInvertMultiPolygon, hUniversePoly);
-
-    /* -------------------------------------------------------------------- */
-    /*      Add outer rings of polygons as inner rings of hUniversePoly     */
-    /*      and inner rings as sub-polygons.                                */
-    /* -------------------------------------------------------------------- */
     bool bFoundNonPoly = false;
+    // If we have GEOS, use it to "subtract" each polygon from the universe
+    // multipolygon
+    if (OGRGeometryFactory::haveGEOS())
+    {
+        OGRGeometry *poInvertMPAsGeom = poInvertMP;
+        poInvertMP = nullptr;
+        CPL_IGNORE_RET_VAL(poInvertMP);
+        for (unsigned int iGeom = 0; iGeom < ahGeometries.size(); iGeom++)
+        {
+            auto poGeom = OGRGeometry::FromHandle(ahGeometries[iGeom]);
+            const auto eGType = OGR_GT_Flatten(poGeom->getGeometryType());
+            if (eGType != wkbPolygon && eGType != wkbMultiPolygon)
+            {
+                if (!bFoundNonPoly)
+                {
+                    bFoundNonPoly = true;
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "Ignoring non-polygon geometries in -i mode");
+                }
+            }
+            else
+            {
+                auto poNewGeom = poInvertMPAsGeom->Difference(poGeom);
+                if (poNewGeom)
+                {
+                    delete poInvertMPAsGeom;
+                    poInvertMPAsGeom = poNewGeom;
+                }
+            }
+
+            delete poGeom;
+        }
+
+        ahGeometries.resize(1);
+        ahGeometries[0] = OGRGeometry::ToHandle(poInvertMPAsGeom);
+        return;
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      If we don't have GEOS, add outer rings of polygons as inner     */
+    /*      rings of poUniversePoly and inner rings as sub-polygons. Note   */
+    /*      that this only works properly if the polygons are disjoint, in  */
+    /*      the sense that the outer ring of any polygon is not inside the  */
+    /*      outer ring of another one. So the scenario of                   */
+    /*      https://github.com/OSGeo/gdal/issues/8689 with an "island" in   */
+    /*      the middle of a hole will not work properly.                    */
+    /* -------------------------------------------------------------------- */
     for (unsigned int iGeom = 0; iGeom < ahGeometries.size(); iGeom++)
     {
         const auto eGType =
@@ -138,19 +176,15 @@ static void InvertGeometries(GDALDatasetH hDstDS,
         }
 
         const auto ProcessPoly =
-            [hUniversePoly, hInvertMultiPolygon](OGRPolygon *poPoly)
+            [poUniversePoly, poInvertMP](OGRPolygon *poPoly)
         {
             for (int i = poPoly->getNumInteriorRings() - 1; i >= 0; --i)
             {
                 auto poNewPoly = new OGRPolygon();
                 poNewPoly->addRingDirectly(poPoly->stealInteriorRing(i));
-                OGRGeometry::FromHandle(hInvertMultiPolygon)
-                    ->toMultiPolygon()
-                    ->addGeometryDirectly(poNewPoly);
+                poInvertMP->addGeometryDirectly(poNewPoly);
             }
-            OGRGeometry::FromHandle(hUniversePoly)
-                ->toPolygon()
-                ->addRingDirectly(poPoly->stealExteriorRing());
+            poUniversePoly->addRingDirectly(poPoly->stealExteriorRing());
         };
 
         if (eGType == wkbPolygon)
@@ -164,16 +198,16 @@ static void InvertGeometries(GDALDatasetH hDstDS,
         {
             auto poMulti =
                 OGRGeometry::FromHandle(ahGeometries[iGeom])->toMultiPolygon();
-            for (int i = 0; i < poMulti->getNumGeometries(); i++)
+            for (auto *poPoly : *poMulti)
             {
-                ProcessPoly(poMulti->getGeometryRef(i));
+                ProcessPoly(poPoly);
             }
             delete poMulti;
         }
     }
 
     ahGeometries.resize(1);
-    ahGeometries[0] = hInvertMultiPolygon;
+    ahGeometries[0] = OGRGeometry::ToHandle(poInvertMP);
 }
 
 /************************************************************************/
@@ -262,8 +296,7 @@ static CPLErr ProcessLayer(OGRLayerH hSrcLayer, bool bSRSIsSet,
         if (iBurnField == -1)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
-                     "Failed to find field %s on layer %s, skipping.",
-                     pszBurnAttribute,
+                     "Failed to find field %s on layer %s.", pszBurnAttribute,
                      OGR_FD_GetName(OGR_L_GetLayerDefn(hSrcLayer)));
             if (hCT != nullptr)
                 OCTDestroyCoordinateTransformation(hCT);
@@ -382,7 +415,7 @@ static CPLErr ProcessLayer(OGRLayerH hSrcLayer, bool bSRSIsSet,
     CPLErr eErr = CE_None;
     if (papszTO != nullptr)
     {
-        GDALDataset *poDS = reinterpret_cast<GDALDataset *>(hDstDS);
+        GDALDataset *poDS = GDALDataset::FromHandle(hDstDS);
         char **papszTransformerOptions = CSLDuplicate(papszTO);
         double adfGeoTransform[6] = {0.0};
         if (poDS->GetGeoTransform(adfGeoTransform) != CE_None &&
@@ -445,20 +478,21 @@ static CPLErr ProcessLayer(OGRLayerH hSrcLayer, bool bSRSIsSet,
 /************************************************************************/
 
 static GDALDatasetH CreateOutputDataset(
-    std::vector<OGRLayerH> ahLayers, OGRSpatialReferenceH hSRS, bool bGotBounds,
+    const std::vector<OGRLayerH> &ahLayers, OGRSpatialReferenceH hSRS,
     OGREnvelope sEnvelop, GDALDriverH hDriver, const char *pszDest, int nXSize,
     int nYSize, double dfXRes, double dfYRes, bool bTargetAlignedPixels,
     int nBandCount, GDALDataType eOutputType, char **papszCreationOptions,
-    std::vector<double> adfInitVals, int bNoDataSet, double dfNoData)
+    const std::vector<double> &adfInitVals, int bNoDataSet, double dfNoData)
 {
     bool bFirstLayer = true;
     char *pszWKT = nullptr;
+    const bool bBoundsSpecifiedByUser = sEnvelop.IsInit();
 
     for (unsigned int i = 0; i < ahLayers.size(); i++)
     {
         OGRLayerH hLayer = ahLayers[i];
 
-        if (!bGotBounds)
+        if (!bBoundsSpecifiedByUser)
         {
             OGREnvelope sLayerEnvelop;
 
@@ -479,36 +513,22 @@ static GDALDatasetH CreateOutputDataset(
                 sLayerEnvelop.MaxY += dfYRes / 2;
             }
 
-            if (bFirstLayer)
-            {
-                sEnvelop.MinX = sLayerEnvelop.MinX;
-                sEnvelop.MinY = sLayerEnvelop.MinY;
-                sEnvelop.MaxX = sLayerEnvelop.MaxX;
-                sEnvelop.MaxY = sLayerEnvelop.MaxY;
-
-                if (hSRS == nullptr)
-                    hSRS = OGR_L_GetSpatialRef(hLayer);
-
-                bFirstLayer = false;
-            }
-            else
-            {
-                sEnvelop.MinX = std::min(sEnvelop.MinX, sLayerEnvelop.MinX);
-                sEnvelop.MinY = std::min(sEnvelop.MinY, sLayerEnvelop.MinY);
-                sEnvelop.MaxX = std::max(sEnvelop.MaxX, sLayerEnvelop.MaxX);
-                sEnvelop.MaxY = std::max(sEnvelop.MaxY, sLayerEnvelop.MaxY);
-            }
+            sEnvelop.Merge(sLayerEnvelop);
         }
-        else
+
+        if (bFirstLayer)
         {
-            if (bFirstLayer)
-            {
-                if (hSRS == nullptr)
-                    hSRS = OGR_L_GetSpatialRef(hLayer);
+            if (hSRS == nullptr)
+                hSRS = OGR_L_GetSpatialRef(hLayer);
 
-                bFirstLayer = false;
-            }
+            bFirstLayer = false;
         }
+    }
+
+    if (!sEnvelop.IsInit())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Could not determine bounds");
+        return nullptr;
     }
 
     if (dfXRes == 0 && dfYRes == 0)
@@ -535,10 +555,20 @@ static GDALDatasetH CreateOutputDataset(
 
     if (nXSize == 0 && nYSize == 0)
     {
-        nXSize =
-            static_cast<int>(0.5 + (sEnvelop.MaxX - sEnvelop.MinX) / dfXRes);
-        nYSize =
-            static_cast<int>(0.5 + (sEnvelop.MaxY - sEnvelop.MinY) / dfYRes);
+        const double dfXSize = 0.5 + (sEnvelop.MaxX - sEnvelop.MinX) / dfXRes;
+        const double dfYSize = 0.5 + (sEnvelop.MaxY - sEnvelop.MinY) / dfYRes;
+        if (dfXSize > std::numeric_limits<int>::max() ||
+            dfXSize < std::numeric_limits<int>::min() ||
+            dfYSize > std::numeric_limits<int>::max() ||
+            dfYSize < std::numeric_limits<int>::min())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid computed output raster size: %f x %f", dfXSize,
+                     dfYSize);
+            return nullptr;
+        }
+        nXSize = static_cast<int>(dfXSize);
+        nYSize = static_cast<int>(dfYSize);
     }
 
     GDALDatasetH hDstDS =
@@ -622,7 +652,6 @@ struct GDALRasterizeOptions
     int bNoDataSet;
     double dfNoData;
     OGREnvelope sEnvelop;
-    bool bGotBounds;
     int nXSize, nYSize;
     OGRSpatialReferenceH hSRS;
     bool bTargetAlignedPixels;
@@ -797,9 +826,9 @@ GDALDatasetH GDALRasterize(const char *pszDest, GDALDatasetH hDstDS,
                 }
 
                 hDstDS = CreateOutputDataset(
-                    ahLayers, psOptions->hSRS, psOptions->bGotBounds,
-                    psOptions->sEnvelop, hDriver, pszDest, psOptions->nXSize,
-                    psOptions->nYSize, psOptions->dfXRes, psOptions->dfYRes,
+                    ahLayers, psOptions->hSRS, psOptions->sEnvelop, hDriver,
+                    pszDest, psOptions->nXSize, psOptions->nYSize,
+                    psOptions->dfXRes, psOptions->dfYRes,
                     psOptions->bTargetAlignedPixels,
                     static_cast<int>(psOptions->anBandList.size()), eOutputType,
                     psOptions->papszCreationOptions, psOptions->adfInitVals,
@@ -847,7 +876,11 @@ GDALDatasetH GDALRasterize(const char *pszDest, GDALDatasetH hDstDS,
                 hLayer = GDALDatasetGetLayer(hSrcDataset, 0);
             if (hLayer == nullptr)
             {
-                continue;
+                CPLError(
+                    CE_Failure, CPLE_AppDefined, "Unable to find layer \"%s\".",
+                    psOptions->papszLayers ? psOptions->papszLayers[i] : "0");
+                GDALRasterizeOptionsFree(psOptionsToFree);
+                return nullptr;
             }
             if (eOutputType == GDT_Unknown &&
                 psOptions->pszBurnAttribute != nullptr)
@@ -872,10 +905,9 @@ GDALDatasetH GDALRasterize(const char *pszDest, GDALDatasetH hDstDS,
         }
 
         hDstDS = CreateOutputDataset(
-            ahLayers, psOptions->hSRS, psOptions->bGotBounds,
-            psOptions->sEnvelop, hDriver, pszDest, psOptions->nXSize,
-            psOptions->nYSize, psOptions->dfXRes, psOptions->dfYRes,
-            psOptions->bTargetAlignedPixels,
+            ahLayers, psOptions->hSRS, psOptions->sEnvelop, hDriver, pszDest,
+            psOptions->nXSize, psOptions->nYSize, psOptions->dfXRes,
+            psOptions->dfYRes, psOptions->bTargetAlignedPixels,
             static_cast<int>(psOptions->anBandList.size()), eOutputType,
             psOptions->papszCreationOptions, psOptions->adfInitVals,
             psOptions->bNoDataSet, psOptions->dfNoData);
@@ -901,16 +933,20 @@ GDALDatasetH GDALRasterize(const char *pszDest, GDALDatasetH hDstDS,
         if (hLayer == nullptr)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
-                     "Unable to find layer \"%s\", skipping.",
+                     "Unable to find layer \"%s\".",
                      psOptions->papszLayers ? psOptions->papszLayers[i] : "0");
-            continue;
+            eErr = CE_Failure;
+            break;
         }
 
         if (psOptions->pszWHERE)
         {
             if (OGR_L_SetAttributeFilter(hLayer, psOptions->pszWHERE) !=
                 OGRERR_NONE)
+            {
+                eErr = CE_Failure;
                 break;
+            }
         }
 
         void *pScaledProgress = GDALCreateScaledProgress(
@@ -986,12 +1022,13 @@ GDALRasterizeOptionsNew(char **papszArgv,
     psOptions->eOutputType = GDT_Unknown;
     psOptions->bNoDataSet = FALSE;
     psOptions->dfNoData = 0;
-    psOptions->bGotBounds = false;
     psOptions->nXSize = 0;
     psOptions->nYSize = 0;
     psOptions->hSRS = nullptr;
     psOptions->bTargetAlignedPixels = false;
 
+    bool bGotSourceFilename = false;
+    bool bGotDestFilename = false;
     /* -------------------------------------------------------------------- */
     /*      Handle command line arguments.                                  */
     /* -------------------------------------------------------------------- */
@@ -1010,7 +1047,15 @@ GDALRasterizeOptionsNew(char **papszArgv,
         else if (EQUAL(papszArgv[i], "-q") || EQUAL(papszArgv[i], "-quiet"))
         {
             if (psOptionsForBinary)
-                psOptionsForBinary->bQuiet = TRUE;
+            {
+                psOptionsForBinary->bQuiet = true;
+            }
+            else
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "%s switch only supported from gdal_rasterize binary.",
+                         papszArgv[i]);
+            }
         }
 
         else if (i < argc - 1 && EQUAL(papszArgv[i], "-a"))
@@ -1022,19 +1067,17 @@ GDALRasterizeOptionsNew(char **papszArgv,
         {
             if (strchr(papszArgv[i + 1], ' '))
             {
-                char **papszTokens = CSLTokenizeString(papszArgv[i + 1]);
-                char **papszIter = papszTokens;
-                while (papszIter && *papszIter)
+                const CPLStringList aosTokens(
+                    CSLTokenizeString(papszArgv[i + 1]));
+                for (const char *pszToken : aosTokens)
                 {
-                    psOptions->anBandList.push_back(atoi(*papszIter));
-                    papszIter++;
+                    psOptions->anBandList.push_back(atoi(pszToken));
                 }
-                CSLDestroy(papszTokens);
                 i += 1;
             }
             else
             {
-                while (i < argc - 1 && ArgIsNumeric(papszArgv[i + 1]))
+                while (i < argc - 1 && ArgIsNumericRasterize(papszArgv[i + 1]))
                 {
                     psOptions->anBandList.push_back(atoi(papszArgv[i + 1]));
                     i += 1;
@@ -1075,19 +1118,17 @@ GDALRasterizeOptionsNew(char **papszArgv,
         {
             if (strchr(papszArgv[i + 1], ' '))
             {
-                char **papszTokens = CSLTokenizeString(papszArgv[i + 1]);
-                char **papszIter = papszTokens;
-                while (papszIter && *papszIter)
+                const CPLStringList aosTokens(
+                    CSLTokenizeString(papszArgv[i + 1]));
+                for (const char *pszToken : aosTokens)
                 {
-                    psOptions->adfBurnValues.push_back(CPLAtof(*papszIter));
-                    papszIter++;
+                    psOptions->adfBurnValues.push_back(CPLAtof(pszToken));
                 }
-                CSLDestroy(papszTokens);
                 i += 1;
             }
             else
             {
-                while (i < argc - 1 && ArgIsNumeric(papszArgv[i + 1]))
+                while (i < argc - 1 && ArgIsNumericRasterize(papszArgv[i + 1]))
                 {
                     psOptions->adfBurnValues.push_back(
                         CPLAtof(papszArgv[i + 1]));
@@ -1107,8 +1148,23 @@ GDALRasterizeOptionsNew(char **papszArgv,
         }
         else if (i < argc - 1 && EQUAL(papszArgv[i], "-sql"))
         {
+            ++i;
             CPLFree(psOptions->pszSQL);
-            psOptions->pszSQL = CPLStrdup(papszArgv[++i]);
+            GByte *pabyRet = nullptr;
+            if (papszArgv[i][0] == '@' &&
+                VSIIngestFile(nullptr, papszArgv[i] + 1, &pabyRet, nullptr,
+                              1024 * 1024))
+            {
+                GDALRemoveBOM(pabyRet);
+                char *pszSQLStatement = reinterpret_cast<char *>(pabyRet);
+                psOptions->pszSQL =
+                    CPLStrdup(GDALRemoveSQLComments(pszSQLStatement).c_str());
+                VSIFree(pszSQLStatement);
+            }
+            else
+            {
+                psOptions->pszSQL = CPLStrdup(papszArgv[i]);
+            }
         }
         else if (i < argc - 1 && EQUAL(papszArgv[i], "-dialect"))
         {
@@ -1119,19 +1175,17 @@ GDALRasterizeOptionsNew(char **papszArgv,
         {
             if (strchr(papszArgv[i + 1], ' '))
             {
-                char **papszTokens = CSLTokenizeString(papszArgv[i + 1]);
-                char **papszIter = papszTokens;
-                while (papszIter && *papszIter)
+                const CPLStringList aosTokens(
+                    CSLTokenizeString(papszArgv[i + 1]));
+                for (const char *pszToken : aosTokens)
                 {
-                    psOptions->adfInitVals.push_back(CPLAtof(*papszIter));
-                    papszIter++;
+                    psOptions->adfInitVals.push_back(CPLAtof(pszToken));
                 }
-                CSLDestroy(papszTokens);
                 i += 1;
             }
             else
             {
-                while (i < argc - 1 && ArgIsNumeric(papszArgv[i + 1]))
+                while (i < argc - 1 && ArgIsNumericRasterize(papszArgv[i + 1]))
                 {
                     psOptions->adfInitVals.push_back(CPLAtof(papszArgv[i + 1]));
                     i += 1;
@@ -1171,7 +1225,6 @@ GDALRasterizeOptionsNew(char **papszArgv,
             psOptions->sEnvelop.MinY = CPLAtof(papszArgv[++i]);
             psOptions->sEnvelop.MaxX = CPLAtof(papszArgv[++i]);
             psOptions->sEnvelop.MaxY = CPLAtof(papszArgv[++i]);
-            psOptions->bGotBounds = true;
             psOptions->bCreateOutput = true;
         }
         else if (i < argc - 4 && EQUAL(papszArgv[i], "-a_ullr"))
@@ -1180,7 +1233,6 @@ GDALRasterizeOptionsNew(char **papszArgv,
             psOptions->sEnvelop.MaxY = CPLAtof(papszArgv[++i]);
             psOptions->sEnvelop.MaxX = CPLAtof(papszArgv[++i]);
             psOptions->sEnvelop.MinY = CPLAtof(papszArgv[++i]);
-            psOptions->bGotBounds = true;
             psOptions->bCreateOutput = true;
         }
         else if (i < argc - 1 && EQUAL(papszArgv[i], "-co"))
@@ -1248,7 +1300,20 @@ GDALRasterizeOptionsNew(char **papszArgv,
             psOptions->papszTO =
                 CSLAddString(psOptions->papszTO, papszArgv[++i]);
         }
-
+        else if (i < argc - 1 && EQUAL(papszArgv[i], "-oo"))
+        {
+            i++;
+            if (psOptionsForBinary)
+            {
+                psOptionsForBinary->aosOpenOptions.AddString(papszArgv[i]);
+            }
+            else
+            {
+                CPLError(
+                    CE_Failure, CPLE_NotSupported,
+                    "-oo switch only supported from gdal_rasterize binary.");
+            }
+        }
         else if (papszArgv[i][0] == '-')
         {
             CPLError(CE_Failure, CPLE_NotSupported, "Unknown option name '%s'",
@@ -1256,13 +1321,34 @@ GDALRasterizeOptionsNew(char **papszArgv,
             GDALRasterizeOptionsFree(psOptions);
             return nullptr;
         }
-        else if (psOptionsForBinary && psOptionsForBinary->pszSource == nullptr)
+        else if (!bGotSourceFilename)
         {
-            psOptionsForBinary->pszSource = CPLStrdup(papszArgv[i]);
+            bGotSourceFilename = true;
+            if (psOptionsForBinary)
+            {
+                psOptionsForBinary->osSource = papszArgv[i];
+            }
+            else
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "{source_filename} only supported from gdal_rasterize "
+                         "binary.");
+            }
         }
-        else if (psOptionsForBinary && psOptionsForBinary->pszDest == nullptr)
+        else if (!bGotDestFilename)
         {
-            psOptionsForBinary->pszDest = CPLStrdup(papszArgv[i]);
+            bGotDestFilename = true;
+            if (psOptionsForBinary)
+            {
+                psOptionsForBinary->bDestSpecified = true;
+                psOptionsForBinary->osDest = papszArgv[i];
+            }
+            else
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "{dest_filename} only supported from gdal_rasterize "
+                         "binary.");
+            }
         }
         else
         {
@@ -1354,7 +1440,7 @@ GDALRasterizeOptionsNew(char **papszArgv,
     {
         psOptionsForBinary->bCreateOutput = psOptions->bCreateOutput;
         if (psOptions->pszFormat)
-            psOptionsForBinary->pszFormat = CPLStrdup(psOptions->pszFormat);
+            psOptionsForBinary->osFormat = psOptions->pszFormat;
     }
 
     return psOptions;

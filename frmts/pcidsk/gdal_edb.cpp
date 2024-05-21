@@ -59,6 +59,7 @@ class GDAL_EDBFile final : public EDBFile
     {
         poDS = poDSIn;
     }
+
     ~GDAL_EDBFile()
     {
         if (poDS)
@@ -88,11 +89,10 @@ EDBFile *GDAL_EDBOpen(const std::string &osFilename,
     GDALDataset *poDS = nullptr;
 
     if (osAccess == "r")
-        poDS = reinterpret_cast<GDALDataset *>(
-            GDALOpen(osFilename.c_str(), GA_ReadOnly));
+        poDS =
+            GDALDataset::FromHandle(GDALOpen(osFilename.c_str(), GA_ReadOnly));
     else
-        poDS = reinterpret_cast<GDALDataset *>(
-            GDALOpen(osFilename.c_str(), GA_Update));
+        poDS = GDALDataset::FromHandle(GDALOpen(osFilename.c_str(), GA_Update));
 
     if (poDS == nullptr)
         ThrowPCIDSKException("%s", CPLGetLastErrorMsg());

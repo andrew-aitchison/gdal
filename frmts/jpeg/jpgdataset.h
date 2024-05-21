@@ -57,7 +57,12 @@
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
 #include "gdal_priv.h"
+
 CPL_C_START
+
+// So that D_LOSSLESS_SUPPORTED is visible if defined in jmorecfg of libjpeg-turbo >= 2.2
+#define JPEG_INTERNAL_OPTIONS
+
 #ifdef LIBJPEG_12_PATH
 #include LIBJPEG_12_PATH
 #else
@@ -80,15 +85,16 @@ typedef struct
 #pragma warning(disable : 4611)
 #endif
 
-typedef struct
+struct JPGDatasetOpenArgs
 {
-    const char *pszFilename;
-    VSILFILE *fpLin;
-    char **papszSiblingFiles;
-    int nScaleFactor;
-    bool bDoPAMInitialize;
-    bool bUseInternalOverviews;
-} JPGDatasetOpenArgs;
+    const char *pszFilename = nullptr;
+    VSILFILE *fpLin = nullptr;
+    char **papszSiblingFiles = nullptr;
+    int nScaleFactor = 1;
+    bool bDoPAMInitialize = false;
+    bool bUseInternalOverviews = false;
+    bool bIsLossless = false;
+};
 
 class JPGDatasetCommon;
 
@@ -167,8 +173,7 @@ class JPGDatasetCommon CPL_NON_FINAL : public GDALPamDataset
     OGRSpatialReference m_oSRS{};
     bool bGeoTransformValid;
     double adfGeoTransform[6];
-    int nGCPCount;
-    GDAL_GCP *pasGCPList;
+    std::vector<gdal::GCP> m_aoGCPs{};
 
     VSILFILE *m_fpImage;
     GUIntBig nSubfileOffset;
@@ -266,9 +271,17 @@ class JPGDatasetCommon CPL_NON_FINAL : public GDALPamDataset
 
     virtual char **GetFileList(void) override;
 
-    virtual void FlushCache(bool bAtClosing) override;
+    virtual CPLErr FlushCache(bool bAtClosing) override;
 
-    static int Identify(GDALOpenInfo *);
+    CPLStringList GetCompressionFormats(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBandCount,
+                                        const int *panBandList) override;
+    CPLErr ReadCompressedData(const char *pszFormat, int nXOff, int nYOff,
+                              int nXSize, int nYSize, int nBandCount,
+                              const int *panBandList, void **ppBuffer,
+                              size_t *pnBufferSize,
+                              char **ppszDetailedFormat) override;
+
     static GDALDataset *Open(GDALOpenInfo *);
 };
 
@@ -295,14 +308,17 @@ class JPGDataset final : public JPGDatasetCommon
     CPLErr StartDecompress();
     virtual void StopDecompress() override;
     virtual CPLErr Restart() override;
+
     virtual int GetDataPrecision() override
     {
         return sDInfo.data_precision;
     }
+
     virtual int GetOutColorSpace() override
     {
         return sDInfo.out_color_space;
     }
+
     virtual int GetJPEGColorSpace() override
     {
         return sDInfo.jpeg_color_space;
@@ -334,6 +350,7 @@ class JPGDataset final : public JPGDatasetCommon
         GDALJPEGUserData &sUserData, struct jpeg_compress_struct &sCInfo,
         struct jpeg_error_mgr &sJErr, GByte *&pabyScanline);
     static void ErrorExit(j_common_ptr cinfo);
+    static void OutputMessage(j_common_ptr cinfo);
 };
 
 /************************************************************************/
@@ -355,6 +372,7 @@ class JPGRasterBand final : public GDALPamRasterBand
 
   public:
     JPGRasterBand(JPGDatasetCommon *, int);
+
     virtual ~JPGRasterBand()
     {
     }
@@ -390,6 +408,7 @@ class JPGMaskBand final : public GDALRasterBand
 
   public:
     explicit JPGMaskBand(JPGDatasetCommon *poDS);
+
     virtual ~JPGMaskBand()
     {
     }

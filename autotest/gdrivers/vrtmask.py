@@ -120,12 +120,8 @@ def test_vrtmask_2():
 # Translate a RGB dataset with a mask into a VRT
 
 
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_vrtmask_3():
-
-    gtiff_drv = gdal.GetDriverByName("GTiff")
-    md = gtiff_drv.GetMetadata()
-    if md["DMD_CREATIONOPTIONLIST"].find("JPEG") == -1:
-        pytest.skip()
 
     src_ds = gdal.Open("../gcore/data/ycbcr_with_mask.tif")
     ds = gdal.GetDriverByName("VRT").CreateCopy("tmp/vrtmask_3.vrt", src_ds)
@@ -150,12 +146,8 @@ def test_vrtmask_3():
 # Same with gdalbuildvrt
 
 
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_vrtmask_4():
-
-    gtiff_drv = gdal.GetDriverByName("GTiff")
-    md = gtiff_drv.GetMetadata()
-    if md["DMD_CREATIONOPTIONLIST"].find("JPEG") == -1:
-        pytest.skip()
 
     src_ds = gdal.Open("../gcore/data/ycbcr_with_mask.tif")
     gdal.BuildVRT("tmp/vrtmask_4.vrt", [src_ds])
@@ -175,12 +167,8 @@ def test_vrtmask_4():
 # Same with gdal_translate
 
 
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_vrtmask_5():
-
-    gtiff_drv = gdal.GetDriverByName("GTiff")
-    md = gtiff_drv.GetMetadata()
-    if md["DMD_CREATIONOPTIONLIST"].find("JPEG") == -1:
-        pytest.skip()
 
     gdal.Translate(
         "tmp/vrtmask_5.vrt",
@@ -205,12 +193,8 @@ def test_vrtmask_5():
 # Same with gdal_translate with explicit -b and -mask arguments
 
 
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_vrtmask_6():
-
-    gtiff_drv = gdal.GetDriverByName("GTiff")
-    md = gtiff_drv.GetMetadata()
-    if md["DMD_CREATIONOPTIONLIST"].find("JPEG") == -1:
-        pytest.skip()
 
     gdal.Translate(
         "tmp/vrtmask_6.vrt",
@@ -235,12 +219,9 @@ def test_vrtmask_6():
 # gdal_translate with RGBmask -> RGBA and then RGBA->RGBmask
 
 
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_vrtmask_7():
 
-    gtiff_drv = gdal.GetDriverByName("GTiff")
-    md = gtiff_drv.GetMetadata()
-    if md["DMD_CREATIONOPTIONLIST"].find("JPEG") == -1:
-        pytest.skip()
     try:
         os.remove("tmp/vrtmask_7_rgba.tif.msk")
     except OSError:
@@ -286,12 +267,8 @@ def test_vrtmask_7():
 # gdal_translate with RGBmask -> RGB
 
 
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_vrtmask_8():
-
-    gtiff_drv = gdal.GetDriverByName("GTiff")
-    md = gtiff_drv.GetMetadata()
-    if md["DMD_CREATIONOPTIONLIST"].find("JPEG") == -1:
-        pytest.skip()
 
     gdal.Translate(
         "tmp/vrtmask_8.vrt",
@@ -387,32 +364,21 @@ def test_vrtmask_11():
     # Cannot create mask band at raster band level when a dataset mask band already exists
     ds = gdal.Translate("", "data/byte.tif", format="VRT")
     ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-    with gdaltest.error_handler():
-        ret = ds.GetRasterBand(1).CreateMaskBand(0)
-    assert ret != 0, "expected an error, but got success"
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).CreateMaskBand(0)
 
     # This VRT dataset has already a mask band
     ds = gdal.Translate("", "data/byte.tif", format="VRT")
     ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-    with gdaltest.error_handler():
-        ret = ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-    assert ret != 0, "expected an error, but got success"
+    with pytest.raises(Exception):
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
 
     # This VRT band has already a mask band
     ds = gdal.Translate("", "data/byte.tif", format="VRT")
     ds.GetRasterBand(1).CreateMaskBand(0)
-    with gdaltest.error_handler():
-        ret = ds.GetRasterBand(1).CreateMaskBand(0)
-    assert ret != 0, "expected an error, but got success"
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).CreateMaskBand(0)
 
     ds = gdal.Translate("", "data/byte.tif", format="VRT")
     ret = ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
     assert ret == 0
-
-
-###############################################################################
-# Cleanup.
-
-
-def test_vrtmask_cleanup():
-    pass

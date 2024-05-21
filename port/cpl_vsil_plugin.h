@@ -52,6 +52,7 @@ class VSIPluginFilesystemHandler : public VSIFilesystemHandler
   private:
     const char *m_Prefix;
     const VSIFilesystemPluginCallbacksStruct *m_cb;
+    bool m_bWarnedAdviseReadImplemented = false;
 
   protected:
     friend class VSIPluginHandle;
@@ -64,6 +65,8 @@ class VSIPluginFilesystemHandler : public VSIFilesystemHandler
     size_t Read(void *pFile, void *pBuffer, size_t nSize, size_t nCount);
     int ReadMultiRange(void *pFile, int nRanges, void **ppData,
                        const vsi_l_offset *panOffsets, const size_t *panSizes);
+    void AdviseRead(void *pFile, int nRanges, const vsi_l_offset *panOffsets,
+                    const size_t *panSizes);
     VSIRangeStatus GetRangeStatus(void *pFile, vsi_l_offset nOffset,
                                   vsi_l_offset nLength);
     int Eof(void *pFile);
@@ -87,10 +90,6 @@ class VSIPluginFilesystemHandler : public VSIFilesystemHandler
     int Rename(const char *oldpath, const char * /*newpath*/) override;
     int Mkdir(const char *pszDirname, long nMode) override;
     int Rmdir(const char *pszDirname) override;
-    char **ReadDir(const char *pszDirname) override
-    {
-        return ReadDirEx(pszDirname, 0);
-    }
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
     char **SiblingFiles(const char *pszFilename) override;
     int HasOptimizedReadMultiRange(const char *pszPath) override;
@@ -118,6 +117,8 @@ class VSIPluginHandle : public VSIVirtualHandle
     int ReadMultiRange(int nRanges, void **ppData,
                        const vsi_l_offset *panOffsets,
                        const size_t *panSizes) override;
+    void AdviseRead(int nRanges, const vsi_l_offset *panOffsets,
+                    const size_t *panSizes) override;
     VSIRangeStatus GetRangeStatus(vsi_l_offset nOffset,
                                   vsi_l_offset nLength) override;
     int Eof() override;

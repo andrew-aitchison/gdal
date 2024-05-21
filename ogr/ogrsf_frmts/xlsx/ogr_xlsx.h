@@ -59,6 +59,7 @@ class OGRXLSXLayer final : public OGRMemLayer
     void Init();
     bool bUpdated;
     bool bHasHeaderLine;
+    std::string m_osCols{};
     std::set<int> oSetFieldsOfUnknownType{};
 
   public:
@@ -69,12 +70,14 @@ class OGRXLSXLayer final : public OGRMemLayer
     {
         return bUpdated;
     }
+
     void SetUpdated(bool bUpdatedIn = true);
 
     bool GetHasHeaderLine() const
     {
         return bHasHeaderLine;
     }
+
     void SetHasHeaderLine(bool bIn)
     {
         bHasHeaderLine = bIn;
@@ -84,10 +87,12 @@ class OGRXLSXLayer final : public OGRMemLayer
     {
         return OGRMemLayer::GetLayerDefn()->GetName();
     }
+
     OGRwkbGeometryType GetGeomType() override
     {
         return wkbNone;
     }
+
     virtual OGRSpatialReference *GetSpatialRef() override
     {
         return nullptr;
@@ -130,7 +135,7 @@ class OGRXLSXLayer final : public OGRMemLayer
         return OGRMemLayer::GetFeatureCount(bForce);
     }
 
-    virtual OGRErr CreateField(OGRFieldDefn *poField,
+    virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
 
     virtual OGRErr DeleteField(int iField) override
@@ -161,7 +166,14 @@ class OGRXLSXLayer final : public OGRMemLayer
         return OGRMemLayer::TestCapability(pszCap);
     }
 
+    const std::string &GetCols() const
+    {
+        return m_osCols;
+    }
+
     virtual OGRErr SyncToDisk() override;
+
+    GDALDataset *GetDataset() override;
 };
 
 /************************************************************************/
@@ -178,6 +190,7 @@ typedef enum
     STATE_T,
 
     /* for sheet?.xml */
+    STATE_COLS,
     STATE_SHEETDATA,
     STATE_ROW,
     STATE_CELL,
@@ -199,6 +212,7 @@ class XLSXFieldTypeExtended
     XLSXFieldTypeExtended() : eType(OFTMaxType), bHasMS(false)
     {
     }
+
     explicit XLSXFieldTypeExtended(OGRFieldType eTypeIn, bool bHasMSIn = false)
         : eType(eTypeIn), bHasMS(bHasMSIn)
     {
@@ -213,7 +227,7 @@ class OGRXLSXDataSource final : public GDALDataset
     bool bUpdated;
 
     int nLayers;
-    OGRLayer **papoLayers;
+    OGRXLSXLayer **papoLayers;
     std::map<CPLString, CPLString> oMapRelsIdToTarget;
     std::set<std::string> m_oSetSheetId;
 
@@ -236,6 +250,7 @@ class OGRXLSXDataSource final : public GDALDataset
     int nCurCol;
 
     OGRXLSXLayer *poCurLayer;
+    std::string m_osCols{};
 
     int nStackDepth;
     int nDepth;
@@ -257,6 +272,8 @@ class OGRXLSXDataSource final : public GDALDataset
     void startElementDefault(const char *pszName, const char **ppszAttr);
     void startElementTable(const char *pszName, const char **ppszAttr);
     void endElementTable(const char *pszName);
+    void startElementCols(const char *pszName, const char **ppszAttr);
+    void endElementCols(const char *pszName);
     void startElementRow(const char *pszName, const char **ppszAttr);
     void endElementRow(const char *pszName);
     void startElementCell(const char *pszName, const char **ppszAttr);
@@ -271,8 +288,9 @@ class OGRXLSXDataSource final : public GDALDataset
     void DeleteLayer(const char *pszLayerName);
 
   public:
-    OGRXLSXDataSource();
+    explicit OGRXLSXDataSource(CSLConstList papszOpenOptionsIn);
     virtual ~OGRXLSXDataSource();
+    CPLErr Close() override;
 
     int Open(const char *pszFilename, const char *pszPrefixedFilename,
              VSILFILE *fpWorkbook, VSILFILE *fpWorkbookRels,
@@ -284,13 +302,13 @@ class OGRXLSXDataSource final : public GDALDataset
 
     virtual int TestCapability(const char *) override;
 
-    virtual OGRLayer *ICreateLayer(const char *pszLayerName,
-                                   OGRSpatialReference *poSRS,
-                                   OGRwkbGeometryType eType,
-                                   char **papszOptions) override;
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
+
     virtual OGRErr DeleteLayer(int iLayer) override;
 
-    virtual void FlushCache(bool bAtClosing) override;
+    virtual CPLErr FlushCache(bool bAtClosing) override;
 
     void startElementCbk(const char *pszName, const char **ppszAttr);
     void endElementCbk(const char *pszName);
@@ -313,6 +331,7 @@ class OGRXLSXDataSource final : public GDALDataset
     {
         return bUpdatable;
     }
+
     void SetUpdated()
     {
         bUpdated = true;

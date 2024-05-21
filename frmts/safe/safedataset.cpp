@@ -81,8 +81,8 @@ CPLErr SAFERasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     {
         nRequestYSize = nRasterYSize - nBlockYOff * nBlockYSize;
         memset(pImage, 0,
-               (GDALGetDataTypeSize(eDataType) / 8) * nBlockXSize *
-                   nBlockYSize);
+               static_cast<size_t>(GDALGetDataTypeSizeBytes(eDataType)) *
+                   nBlockXSize * nBlockYSize);
     }
     else
     {
@@ -98,8 +98,8 @@ CPLErr SAFERasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     {
         nRequestXSize = nRasterXSize - nBlockXOff * nBlockXSize;
         memset(pImage, 0,
-               (GDALGetDataTypeSize(eDataType) / 8) * nBlockXSize *
-                   nBlockYSize);
+               static_cast<size_t>(GDALGetDataTypeSizeBytes(eDataType)) *
+                   nBlockXSize * nBlockYSize);
     }
     else
     {
@@ -241,9 +241,8 @@ CPLErr SAFESLCRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
         }
         else if (m_eBandType == INTENSITY)
         {
-            GInt16 *pnImageTmp = static_cast<GInt16 *>(
-                VSI_MALLOC_VERBOSE(2 * nBlockXSize * nBlockYSize *
-                                   GDALGetDataTypeSizeBytes(GDT_Int16)));
+            GInt16 *pnImageTmp = static_cast<GInt16 *>(VSI_MALLOC3_VERBOSE(
+                2 * sizeof(int16_t), nBlockXSize, nBlockYSize));
             if (!pnImageTmp)
             {
                 return CE_Failure;
@@ -487,8 +486,7 @@ CPLErr SAFECalibratedRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
     {
         CPLErr eErr = CE_None;
         GInt16 *pnImageTmp = static_cast<GInt16 *>(
-            VSI_MALLOC_VERBOSE(2 * nBlockXSize * nBlockYSize *
-                               GDALGetDataTypeSizeBytes(GDT_Int16)));
+            VSI_MALLOC3_VERBOSE(2 * sizeof(int16_t), nBlockXSize, nBlockYSize));
         if (!pnImageTmp)
             return CE_Failure;
 
@@ -557,8 +555,8 @@ CPLErr SAFECalibratedRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
     else if (m_eInputDataType == GDT_UInt16)
     {
         CPLErr eErr = CE_None;
-        GUInt16 *pnImageTmp = static_cast<GUInt16 *>(VSI_MALLOC_VERBOSE(
-            nBlockXSize * nBlockYSize * GDALGetDataTypeSizeBytes(GDT_UInt16)));
+        GUInt16 *pnImageTmp = static_cast<GUInt16 *>(VSI_MALLOC3_VERBOSE(
+            nBlockXSize, nBlockYSize, GDALGetDataTypeSizeBytes(GDT_UInt16)));
         if (!pnImageTmp)
             return CE_Failure;
         eErr = poBandDataset->RasterIO(GF_Read, nBlockXOff * nBlockXSize,
@@ -851,6 +849,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     SAFECalibratedRasterBand::CalibrationType eCalibrationType =
         SAFECalibratedRasterBand::SIGMA_NOUGHT;
     bool bCalibrated = false;
+
     // 0 for amplitude, 1 for complex (2 band : I , Q) and 2 for INTENSITY
     typedef enum
     {
@@ -859,6 +858,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
         COMPLEX,
         INTENSITY
     } RequestDataType;
+
     RequestDataType eRequestType = UNKNOWN;
     // Calibration Information selection
     CPLString osSubdatasetName;
@@ -1067,7 +1067,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create the dataset.                                             */
     /* -------------------------------------------------------------------- */
-    auto poDS = cpl::make_unique<SAFEDataset>();
+    auto poDS = std::make_unique<SAFEDataset>();
 
     poDS->psManifest = psManifest;
 
@@ -1379,7 +1379,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                     }
 
                     oLL.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                    poDS->m_oGCPSRS = oLL;
+                    poDS->m_oGCPSRS = std::move(oLL);
                 }
 
                 /* --------------------------------------------------------------------
@@ -1481,7 +1481,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                 else if (bCalibrated &&
                          (eRequestType == UNKNOWN || eRequestType == COMPLEX))
                 {
-                    auto poBand = cpl::make_unique<SAFECalibratedRasterBand>(
+                    auto poBand = std::make_unique<SAFECalibratedRasterBand>(
                         poDS.get(), eDataType, osSwath, osPolarization,
                         std::move(poBandFile), osCalibrationFilePath,
                         eCalibrationType);
@@ -1492,7 +1492,8 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                  osCalibrationFilePath.c_str());
                         return nullptr;
                     }
-                    poDS->SetBand(poDS->GetRasterCount() + 1, poBand.release());
+                    poDS->SetBand(poDS->GetRasterCount() + 1,
+                                  std::move(poBand));
                 }
             }
         }
@@ -1501,7 +1502,6 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     // loop through all Swath/pols to add subdatasets
     if (!bIsSubDS)
     {
-        int iSubDS = 1;
         const CPLString aosCalibrationValues[4] = {"SIGMA0", "BETA0", "GAMMA",
                                                    "UNCALIB"};
         const CPLString aosDataUnitValues[3] = {"AMPLITUDE", "COMPLEX",
@@ -1525,8 +1525,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                         for (i = 0; i < 3; i++)
                         {
                             CPLString osCalibTemp = aosCalibrationValues[i];
-                            SAFEDataset::AddSubDataset(
-                                poDS.get(), iSubDS,
+                            poDS->AddSubDataset(
                                 CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s_%s:%s",
                                            osCalibTemp.c_str(),
                                            osMDFilename.c_str(),
@@ -1536,12 +1535,10 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                            "polarization and %s calibration",
                                            osSubDS1.c_str(), pol.c_str(),
                                            osCalibTemp.c_str()));
-                            iSubDS++;
                         }
 
                         CPLString osCalibTemp = aosCalibrationValues[i];
-                        SAFEDataset::AddSubDataset(
-                            poDS.get(), iSubDS,
+                        poDS->AddSubDataset(
                             CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s_%s:%s",
                                        osCalibTemp.c_str(),
                                        osMDFilename.c_str(), osSubDS1.c_str(),
@@ -1551,9 +1548,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                        "polarization and %s calibration",
                                        osSubDS1.c_str(), pol.c_str(),
                                        osCalibTemp.c_str()));
-                        iSubDS++;
-                        SAFEDataset::AddSubDataset(
-                            poDS.get(), iSubDS,
+                        poDS->AddSubDataset(
                             CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s_%s:%s",
                                        osCalibTemp.c_str(),
                                        osMDFilename.c_str(), osSubDS1.c_str(),
@@ -1563,15 +1558,13 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                        "polarization and %s calibration",
                                        osSubDS1.c_str(), pol.c_str(),
                                        osCalibTemp.c_str()));
-                        iSubDS++;
                     }
                     else
                     {
                         i = 3;
                         CPLString osCalibTemp = aosCalibrationValues[i];
 
-                        SAFEDataset::AddSubDataset(
-                            poDS.get(), iSubDS,
+                        poDS->AddSubDataset(
                             CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s_%s:%s",
                                        osCalibTemp.c_str(),
                                        osMDFilename.c_str(), osSubDS1.c_str(),
@@ -1581,7 +1574,6 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                        "polarization and %s calibration",
                                        osSubDS1.c_str(), pol.c_str(),
                                        osCalibTemp.c_str()));
-                        iSubDS++;
                     }
                 }
 
@@ -1595,8 +1587,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                         {
                             CPLString osCalibTemp = aosCalibrationValues[i];
 
-                            SAFEDataset::AddSubDataset(
-                                poDS.get(), iSubDS,
+                            poDS->AddSubDataset(
                                 CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s:%s",
                                            osCalibTemp.c_str(),
                                            osMDFilename.c_str(),
@@ -1607,12 +1598,10 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                     "bands and %s calibration",
                                     osSubDS1.c_str(), osSubDS2.c_str(),
                                     osCalibTemp.c_str()));
-                            iSubDS++;
                         }
 
                         CPLString osCalibTemp = aosCalibrationValues[i];
-                        SAFEDataset::AddSubDataset(
-                            poDS.get(), iSubDS,
+                        poDS->AddSubDataset(
                             CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s:%s",
                                        osCalibTemp.c_str(),
                                        osMDFilename.c_str(), osSubDS1.c_str(),
@@ -1622,9 +1611,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                 "bands and %s calibration",
                                 osSubDS1.c_str(), osSubDS2.c_str(),
                                 osCalibTemp.c_str()));
-                        iSubDS++;
-                        SAFEDataset::AddSubDataset(
-                            poDS.get(), iSubDS,
+                        poDS->AddSubDataset(
                             CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s:%s",
                                        osCalibTemp.c_str(),
                                        osMDFilename.c_str(), osSubDS1.c_str(),
@@ -1634,14 +1621,12 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                 "bands and %s calibration",
                                 osSubDS1.c_str(), osSubDS2.c_str(),
                                 osCalibTemp.c_str()));
-                        iSubDS += 5;
                     }
                     else
                     {
                         i = 3;
                         CPLString osCalibTemp = aosCalibrationValues[i];
-                        SAFEDataset::AddSubDataset(
-                            poDS.get(), iSubDS,
+                        poDS->AddSubDataset(
                             CPLSPrintf("SENTINEL1_CALIB:%s:%s:%s:%s",
                                        osCalibTemp.c_str(),
                                        osMDFilename.c_str(), osSubDS1.c_str(),
@@ -1651,7 +1636,6 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                 "bands and %s calibration",
                                 osSubDS1.c_str(), osSubDS2.c_str(),
                                 osCalibTemp.c_str()));
-                        iSubDS++;
                     }
                 }
             }
@@ -1682,8 +1666,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                             {
                                 CPLString osCalibTemp = aosCalibrationValues[i];
 
-                                SAFEDataset::AddSubDataset(
-                                    poDS.get(), iSubDS,
+                                poDS->AddSubDataset(
                                     CPLSPrintf(
                                         "SENTINEL1_CALIB:%s:%s:%s_%s_%s:%s",
                                         osCalibTemp.c_str(),
@@ -1695,13 +1678,11 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                         "polarization and %s calibration",
                                         osSwath.c_str(), osPolarization.c_str(),
                                         osCalibTemp.c_str()));
-                                iSubDS++;
                             }
 
                             CPLString osCalibTemp = aosCalibrationValues[i];
 
-                            SAFEDataset::AddSubDataset(
-                                poDS.get(), iSubDS,
+                            poDS->AddSubDataset(
                                 CPLSPrintf(
                                     "SENTINEL1_CALIB:%s:%s:%s_%s_%s:%s",
                                     osCalibTemp.c_str(), osMDFilename.c_str(),
@@ -1713,10 +1694,8 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                            osSwath.c_str(),
                                            osPolarization.c_str(),
                                            osCalibTemp.c_str()));
-                            iSubDS++;
 
-                            SAFEDataset::AddSubDataset(
-                                poDS.get(), iSubDS,
+                            poDS->AddSubDataset(
                                 CPLSPrintf(
                                     "SENTINEL1_CALIB:%s:%s:%s_%s_%s:%s",
                                     osCalibTemp.c_str(), osMDFilename.c_str(),
@@ -1728,15 +1707,13 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                            osSwath.c_str(),
                                            osPolarization.c_str(),
                                            osCalibTemp.c_str()));
-                            iSubDS++;
                         }
                         else
                         {
                             i = 3;
                             CPLString osCalibTemp = aosCalibrationValues[i];
 
-                            SAFEDataset::AddSubDataset(
-                                poDS.get(), iSubDS,
+                            poDS->AddSubDataset(
                                 CPLSPrintf(
                                     "SENTINEL1_CALIB:%s:%s:%s_%s_%s:%s",
                                     osCalibTemp.c_str(), osMDFilename.c_str(),
@@ -1748,7 +1725,6 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                            osSwath.c_str(),
                                            osPolarization.c_str(),
                                            osCalibTemp.c_str()));
-                            iSubDS++;
                         }
                     }
                 }
@@ -1888,15 +1864,15 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
 /************************************************************************/
 /*                            AddSubDataset()                           */
 /************************************************************************/
-void SAFEDataset::AddSubDataset(SAFEDataset *poDS, int iDSNum,
-                                const CPLString &osName,
+void SAFEDataset::AddSubDataset(const CPLString &osName,
                                 const CPLString &osDesc)
 {
-    poDS->papszSubDatasets = CSLAddNameValue(
-        poDS->papszSubDatasets, CPLSPrintf("SUBDATASET_%d_NAME", iDSNum),
+    ++m_nSubDSNum;
+    papszSubDatasets = CSLAddNameValue(
+        papszSubDatasets, CPLSPrintf("SUBDATASET_%d_NAME", m_nSubDSNum),
         osName.c_str());
-    poDS->papszSubDatasets = CSLAddNameValue(
-        poDS->papszSubDatasets, CPLSPrintf("SUBDATASET_%d_DESC", iDSNum),
+    papszSubDatasets = CSLAddNameValue(
+        papszSubDatasets, CPLSPrintf("SUBDATASET_%d_DESC", m_nSubDSNum),
         osDesc.c_str());
 }
 

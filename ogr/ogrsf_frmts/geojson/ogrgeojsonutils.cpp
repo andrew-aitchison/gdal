@@ -57,7 +57,7 @@ static bool IsJSONObject(const char *pszText)
     /* -------------------------------------------------------------------- */
     /*      This is a primitive test, but we need to perform it fast.       */
     /* -------------------------------------------------------------------- */
-    while (*pszText != '\0' && isspace((unsigned char)*pszText))
+    while (*pszText != '\0' && isspace(static_cast<unsigned char>(*pszText)))
         pszText++;
 
     const char *const apszPrefix[] = {"loadGeoJSON(", "jsonp("};
@@ -89,12 +89,12 @@ static bool IsTypeSomething(const char *pszText, const char *pszTypeValue)
         if (pszIter == nullptr)
             return false;
         pszIter += strlen("\"type\"");
-        while (isspace(*pszIter))
+        while (isspace(static_cast<unsigned char>(*pszIter)))
             pszIter++;
         if (*pszIter != ':')
             return false;
         pszIter++;
-        while (isspace(*pszIter))
+        while (isspace(static_cast<unsigned char>(*pszIter)))
             pszIter++;
         CPLString osValue;
         osValue.Printf("\"%s\"", pszTypeValue);
@@ -143,7 +143,7 @@ static CPLString GetCompactJSon(const char *pszText, size_t nMaxSize)
             bInString = true;
             osWithoutSpace += '"';
         }
-        else if (!isspace(static_cast<int>(pszText[i])))
+        else if (!isspace(static_cast<unsigned char>(pszText[i])))
         {
             osWithoutSpace += pszText[i];
         }
@@ -165,6 +165,9 @@ static bool IsGeoJSONLikeObject(const char *pszText, bool &bMightBeSequence,
         return false;
 
     if (IsTypeSomething(pszText, "Topology"))
+        return false;
+
+    if (JSONFGIsObject(pszText) && GDALGetDriverByName("JSONFG"))
         return false;
 
     if (IsTypeSomething(pszText, "FeatureCollection"))
@@ -333,7 +336,7 @@ static bool IsLikelyNewlineSequenceGeoJSON(VSILFILE *fpL,
                 {
                     bEOLFound = true;
                 }
-                else if (!isspace(static_cast<int>(abyBuffer[i])))
+                else if (!isspace(static_cast<unsigned char>(abyBuffer[i])))
                 {
                     bCompatibleOfSequence = false;
                     break;
@@ -479,6 +482,60 @@ bool GeoJSONSeqIsObject(const char *pszText)
 
     return bMightBeSequence &&
            IsLikelyNewlineSequenceGeoJSON(nullptr, nullptr, pszText);
+}
+
+/************************************************************************/
+/*                        JSONFGFileIsObject()                          */
+/************************************************************************/
+
+static bool JSONFGFileIsObject(GDALOpenInfo *poOpenInfo)
+{
+    // 6000 somewhat arbitrary. Based on other JSON-like drivers
+    if (poOpenInfo->fpL == nullptr || !poOpenInfo->TryToIngest(6000))
+    {
+        return false;
+    }
+
+    const char *pszText =
+        reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
+    return JSONFGIsObject(pszText);
+}
+
+bool JSONFGIsObject(const char *pszText)
+{
+    if (!IsJSONObject(pszText))
+        return false;
+
+    const std::string osWithoutSpace = GetCompactJSon(pszText, strlen(pszText));
+
+    {
+        const auto nPos = osWithoutSpace.find("\"conformsTo\":[");
+        if (nPos != std::string::npos)
+        {
+            if (osWithoutSpace.find("\"[ogc-json-fg-1-0.1:core]\"", nPos) !=
+                    std::string::npos ||
+                osWithoutSpace.find(
+                    "\"http://www.opengis.net/spec/json-fg-1/0.1\"", nPos) !=
+                    std::string::npos)
+            {
+                return true;
+            }
+        }
+    }
+
+    if (osWithoutSpace.find("\"coordRefSys\":") != std::string::npos ||
+        osWithoutSpace.find("\"featureType\":\"") != std::string::npos ||
+        osWithoutSpace.find("\"place\":{\"type\":") != std::string::npos ||
+        osWithoutSpace.find("\"place\":{\"coordinates\":") !=
+            std::string::npos ||
+        osWithoutSpace.find("\"time\":{\"date\":") != std::string::npos ||
+        osWithoutSpace.find("\"time\":{\"timestamp\":") != std::string::npos ||
+        osWithoutSpace.find("\"time\":{\"interval\":") != std::string::npos)
+    {
+        return true;
+    }
+
+    return false;
 }
 
 /************************************************************************/
@@ -725,6 +782,55 @@ GeoJSONSourceType GeoJSONSeqGetSourceType(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
+/*                      JSONFGDriverGetSourceType()                     */
+/************************************************************************/
+
+GeoJSONSourceType JSONFGDriverGetSourceType(GDALOpenInfo *poOpenInfo)
+{
+    GeoJSONSourceType srcType = eGeoJSONSourceUnknown;
+
+    if (STARTS_WITH_CI(poOpenInfo->pszFilename, "JSONFG:http://") ||
+        STARTS_WITH_CI(poOpenInfo->pszFilename, "JSONFG:https://") ||
+        STARTS_WITH_CI(poOpenInfo->pszFilename, "JSONFG:ftp://"))
+    {
+        srcType = eGeoJSONSourceService;
+    }
+    else if (STARTS_WITH_CI(poOpenInfo->pszFilename, "http://") ||
+             STARTS_WITH_CI(poOpenInfo->pszFilename, "https://") ||
+             STARTS_WITH_CI(poOpenInfo->pszFilename, "ftp://"))
+    {
+        if (IsLikelyESRIJSONURL(poOpenInfo->pszFilename))
+        {
+            return eGeoJSONSourceUnknown;
+        }
+        srcType = eGeoJSONSourceService;
+    }
+    else if (STARTS_WITH_CI(poOpenInfo->pszFilename, "JSONFG:"))
+    {
+        VSIStatBufL sStat;
+        const size_t nJSONFGPrefixLen = strlen("JSONFG:");
+        if (VSIStatL(poOpenInfo->pszFilename + nJSONFGPrefixLen, &sStat) == 0)
+        {
+            return eGeoJSONSourceFile;
+        }
+        const char *pszText = poOpenInfo->pszFilename + nJSONFGPrefixLen;
+        if (JSONFGIsObject(pszText))
+            return eGeoJSONSourceText;
+        return eGeoJSONSourceUnknown;
+    }
+    else if (JSONFGIsObject(poOpenInfo->pszFilename))
+    {
+        srcType = eGeoJSONSourceText;
+    }
+    else if (JSONFGFileIsObject(poOpenInfo))
+    {
+        srcType = eGeoJSONSourceFile;
+    }
+
+    return srcType;
+}
+
+/************************************************************************/
 /*                           GeoJSONPropertyToFieldType()               */
 /************************************************************************/
 
@@ -885,7 +991,8 @@ OGRFieldType GeoJSONPropertyToFieldType(json_object *poObject,
 /*                        GeoJSONStringPropertyToFieldType()            */
 /************************************************************************/
 
-OGRFieldType GeoJSONStringPropertyToFieldType(json_object *poObject)
+OGRFieldType GeoJSONStringPropertyToFieldType(json_object *poObject,
+                                              int &nTZFlag)
 {
     if (poObject == nullptr)
     {
@@ -893,6 +1000,7 @@ OGRFieldType GeoJSONStringPropertyToFieldType(json_object *poObject)
     }
     const char *pszStr = json_object_get_string(poObject);
 
+    nTZFlag = 0;
     OGRField sWrkField;
     CPLPushErrorHandler(CPLQuietErrorHandler);
     const bool bSuccess = CPL_TO_BOOL(OGRParseDate(pszStr, &sWrkField, 0));
@@ -903,6 +1011,7 @@ OGRFieldType GeoJSONStringPropertyToFieldType(json_object *poObject)
         const bool bHasDate =
             strchr(pszStr, '/') != nullptr || strchr(pszStr, '-') != nullptr;
         const bool bHasTime = strchr(pszStr, ':') != nullptr;
+        nTZFlag = sWrkField.Date.TZFlag;
         if (bHasDate && bHasTime)
             return OFTDateTime;
         else if (bHasDate)

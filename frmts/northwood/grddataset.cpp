@@ -46,6 +46,7 @@ constexpr double SCALE16BIT = 65534.0;
 constexpr double SCALE32BIT = 4294967294.0;
 
 void replaceExt(std::string &s, const std::string &newExt);
+
 /************************************************************************/
 /* Replace the extension on a filepath with an alternative extension    */
 /************************************************************************/
@@ -102,7 +103,7 @@ class NWT_GRDDataset final : public GDALPamDataset
 
     CPLErr GetGeoTransform(double *padfTransform) override;
     CPLErr SetGeoTransform(double *padfTransform) override;
-    void FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
@@ -462,7 +463,7 @@ NWT_GRDDataset::~NWT_GRDDataset()
 /************************************************************************/
 /*                 ~FlushCache(bool bAtClosing)                         */
 /************************************************************************/
-void NWT_GRDDataset::FlushCache(bool bAtClosing)
+CPLErr NWT_GRDDataset::FlushCache(bool bAtClosing)
 {
     // Ensure the header and TAB file are up to date
     if (bUpdateHeader)
@@ -471,7 +472,7 @@ void NWT_GRDDataset::FlushCache(bool bAtClosing)
     }
 
     // Call the parent method
-    GDALPamDataset::FlushCache(bAtClosing);
+    return GDALPamDataset::FlushCache(bAtClosing);
 }
 
 /************************************************************************/

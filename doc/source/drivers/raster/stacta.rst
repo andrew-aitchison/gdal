@@ -17,6 +17,21 @@ from a potentially big dataset according to a tiling scheme, with several zoom
 levels. The driver provides a single raster view, with overviews, of the dataset
 described by the JSON file. The driver supports metatiles of arbitrary size.
 
+The driver may use the `Electro-Optical Extension <https://github.com/stac-extensions/eo>`__
+and, starting with GDAL 3.8.2, the `Raster Extension <https://github.com/stac-extensions/raster>`__
+attached to an asset template.
+
+Configuration options
+---------------------
+
+|about-config-options|
+The following configuration options are
+available:
+
+-  .. config:: GDAL_STACTA_SKIP_MISSING_METATILE
+
+      See :oo:`SKIP_MISSING_METATILE` open option.
+
 Open syntax
 -----------
 
@@ -35,17 +50,24 @@ The root of the JSON file must be of type ``Feature``.
 Open options
 ------------
 
+|about-open-options|
 The following open options are supported:
 
-* ``WHOLE_METATILE`` = YES/NO. If set to YES, metatiles will be entirely downloaded
-  (into memory). Otherwise by default, if metatiles are bigger than a threshold,
-  they will be accessed in a piece-wise way.
+-  .. oo:: WHOLE_METATILE
+      :choices: YES, NO.
 
-* ``SKIP_MISSING_METATILE`` = YES/NO. If set to YES, metatiles that are missing
-  will be skipped without error, and corresponding area in the dataset will be
-  filled with the nodata value or zero if there is no nodata value. This setting
-  can also be set with the :decl_configoption:`GDAL_STACTA_SKIP_MISSING_METATILE`
-  configuration option.
+      If set to YES, metatiles will be entirely downloaded
+      (into memory). Otherwise by default, if metatiles are bigger than a threshold,
+      they will be accessed in a piece-wise way.
+
+-  .. oo:: SKIP_MISSING_METATILE
+      :choices: YES, NO
+
+      If set to YES, metatiles that are missing
+      will be skipped without error, and corresponding area in the dataset will be
+      filled with the nodata value or zero if there is no nodata value. This setting
+      can also be set with the :config:`GDAL_STACTA_SKIP_MISSING_METATILE`
+      configuration option.
 
 Subdatasets
 -----------

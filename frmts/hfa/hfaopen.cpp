@@ -3750,9 +3750,9 @@ CPLErr HFARenameReferences(HFAHandle hHFA, const char *pszNewBase,
         {
             if (strncmp(aosNL[i], pszOldBase, strlen(pszOldBase)) == 0)
             {
-                CPLString osNew = pszNewBase;
+                std::string osNew = pszNewBase;
                 osNew += aosNL[i].c_str() + strlen(pszOldBase);
-                aosNL[i] = osNew;
+                aosNL[i] = std::move(osNew);
             }
         }
 
@@ -3807,9 +3807,9 @@ CPLErr HFARenameReferences(HFAHandle hHFA, const char *pszNewBase,
         // Update the filename.
         if (strncmp(osFileName, pszOldBase, strlen(pszOldBase)) == 0)
         {
-            CPLString osNew = pszNewBase;
+            std::string osNew = pszNewBase;
             osNew += osFileName.c_str() + strlen(pszOldBase);
-            osFileName = osNew;
+            osFileName = std::move(osNew);
         }
 
         // Grow the node if needed.
@@ -3859,9 +3859,9 @@ CPLErr HFARenameReferences(HFAHandle hHFA, const char *pszNewBase,
         // Update the filename.
         if (strncmp(osFileName, pszOldBase, strlen(pszOldBase)) == 0)
         {
-            CPLString osNew = pszNewBase;
-            osNew += osFileName.c_str() + strlen(pszOldBase);
-            osFileName = osNew;
+            std::string osNew = pszNewBase;
+            osNew += (osFileName.c_str() + strlen(pszOldBase));
+            osFileName = std::move(osNew);
         }
 
         apoNodeList[iNode]->SetStringField("dependent.string", osFileName);
@@ -3989,6 +3989,8 @@ static const char *const apszUnitMap[] = {"meters",
                                           "0.9144",
                                           "yd",
                                           "0.9144",
+                                          "clarke_yard",
+                                          "0.9143917962",
                                           "miles",
                                           "1304.544",
                                           "mile",
@@ -4031,7 +4033,7 @@ HFAPCSStructToOSR(const Eprj_Datum *psDatum, const Eprj_ProParameters *psPro,
 
     // We make a particular effort to adapt the mapinfo->proname as
     // the PROJCS[] name per #2422.
-    auto poSRS = cpl::make_unique<OGRSpatialReference>();
+    auto poSRS = std::make_unique<OGRSpatialReference>();
     poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
 
     if (psPro == nullptr && psMapInfo != nullptr)
@@ -4349,10 +4351,12 @@ HFAPCSStructToOSR(const Eprj_Datum *psDatum, const Eprj_ProParameters *psPro,
             break;
 
         case EPRJ_HOTINE_OBLIQUE_MERCATOR_AZIMUTH_CENTER:
-            poSRS->SetHOMAC(psPro->proParams[5] * R2D,
-                            psPro->proParams[4] * R2D,
-                            psPro->proParams[3] * R2D, 0.0, psPro->proParams[2],
-                            psPro->proParams[6], psPro->proParams[7]);
+            poSRS->SetHOMAC(
+                psPro->proParams[5] * R2D, psPro->proParams[4] * R2D,
+                psPro->proParams[3] * R2D,
+                psPro->proParams[3] *
+                    R2D,  // We reuse azimuth as rectified_grid_angle
+                psPro->proParams[2], psPro->proParams[6], psPro->proParams[7]);
             break;
 
         case EPRJ_ROBINSON:
@@ -4569,14 +4573,13 @@ HFAPCSStructToOSR(const Eprj_Datum *psDatum, const Eprj_ProParameters *psPro,
 
         case EPRJ_VERTICAL_NEAR_SIDE_PERSPECTIVE:
         {
-            poSRS->SetProjection("Vertical_Near_Side_Perspective");
-            poSRS->SetNormProjParm(SRS_PP_LATITUDE_OF_CENTER,
-                                   psPro->proParams[5] * R2D);
-            poSRS->SetNormProjParm(SRS_PP_LONGITUDE_OF_CENTER,
-                                   psPro->proParams[4] * R2D);
-            poSRS->SetNormProjParm("height", psPro->proParams[2]);
-            poSRS->SetNormProjParm(SRS_PP_FALSE_EASTING, psPro->proParams[6]);
-            poSRS->SetNormProjParm(SRS_PP_FALSE_NORTHING, psPro->proParams[7]);
+            poSRS->SetVerticalPerspective(
+                psPro->proParams[5] * R2D,  // dfTopoOriginLat
+                psPro->proParams[4] * R2D,  // dfTopoOriginLon
+                0,                          // dfTopoOriginHeight
+                psPro->proParams[2],        // dfViewPointHeight
+                psPro->proParams[6],        // dfFalseEasting
+                psPro->proParams[7]);       // dfFalseNorthing
         }
         break;
 

@@ -55,11 +55,9 @@ def test_ogr_dgnv8_2():
     lyr_ref = ds_ref.GetLayer(0)
     ds = ogr.Open("data/dgnv8/test_dgnv8_ref.csv")
     lyr = ds.GetLayer(0)
-    ret = ogrtest.compare_layers(lyr, lyr_ref, excluded_fields=["WKT"])
+    ogrtest.compare_layers(lyr, lyr_ref, excluded_fields=["WKT"])
 
     gdal.Unlink("/vsimem/ogr_dgnv8_2.csv")
-
-    return ret
 
 
 ###############################################################################
@@ -109,11 +107,9 @@ def test_ogr_dgnv8_4():
     lyr_ref = ds_ref.GetLayer(0)
     ds = ogr.Open("data/dgnv8/test_dgnv8_write_ref.csv")
     lyr = ds.GetLayer(0)
-    ret = ogrtest.compare_layers(lyr, lyr_ref, excluded_fields=["WKT"])
+    ogrtest.compare_layers(lyr, lyr_ref, excluded_fields=["WKT"])
 
     gdal.Unlink(tmp_csv)
-
-    return ret
 
 
 ###############################################################################
@@ -139,6 +135,7 @@ def test_ogr_dgnv8_5():
     ]
     ds = ogr.GetDriverByName("DGNv8").CreateDataSource(tmp_dgn, options=options)
     lyr = ds.CreateLayer("my_layer")
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(0 1)"))
     lyr.CreateFeature(f)

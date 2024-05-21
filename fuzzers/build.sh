@@ -37,7 +37,7 @@ if test "${CIFUZZ:-}" = "True"; then
   echo "Running under CI fuzz"
 
   PACKAGES="zlib1g-dev${ARCH_SUFFIX} libexpat-dev${ARCH_SUFFIX} liblzma-dev${ARCH_SUFFIX} \
-          libpng-dev${ARCH_SUFFIX} libgif-dev${ARCH_SUFFIX} \
+          libgif-dev${ARCH_SUFFIX} \
           libjpeg-dev${ARCH_SUFFIX} \
           libwebp-dev${ARCH_SUFFIX} \
           libzstd-dev${ARCH_SUFFIX} \
@@ -69,6 +69,7 @@ if test "${CIFUZZ:-}" = "True"; then
         -DOGR_ENABLE_DRIVER_GPKG:BOOL=ON \
         -DOGR_ENABLE_DRIVER_SQLITE:BOOL=ON \
         -DGDAL_ENABLE_DRIVER_ZARR:BOOL=ON \
+        -DGDAL_USE_PNG_INTERNAL=ON \
         -DGDAL_USE_TIFF_INTERNAL=ON \
         -DGDAL_USE_GEOTIFF_INTERNAL=ON
   make -j$(nproc) GDAL
@@ -87,7 +88,7 @@ if test "${CIFUZZ:-}" = "True"; then
             $LIB_FUZZING_ENGINE \
             -L$SRC_DIR/build -lgdal \
             -lproj \
-            -Wl,-Bstatic -lzstd -lwebp -llzma -lexpat -lsqlite3 -lgif -ljpeg -lpng -lz \
+            -Wl,-Bstatic -lzstd -lwebp -llzma -lexpat -lsqlite3 -lgif -ljpeg -lz \
             -Wl,-Bdynamic -ldl -lpthread
 
   echo "Building ogr_fuzzer"
@@ -101,7 +102,7 @@ if test "${CIFUZZ:-}" = "True"; then
             $LIB_FUZZING_ENGINE \
             -L$SRC_DIR/build -lgdal \
             -L$SRC/install/lib -lproj \
-            -Wl,-Bstatic -lzstd -lwebp -llzma -lexpat -lsqlite3 -lgif -ljpeg -lpng -lz \
+            -Wl,-Bstatic -lzstd -lwebp -llzma -lexpat -lsqlite3 -lgif -ljpeg -lz \
             -Wl,-Bdynamic -ldl -lpthread
 
   echo "Building gdal_fuzzer_seed_corpus.zip"
@@ -137,6 +138,11 @@ curl -L https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.7.4.tar.gz > v4
     cd netcdf-c-4.7.4 && \
     patch -p0 < $SRC/gdal/fuzzers/fix_stack_read_overflow_ncindexlookup.patch && \
     cd ..
+
+rm -rf freetype-2.13.2
+curl -L https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.xz > freetype-2.13.2.tar.xz && \
+    tar xJf freetype-2.13.2.tar.xz && \
+    rm freetype-2.13.2.tar.xz
 
 rm -rf poppler
 git clone --depth 1 https://anongit.freedesktop.org/git/poppler/poppler.git poppler
@@ -181,6 +187,14 @@ make -j$(nproc) -s
 make install
 cd ..
 
+# build freetype
+cd freetype-2.13.2
+CFLAGS="$NON_FUZZING_CFLAGS" ./configure --prefix=$SRC/install
+make clean -s
+make -j$(nproc) -s
+make install
+cd ..
+
 # build poppler
 
 # We *need* to build with the sanitize flags for the address sanitizer,
@@ -200,8 +214,10 @@ fi
 cd poppler
 mkdir -p build
 cd build
+# -DENABLE_BOOST=OFF because Boost 1.74 is now required. Ubuntu 20.04 only provides 1.71
 cmake .. \
   -DCMAKE_INSTALL_PREFIX=$SRC/install \
+  -DCMAKE_PREFIX_PATH=$SRC/install \
   -DCMAKE_BUILD_TYPE=debug \
   -DCMAKE_C_FLAGS="$POPPLER_C_FLAGS" \
   -DCMAKE_CXX_FLAGS="$POPPLER_CXX_FLAGS" \
@@ -216,7 +232,12 @@ cmake .. \
   -DENABLE_GLIB=OFF \
   -DENABLE_LIBCURL=OFF \
   -DENABLE_QT5=OFF \
+  -DENABLE_QT6=OFF \
+  -DENABLE_NSS3=OFF \
+  -DENABLE_GPGME=OFF \
+  -DENABLE_LCMS=OFF \
   -DENABLE_UTILS=OFF \
+  -DENABLE_BOOST=OFF \
   -DWITH_Cairo=OFF \
   -DWITH_NSS3=OFF \
   -DBUILD_CPP_TESTS=OFF \
@@ -232,7 +253,7 @@ cd ../..
 # build libcurl.a (builing against Ubuntu libcurl.a doesn't work easily)
 cd curl
 autoreconf -fi
-./configure --disable-shared --with-openssl --prefix=$SRC/install
+./configure --disable-shared --with-openssl --without-libpsl --prefix=$SRC/install
 make clean -s
 make -j$(nproc) -s
 make install
@@ -293,11 +314,13 @@ cmake .. \
     -DGDAL_USE_TIFF_INTERNAL=ON \
     -DGDAL_USE_GEOTIFF_INTERNAL=ON \
     -DGDAL_USE_HDF5=OFF \
+    -DGDAL_USE_PNG_INTERNAL=ON \
     -DBUILD_APPS:BOOL=OFF  \
     -DBUILD_CSHARP_BINDINGS:BOOL=OFF  \
     -DBUILD_JAVA_BINDINGS:BOOL=OFF  \
     -DBUILD_PYTHON_BINDINGS:BOOL=OFF  \
-    -DBUILD_TESTING:BOOL=OFF
+    -DBUILD_TESTING:BOOL=OFF \
+    -DPOPPLER_24_05_OR_LATER=ON
 make -j$(nproc)
 cd ..
 
@@ -314,7 +337,7 @@ if [ "$ARCHITECTURE" = "x86_64" ]; then
   export EXTRA_LIBS="$EXTRA_LIBS -L$SRC/install/lib -lnetcdf -lhdf5_serial_hl -lhdf5_serial -lsz -laec -lz"
 fi
 # poppler related
-export EXTRA_LIBS="$EXTRA_LIBS -L$SRC/install/lib -lpoppler -ljpeg -lfreetype -lfontconfig"
+export EXTRA_LIBS="$EXTRA_LIBS -L$SRC/install/lib -lpoppler -ljpeg -lfreetype -lfontconfig -lpng"
 export EXTRA_LIBS="$EXTRA_LIBS -Wl,-Bdynamic -ldl -lpthread"
 
 # to find sqlite3.h

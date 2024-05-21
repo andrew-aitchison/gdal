@@ -204,7 +204,7 @@ const char *GDALRelationshipGetMappingTableName(GDALRelationshipH hRelationship)
  * \brief Sets the name of the mapping table for many-to-many relationships.
  *
  * This function is the same as the CPP method
- * OGRFieldDefn::SetMappingTableName().
+ * GDALRelationship::SetMappingTableName().
  *
  * @param hRelationship handle to the relationship to apply the new mapping name
  * to.
@@ -240,14 +240,9 @@ char **GDALRelationshipGetLeftTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship, "GDALRelationshipGetLeftTableFields",
                       nullptr);
 
-    auto fields =
+    const auto &fields =
         GDALRelationship::FromHandle(hRelationship)->GetLeftTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -271,14 +266,9 @@ char **GDALRelationshipGetRightTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship, "GDALRelationshipGetRightTableFields",
                       nullptr);
 
-    auto fields =
+    const auto &fields =
         GDALRelationship::FromHandle(hRelationship)->GetRightTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -302,15 +292,8 @@ char **GDALRelationshipGetRightTableFields(GDALRelationshipH hRelationship)
 void GDALRelationshipSetLeftTableFields(GDALRelationshipH hRelationship,
                                         CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
-    GDALRelationship::FromHandle(hRelationship)->SetLeftTableFields(aosFields);
+    GDALRelationship::FromHandle(hRelationship)
+        ->SetLeftTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -334,15 +317,8 @@ void GDALRelationshipSetLeftTableFields(GDALRelationshipH hRelationship,
 void GDALRelationshipSetRightTableFields(GDALRelationshipH hRelationship,
                                          CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
-    GDALRelationship::FromHandle(hRelationship)->SetRightTableFields(aosFields);
+    GDALRelationship::FromHandle(hRelationship)
+        ->SetRightTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -367,14 +343,9 @@ GDALRelationshipGetLeftMappingTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship,
                       "GDALRelationshipGetLeftMappingTableFields", nullptr);
 
-    auto fields = GDALRelationship::FromHandle(hRelationship)
-                      ->GetLeftMappingTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    const auto &fields = GDALRelationship::FromHandle(hRelationship)
+                             ->GetLeftMappingTableFields();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -399,14 +370,9 @@ GDALRelationshipGetRightMappingTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship,
                       "GDALRelationshipGetRightMappingTableFields", nullptr);
 
-    auto fields = GDALRelationship::FromHandle(hRelationship)
-                      ->GetRightMappingTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    const auto &fields = GDALRelationship::FromHandle(hRelationship)
+                             ->GetRightMappingTableFields();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -430,16 +396,8 @@ GDALRelationshipGetRightMappingTableFields(GDALRelationshipH hRelationship)
 void GDALRelationshipSetLeftMappingTableFields(GDALRelationshipH hRelationship,
                                                CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
     GDALRelationship::FromHandle(hRelationship)
-        ->SetLeftMappingTableFields(aosFields);
+        ->SetLeftMappingTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -463,16 +421,8 @@ void GDALRelationshipSetLeftMappingTableFields(GDALRelationshipH hRelationship,
 void GDALRelationshipSetRightMappingTableFields(GDALRelationshipH hRelationship,
                                                 CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
     GDALRelationship::FromHandle(hRelationship)
-        ->SetRightMappingTableFields(aosFields);
+        ->SetRightMappingTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -554,7 +504,7 @@ const char *GDALRelationshipGetForwardPathLabel(GDALRelationshipH hRelationship)
  * \brief Sets the label of the forward path for the relationship.
  *
  * This function is the same as the CPP method
- * OGRFieldDefn::SetForwardPathLabel().
+ * GDALRelationship::SetForwardPathLabel().
  *
  * The forward and backward path labels are free-form, user-friendly strings
  * which can be used to generate descriptions of the relationship between
@@ -622,7 +572,7 @@ GDALRelationshipGetBackwardPathLabel(GDALRelationshipH hRelationship)
  * \brief Sets the label of the backward path for the relationship.
  *
  * This function is the same as the CPP method
- * OGRFieldDefn::SetBackwardPathLabel().
+ * GDALRelationship::SetBackwardPathLabel().
  *
  * The forward and backward path labels are free-form, user-friendly strings
  * which can be used to generate descriptions of the relationship between
@@ -683,7 +633,7 @@ const char *GDALRelationshipGetRelatedTableType(GDALRelationshipH hRelationship)
  * \brief Sets the type string of the related table.
  *
  * This function is the same as the CPP method
- * OGRFieldDefn::SetRelatedTableType().
+ * GDALRelationship::SetRelatedTableType().
  *
  * This a free-form string representing the type of related features, where the
  * exact interpretation is format dependent. For instance, table types from

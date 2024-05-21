@@ -30,7 +30,6 @@ Raster drivers
    adrg
    aig
    airsar
-   arg
    bag
    basisu
    blx
@@ -82,6 +81,7 @@ Raster drivers
    gsbg
    gsc
    gta
+   gti
    gtiff
    gxf
    hdf4
@@ -129,9 +129,11 @@ Raster drivers
    ngw
    nitf
    noaa_b
+   nsidcbin
    ntv2
    nwtgrd
    ogcapi
+   openfilegdb
    ozi
    palsar
    paux
@@ -145,7 +147,6 @@ Raster drivers
    pnm
    postgisraster
    prf
-   rasdaman
    rasterlite
    rasterlite2
    r
@@ -156,6 +157,9 @@ Raster drivers
    rpftoc
    rraster
    rs2
+   s102
+   s104
+   s111
    safe
    sar_ceos
    sdat

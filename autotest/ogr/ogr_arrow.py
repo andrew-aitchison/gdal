@@ -112,7 +112,7 @@ def test_ogr_arrow_read_all_geom_types(filename_prefix, dim):
     ],
 )
 @pytest.mark.parametrize("dim", ["", "_z", "_m", "_zm"])
-@pytest.mark.parametrize("encoding", ["WKB", "WKT", "GEOARROW"])
+@pytest.mark.parametrize("encoding", ["WKB", "WKT", "GEOARROW", "GEOARROW_INTERLEAVED"])
 def test_ogr_arrow_write_all_geom_types(filename_prefix, dim, encoding):
 
     test_filename = (
@@ -124,7 +124,7 @@ def test_ogr_arrow_write_all_geom_types(filename_prefix, dim, encoding):
     ds_ref = ogr.Open(test_filename)
     lyr_ref = ds_ref.GetLayer(0)
 
-    if encoding != "GEOARROW" or lyr_ref.GetGeomType() not in (
+    if not encoding.startswith("GEOARROW") or lyr_ref.GetGeomType() not in (
         ogr.wkbGeometryCollection,
         ogr.wkbGeometryCollection25D,
         ogr.wkbGeometryCollectionM,
@@ -178,6 +178,24 @@ def test_ogr_arrow_test_ogrsf_test_feather():
     ret = gdaltest.runexternal(
         test_cli_utilities.get_test_ogrsf_path()
         + " -ro data/arrow/from_paleolimbot_geoarrow/polygon-default.feather"
+    )
+
+    assert "INFO" in ret
+    assert "ERROR" not in ret
+
+
+###############################################################################
+# Run test_ogrsf on a Feather file
+
+
+def test_ogr_arrow_test_ogrsf_test_feather_all_types():
+    import test_cli_utilities
+
+    if test_cli_utilities.get_test_ogrsf_path() is None:
+        pytest.skip()
+
+    ret = gdaltest.runexternal(
+        test_cli_utilities.get_test_ogrsf_path() + " -ro data/arrow/test.feather"
     )
 
     assert "INFO" in ret
@@ -261,6 +279,7 @@ def test_ogr_arrow_write_from_another_dataset(
             "ARROW_IPC_STREAM:" + outfilename if open_as_stream else outfilename
         )
         lyr = ds.GetLayer(0)
+        assert lyr.GetDataset().GetDescription() == ds.GetDescription()
 
         assert lyr.GetFIDColumn() == (fid if fid else "")
         f = lyr.GetNextFeature()
@@ -322,17 +341,13 @@ def test_ogr_arrow_write_from_another_dataset(
 
         if open_as_stream:
 
-            with gdaltest.error_handler():
-                assert lyr.GetFeatureCount(force=0) == -1
+            with pytest.raises(Exception):
+                lyr.GetFeatureCount(force=0)
 
             assert lyr.GetFeatureCount() == 5
 
-            with gdaltest.error_handler():
-                gdal.ErrorReset()
-                assert lyr.GetNextFeature() is None
-                assert (
-                    gdal.GetLastErrorMsg() == "Attempting to rewind non-seekable stream"
-                )
+            with pytest.raises(Exception, match="rewind non-seekable stream"):
+                lyr.GetNextFeature()
 
         elif format == "STREAM" and batch_size:
 
@@ -346,6 +361,7 @@ def test_ogr_arrow_write_from_another_dataset(
         )
 
     finally:
+        ds = None
         gdal.Unlink(outfilename)
 
 
@@ -365,6 +381,7 @@ def test_ogr_arrow_write_compression(compression):
     options = ["FID=fid", "COMPRESSION=" + compression]
     lyr = ds.CreateLayer("out", geom_type=ogr.wkbNone, options=options)
     assert lyr is not None
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
     f = ogr.Feature(lyr.GetLayerDefn())
     lyr.CreateFeature(f)
     lyr = None
@@ -387,8 +404,8 @@ def test_ogr_arrow_write_compression(compression):
 
 def test_ogr_arrow_invalid_arrow():
 
-    with gdaltest.error_handler():
-        assert ogr.Open("data/arrow/invalid.arrow") is None
+    with pytest.raises(Exception):
+        ogr.Open("data/arrow/invalid.arrow")
 
 
 ###############################################################################
@@ -397,11 +414,11 @@ def test_ogr_arrow_invalid_arrow():
 
 def test_ogr_arrow_invalid_arrows():
 
-    with gdaltest.error_handler():
-        assert ogr.Open("data/arrow/invalid.arrows") is None
+    with pytest.raises(Exception):
+        ogr.Open("data/arrow/invalid.arrows")
 
-    with gdaltest.error_handler():
-        ogr.Open("ARROW_IPC_STREAM:/vsimem/i_dont_exist.bin") is None
+    with pytest.raises(Exception):
+        ogr.Open("ARROW_IPC_STREAM:/vsimem/i_dont_exist.bin")
 
 
 ###############################################################################
@@ -487,5 +504,272 @@ def test_ogr_arrow_read_with_geoarrow_extension_registered():
         ds = ogr.Open("data/arrow/from_paleolimbot_geoarrow/point-default.feather")
         lyr = ds.GetLayer(0)
         assert lyr.GetGeometryColumn() == "geometry"
+        f = lyr.GetNextFeature()
+        assert f.GetGeometryRef().ExportToIsoWkt() == "POINT (30 10)"
     finally:
         pa.unregister_extension_type(point_type.extension_name)
+
+
+###############################################################################
+# Test reading a file with an extension on a regular field registered with
+# PyArrow
+
+
+def test_ogr_arrow_read_with_extension_registered_on_regular_field():
+    pa = pytest.importorskip("pyarrow")
+
+    class MyJsonType(pa.ExtensionType):
+        def __init__(self):
+            super().__init__(pa.string(), "my_json")
+
+        def __arrow_ext_serialize__(self):
+            return b""
+
+        @classmethod
+        def __arrow_ext_deserialize__(cls, storage_type, serialized):
+            return cls()
+
+    my_json_type = MyJsonType()
+
+    pa.register_extension_type(my_json_type)
+    try:
+        ds = ogr.Open("data/arrow/extension_custom.feather")
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["extension_custom"] == '{"foo":"bar"}'
+    finally:
+        pa.unregister_extension_type(my_json_type.extension_name)
+
+
+###############################################################################
+# Test reading a file with an extension on a regular field not registered with
+# PyArrow
+
+
+def test_ogr_arrow_read_with_extension_not_registered_on_regular_field():
+
+    ds = ogr.Open("data/arrow/extension_custom.feather")
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["extension_custom"] == '{"foo":"bar"}'
+
+
+###############################################################################
+# Test reading a file with the arrow.json extension
+
+
+def test_ogr_arrow_read_arrow_json_extension():
+
+    ds = ogr.Open("data/arrow/extension_json.feather")
+    lyr = ds.GetLayer(0)
+    assert lyr.GetLayerDefn().GetFieldDefn(0).GetSubType() == ogr.OFSTJSON
+    f = lyr.GetNextFeature()
+    assert f["extension_json"] == '{"foo":"bar"}'
+
+    stream = lyr.GetArrowStream()
+    schema = stream.GetSchema()
+
+    dst_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    dst_lyr = dst_ds.CreateLayer("test")
+    success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
+    assert success
+
+    for i in range(schema.GetChildrenCount()):
+        if schema.GetChild(i).GetName() not in ("wkb_geometry", "OGC_FID"):
+            dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+    assert dst_lyr.GetLayerDefn().GetFieldDefn(0).GetSubType() == ogr.OFSTJSON
+
+
+###############################################################################
+# Test storing OGR field alternative name and comment in gdal:schema extension
+
+
+def test_ogr_arrow_field_alternative_name_comment():
+
+    outfilename = "/vsimem/out.feather"
+    try:
+        ds = ogr.GetDriverByName("Arrow").CreateDataSource(outfilename)
+        lyr = ds.CreateLayer("test", geom_type=ogr.wkbNone)
+        fld_defn = ogr.FieldDefn("fld", ogr.OFTInteger)
+        fld_defn.SetAlternativeName("long_field_name")
+        fld_defn.SetComment("this is a field")
+        lyr.CreateField(fld_defn)
+        ds = None
+
+        ds = ogr.Open(outfilename)
+        assert ds is not None
+        lyr = ds.GetLayer(0)
+        assert lyr is not None
+        assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "fld"
+        assert (
+            lyr.GetLayerDefn().GetFieldDefn(0).GetAlternativeName() == "long_field_name"
+        )
+        assert lyr.GetLayerDefn().GetFieldDefn(0).GetComment() == "this is a field"
+        lyr = None
+        ds = None
+    finally:
+        gdal.Unlink(outfilename)
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize("encoding", ["WKB", "WKT", "GEOARROW"])
+def test_ogr_arrow_write_arrow(encoding, tmp_vsimem):
+
+    src_ds = ogr.Open("data/arrow/test.feather")
+    src_lyr = src_ds.GetLayer(0)
+
+    outfilename = str(tmp_vsimem / "test_ogr_arrow_write_arrow.feather")
+    with ogr.GetDriverByName("Arrow").CreateDataSource(outfilename) as dst_ds:
+        dst_lyr = dst_ds.CreateLayer(
+            "test",
+            srs=src_lyr.GetSpatialRef(),
+            geom_type=ogr.wkbPoint,
+            options=["GEOMETRY_ENCODING=" + encoding],
+        )
+
+        stream = src_lyr.GetArrowStream(["MAX_FEATURES_IN_BATCH=3"])
+        schema = stream.GetSchema()
+
+        success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
+        assert success
+
+        for i in range(schema.GetChildrenCount()):
+            if schema.GetChild(i).GetName() != src_lyr.GetGeometryColumn():
+                dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+        while True:
+            array = stream.GetNextRecordBatch()
+            if array is None:
+                break
+            assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
+
+    ogr_parquet._check_test_parquet(
+        outfilename, expect_fast_get_extent=False, expect_ignore_fields=False
+    )
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_arrow_write_arrow_fid_in_input_and_output(tmp_vsimem):
+
+    src_ds = ogr.Open("data/poly.shp")
+    src_lyr = src_ds.GetLayer(0)
+
+    outfilename = str(tmp_vsimem / "poly.feather")
+    with ogr.GetDriverByName("Arrow").CreateDataSource(outfilename) as dst_ds:
+        dst_lyr = dst_ds.CreateLayer(
+            "test",
+            srs=src_lyr.GetSpatialRef(),
+            geom_type=ogr.wkbPoint,
+            options=["GEOMETRY_ENCODING=WKB", "FID=my_fid"],
+        )
+
+        stream = src_lyr.GetArrowStream(["INCLUDE_FID=YES"])
+        schema = stream.GetSchema()
+
+        success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
+        assert success
+
+        for i in range(schema.GetChildrenCount()):
+            if schema.GetChild(i).GetName() not in ("wkb_geometry", "OGC_FID"):
+                dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+        while True:
+            array = stream.GetNextRecordBatch()
+            if array is None:
+                break
+            assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
+
+    ds = ogr.Open(outfilename)
+    lyr = ds.GetLayer(0)
+    src_lyr.ResetReading()
+    for i in range(src_lyr.GetFeatureCount()):
+        assert str(src_lyr.GetNextFeature()) == str(lyr.GetNextFeature())
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_arrow_write_arrow_fid_in_input_but_not_in_output(tmp_vsimem):
+
+    src_ds = ogr.Open("data/poly.shp")
+    src_lyr = src_ds.GetLayer(0)
+
+    outfilename = str(tmp_vsimem / "poly.feather")
+    with ogr.GetDriverByName("Arrow").CreateDataSource(outfilename) as dst_ds:
+        dst_lyr = dst_ds.CreateLayer(
+            "test",
+            srs=src_lyr.GetSpatialRef(),
+            geom_type=ogr.wkbPoint,
+            options=["GEOMETRY_ENCODING=WKB"],
+        )
+
+        stream = src_lyr.GetArrowStream(["INCLUDE_FID=YES"])
+        schema = stream.GetSchema()
+
+        success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
+        assert success
+
+        for i in range(schema.GetChildrenCount()):
+            if schema.GetChild(i).GetName() not in ("wkb_geometry", "OGC_FID"):
+                dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+        while True:
+            array = stream.GetNextRecordBatch()
+            if array is None:
+                break
+            assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
+
+    ds = ogr.Open(outfilename)
+    lyr = ds.GetLayer(0)
+    src_lyr.ResetReading()
+    for i in range(src_lyr.GetFeatureCount()):
+        assert str(src_lyr.GetNextFeature()) == str(lyr.GetNextFeature())
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_arrow_write_arrow_fid_in_output_but_not_in_input(tmp_vsimem):
+
+    src_ds = ogr.Open("data/poly.shp")
+    src_lyr = src_ds.GetLayer(0)
+
+    outfilename = str(tmp_vsimem / "poly.feather")
+    with ogr.GetDriverByName("Arrow").CreateDataSource(outfilename) as dst_ds:
+        dst_lyr = dst_ds.CreateLayer(
+            "test",
+            srs=src_lyr.GetSpatialRef(),
+            geom_type=ogr.wkbPoint,
+            options=["GEOMETRY_ENCODING=WKB", "FID=my_fid"],
+        )
+
+        stream = src_lyr.GetArrowStream(["INCLUDE_FID=NO"])
+        schema = stream.GetSchema()
+
+        success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
+        assert success
+
+        for i in range(schema.GetChildrenCount()):
+            if schema.GetChild(i).GetName() not in ("wkb_geometry", "OGC_FID"):
+                dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+        while True:
+            array = stream.GetNextRecordBatch()
+            if array is None:
+                break
+            assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
+
+    ds = ogr.Open(outfilename)
+    lyr = ds.GetLayer(0)
+    src_lyr.ResetReading()
+    for i in range(src_lyr.GetFeatureCount()):
+        assert str(src_lyr.GetNextFeature()) == str(lyr.GetNextFeature())

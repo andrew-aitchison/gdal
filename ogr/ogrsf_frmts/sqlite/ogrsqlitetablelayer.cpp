@@ -65,7 +65,9 @@ static const char UNSUPPORTED_OP_READ_ONLY[] =
 
 OGRSQLiteTableLayer::OGRSQLiteTableLayer(OGRSQLiteDataSource *poDSIn)
     : OGRSQLiteLayer(poDSIn),
-      m_bSpatialite2D(poDSIn->GetSpatialiteVersionNumber() < 24),
+      m_bSpatialite2D(
+          poDSIn->GetSpatialiteVersionNumber() <
+          OGRSQLiteDataSource::MakeSpatialiteVersionNumber(2, 4, 0)),
       m_bHasCheckedTriggers(!CPLTestBool(
           CPLGetConfigOption("OGR_SQLITE_DISABLE_INSERT_TRIGGERS", "YES")))
 {
@@ -232,7 +234,7 @@ void OGRSQLiteTableLayer::SetCreationParameters(const char *pszFIDColumnName,
             nSRSId = m_poDS->GetUndefinedSRID();
         OGRSQLiteGeomFormat eGeomFormat = GetGeomFormat(pszGeomFormat);
         auto poGeomFieldDefn =
-            cpl::make_unique<OGRSQLiteGeomFieldDefn>(pszGeometryName, -1);
+            std::make_unique<OGRSQLiteGeomFieldDefn>(pszGeometryName, -1);
         poGeomFieldDefn->SetType(eGeomType);
         poGeomFieldDefn->m_nSRSId = nSRSId;
         poGeomFieldDefn->m_eGeomFormat = eGeomFormat;
@@ -525,7 +527,9 @@ CPLErr OGRSQLiteTableLayer::EstablishFeatureDefn(const char *pszGeomCol,
     }
 
     if (bHasSpatialiteCol && m_poDS->IsSpatialiteLoaded() &&
-        m_poDS->GetSpatialiteVersionNumber() < 24 && m_poDS->GetUpdate())
+        m_poDS->GetSpatialiteVersionNumber() <
+            OGRSQLiteDataSource::MakeSpatialiteVersionNumber(2, 4, 0) &&
+        m_poDS->GetUpdate())
     {
         // we need to test version required by Spatialite TRIGGERs
         // hColStmt = NULL;
@@ -1513,7 +1517,7 @@ OGRSQLiteTableLayer::FieldDefnToSQliteFieldDefn(OGRFieldDefn *poFieldDefn)
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRSQLiteTableLayer::CreateField(OGRFieldDefn *poFieldIn,
+OGRErr OGRSQLiteTableLayer::CreateField(const OGRFieldDefn *poFieldIn,
                                         CPL_UNUSED int bApproxOK)
 {
     OGRFieldDefn oField(poFieldIn);
@@ -1628,8 +1632,9 @@ OGRErr OGRSQLiteTableLayer::CreateField(OGRFieldDefn *poFieldIn,
 /*                           CreateGeomField()                          */
 /************************************************************************/
 
-OGRErr OGRSQLiteTableLayer::CreateGeomField(OGRGeomFieldDefn *poGeomFieldIn,
-                                            CPL_UNUSED int bApproxOK)
+OGRErr
+OGRSQLiteTableLayer::CreateGeomField(const OGRGeomFieldDefn *poGeomFieldIn,
+                                     CPL_UNUSED int bApproxOK)
 {
     OGRwkbGeometryType eType = poGeomFieldIn->GetType();
     if (eType == wkbNone)
@@ -1652,7 +1657,7 @@ OGRErr OGRSQLiteTableLayer::CreateGeomField(OGRGeomFieldDefn *poGeomFieldIn,
         }
     }
 
-    auto poGeomField = cpl::make_unique<OGRSQLiteGeomFieldDefn>(
+    auto poGeomField = std::make_unique<OGRSQLiteGeomFieldDefn>(
         poGeomFieldIn->GetNameRef(), -1);
     if (EQUAL(poGeomField->GetNameRef(), ""))
     {
@@ -1662,10 +1667,10 @@ OGRErr OGRSQLiteTableLayer::CreateGeomField(OGRGeomFieldDefn *poGeomFieldIn,
             poGeomField->SetName(CPLSPrintf(
                 "GEOMETRY%d", m_poFeatureDefn->GetGeomFieldCount() + 1));
     }
-    auto l_poSRS = poGeomFieldIn->GetSpatialRef();
-    if (l_poSRS)
+    auto poSRSIn = poGeomFieldIn->GetSpatialRef();
+    if (poSRSIn)
     {
-        l_poSRS = l_poSRS->Clone();
+        auto l_poSRS = poSRSIn->Clone();
         l_poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
         poGeomField->SetSpatialRef(l_poSRS);
         l_poSRS->Release();
@@ -1683,7 +1688,7 @@ OGRErr OGRSQLiteTableLayer::CreateGeomField(OGRGeomFieldDefn *poGeomFieldIn,
         CPLFree(pszSafeName);
     }
 
-    OGRSpatialReference *poSRS = poGeomField->GetSpatialRef();
+    const OGRSpatialReference *poSRS = poGeomField->GetSpatialRef();
     int nSRSId = -1;
     if (poSRS != nullptr)
         nSRSId = m_poDS->FetchSRSId(poSRS);
@@ -1781,7 +1786,9 @@ OGRErr OGRSQLiteTableLayer::RunAddGeometryColumn(
         */
         int iSpatialiteVersion = m_poDS->GetSpatialiteVersionNumber();
         const char *pszCoordDim = "2";
-        if (iSpatialiteVersion < 24 && nCoordDim == 3)
+        if (iSpatialiteVersion <
+                OGRSQLiteDataSource::MakeSpatialiteVersionNumber(2, 4, 0) &&
+            nCoordDim == 3)
         {
             CPLDebug("SQLITE", "Spatialite < 2.4.0 --> 2.5D geometry not "
                                "supported. Casting to 2D");
@@ -1799,7 +1806,9 @@ OGRErr OGRSQLiteTableLayer::RunAddGeometryColumn(
                          m_pszEscapedTableName,
                          SQLEscapeLiteral(pszGeomCol).c_str(), nSRSId, pszType,
                          pszCoordDim);
-        if (iSpatialiteVersion >= 30 && !poGeomFieldDefn->IsNullable())
+        if (iSpatialiteVersion >=
+                OGRSQLiteDataSource::MakeSpatialiteVersionNumber(3, 0, 0) &&
+            !poGeomFieldDefn->IsNullable())
             osCommand += ", 1";
         osCommand += ")";
     }
@@ -2265,9 +2274,6 @@ OGRErr OGRSQLiteTableLayer::AlterFieldDefn(int iFieldToAlter,
         oTmpFieldDefn.SetUnique(poNewFieldDefn->IsUnique());
     }
 
-    // ALTER TABLE ... RENAME COLUMN ... was first implemented in 3.25.0 but
-    // 3.26.0 was required so that foreign key constraints are updated as well
-#if SQLITE_VERSION_NUMBER >= 3026000L
     if (nActualFlags == ALTER_NAME_FLAG)
     {
         CPLDebug("SQLite", "Running ALTER TABLE RENAME COLUMN");
@@ -2284,7 +2290,6 @@ OGRErr OGRSQLiteTableLayer::AlterFieldDefn(int iFieldToAlter,
             return eErr;
     }
     else
-#endif
     {
         /* --------------------------------------------------------------------
          */

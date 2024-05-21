@@ -42,6 +42,7 @@
 #include "cpl_error.h"
 #include "cpl_multiproc.h"
 #include "cpl_string.h"
+#include "cpl_vsi_virtual.h"
 #include "gmlutils.h"
 #include "ogr_geometry.h"
 
@@ -302,6 +303,8 @@ bool GMLReader::SetupParserXerces()
         m_poSAXReader->setLexicalHandler(poXercesHandler);
         m_poSAXReader->setEntityResolver(poXercesHandler);
         m_poSAXReader->setDTDHandler(poXercesHandler);
+        m_poSAXReader->setFeature(
+            XMLUni::fgXercesDisableDefaultEntityResolution, true);
 
         xmlUriValid =
             XMLString::transcode("http://xml.org/sax/features/validation");
@@ -1257,15 +1260,16 @@ bool GMLReader::SaveClasses(const char *pszFile)
 
     CPLDestroyXMLNode(psRoot);
 
-    VSILFILE *fp = VSIFOpenL(pszFile, "wb");
+    auto fp = VSIVirtualHandleUniquePtr(VSIFOpenL(pszFile, "wb"));
 
     bool bSuccess = true;
     if (fp == nullptr)
         bSuccess = false;
-    else if (VSIFWriteL(pszWholeText, strlen(pszWholeText), 1, fp) != 1)
-        bSuccess = false;
     else
-        VSIFCloseL(fp);
+    {
+        if (fp->Write(pszWholeText, strlen(pszWholeText), 1) != 1)
+            bSuccess = false;
+    }
 
     CPLFree(pszWholeText);
 
@@ -1341,25 +1345,44 @@ bool GMLReader::PrescanForSchema(bool bGetExtents, bool bOnlyDetectSRS)
 
         const CPLXMLNode *const *papsGeometry = poFeature->GetGeometryList();
         bool bGeometryColumnJustCreated = false;
+
+        const CPLXMLNode *apsGeometries[2] = {nullptr, nullptr};
+        const CPLXMLNode *psBoundedByGeometry =
+            poFeature->GetBoundedByGeometry();
+        int nFeatureGeomCount = poFeature->GetGeometryCount();
+        if (psBoundedByGeometry && nFeatureGeomCount == 0 &&
+            strcmp(psBoundedByGeometry->pszValue, "null") != 0)
+        {
+            apsGeometries[0] = psBoundedByGeometry;
+            papsGeometry = apsGeometries;
+            nFeatureGeomCount = 1;
+        }
+
         if (!bOnlyDetectSRS && papsGeometry != nullptr &&
             papsGeometry[0] != nullptr)
         {
             if (poClass->GetGeometryPropertyCount() == 0)
             {
-                std::string osGeomName(m_osSingleGeomElemPath);
+                std::string osPath(poClass->GetSingleGeomElemPath());
+                if (osPath.empty() &&
+                    poClass->IsConsistentSingleGeomElemPath() &&
+                    papsGeometry[0] == psBoundedByGeometry)
+                {
+                    osPath = "boundedBy";
+                }
+                std::string osGeomName(osPath);
                 const auto nPos = osGeomName.rfind('|');
                 if (nPos != std::string::npos)
                     osGeomName = osGeomName.substr(nPos + 1);
                 bGeometryColumnJustCreated = true;
                 poClass->AddGeometryProperty(new GMLGeometryPropertyDefn(
-                    osGeomName.c_str(), m_osSingleGeomElemPath.c_str(),
-                    wkbUnknown, -1, true));
+                    osGeomName.c_str(), osPath.c_str(), wkbUnknown, -1, true));
             }
         }
 
         if (bGetExtents && papsGeometry != nullptr)
         {
-            const int nIters = std::min(poFeature->GetGeometryCount(),
+            const int nIters = std::min(nFeatureGeomCount,
                                         poClass->GetGeometryPropertyCount());
             for (int i = 0; i < nIters; ++i)
             {
@@ -1406,9 +1429,8 @@ bool GMLReader::PrescanForSchema(bool bGetExtents, bool bOnlyDetectSRS)
                 }
                 else
                 {
-                    poGeomProperty->SetType(
-                        static_cast<int>(OGRMergeGeometryTypesEx(
-                            eGType, poGeometry->getGeometryType(), true)));
+                    poGeomProperty->SetType(OGRMergeGeometryTypesEx(
+                        eGType, poGeometry->getGeometryType(), true));
                 }
 
                 // Merge extents.

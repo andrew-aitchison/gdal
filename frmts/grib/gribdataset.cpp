@@ -31,6 +31,7 @@
 
 #include "cpl_port.h"
 #include "gribdataset.h"
+#include "gribdrivercore.h"
 
 #include <cerrno>
 #include <cmath>
@@ -240,15 +241,17 @@ vsi_l_offset GRIBRasterBand::FindTrueStart(VSILFILE *fp, vsi_l_offset start)
 }
 
 /************************************************************************/
-/*                          FindPDSTemplate()                           */
+/*                      FindPDSTemplateGRIB2()                          */
 /*                                                                      */
 /*      Scan the file for the PDS template info and represent it as     */
 /*      metadata.                                                       */
 /************************************************************************/
 
-void GRIBRasterBand::FindPDSTemplate()
+void GRIBRasterBand::FindPDSTemplateGRIB2()
 
 {
+    CPLAssert(m_nGribVersion == 2);
+
     if (bLoadedPDS)
         return;
     bLoadedPDS = true;
@@ -908,7 +911,7 @@ char **GRIBRasterBand::GetMetadata(const char *pszDomain)
     if (m_nGribVersion == 2 &&
         CPLTestBool(CPLGetConfigOption("GRIB_PDS_ALL_BANDS", "ON")))
     {
-        FindPDSTemplate();
+        FindPDSTemplateGRIB2();
     }
     return GDALPamRasterBand::GetMetadata(pszDomain);
 }
@@ -923,7 +926,7 @@ const char *GRIBRasterBand::GetMetadataItem(const char *pszName,
     if (m_nGribVersion == 2 &&
         CPLTestBool(CPLGetConfigOption("GRIB_PDS_ALL_BANDS", "ON")))
     {
-        FindPDSTemplate();
+        FindPDSTemplateGRIB2();
     }
     return GDALPamRasterBand::GetMetadataItem(pszName, pszDomain);
 }
@@ -1171,7 +1174,8 @@ class InventoryWrapperSidecar : public gdal::grib::InventoryWrapper
             CSLTokenizeString2(psSidecar.c_str(), "\n",
                                CSLT_PRESERVEQUOTES | CSLT_STRIPLEADSPACES));
         inv_len_ = aosMsgs.size();
-        inv_ = new inventoryType[inv_len_];
+        inv_ = static_cast<inventoryType *>(
+            CPLMalloc(inv_len_ * sizeof(inventoryType)));
 
         for (size_t i = 0; i < inv_len_; ++i)
         {
@@ -1245,7 +1249,7 @@ class InventoryWrapperSidecar : public gdal::grib::InventoryWrapper
         for (unsigned i = 0; i < inv_len_; i++)
             VSIFree(inv_[i].longFstLevel);
 
-        delete[] inv_;
+        VSIFree(inv_);
     }
 };
 
@@ -1296,30 +1300,6 @@ CPLErr GRIBDataset::GetGeoTransform(double *padfTransform)
 }
 
 /************************************************************************/
-/*                            Identify()                                */
-/************************************************************************/
-
-int GRIBDataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (poOpenInfo->nHeaderBytes < 8)
-        return FALSE;
-
-    const char *pasHeader = reinterpret_cast<char *>(poOpenInfo->pabyHeader);
-    // Does a part of what ReadSECT0(), but in a thread-safe way.
-    for (int i = 0; i < poOpenInfo->nHeaderBytes - 3; i++)
-    {
-        if (STARTS_WITH_CI(pasHeader + i, "GRIB")
-#ifdef ENABLE_TDLP
-            || STARTS_WITH_CI(pasHeader + i, "TDLP")
-#endif
-        )
-            return TRUE;
-    }
-
-    return FALSE;
-}
-
-/************************************************************************/
 /*                                Inventory()                           */
 /************************************************************************/
 
@@ -1338,7 +1318,7 @@ GRIBDataset::Inventory(VSILFILE *fp, GDALOpenInfo *poOpenInfo)
         CPLDebug("GRIB", "Reading inventories from sidecar file %s",
                  sSideCarFilename.c_str());
         // Contains an GRIB2 message inventory of the file.
-        pInventories = cpl::make_unique<InventoryWrapperSidecar>(fpSideCar);
+        pInventories = std::make_unique<InventoryWrapperSidecar>(fpSideCar);
         if (pInventories->result() <= 0 || pInventories->length() == 0)
             pInventories = nullptr;
         VSIFCloseL(fpSideCar);
@@ -1351,7 +1331,7 @@ GRIBDataset::Inventory(VSILFILE *fp, GDALOpenInfo *poOpenInfo)
         CPLDebug("GRIB", "Reading inventories from GRIB file %s",
                  poOpenInfo->pszFilename);
         // Contains an GRIB2 message inventory of the file.
-        pInventories = cpl::make_unique<InventoryWrapperGrib>(fp);
+        pInventories = std::make_unique<InventoryWrapperGrib>(fp);
     }
 
     return pInventories;
@@ -1366,7 +1346,7 @@ GDALDataset *GRIBDataset::Open(GDALOpenInfo *poOpenInfo)
 {
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
     // During fuzzing, do not use Identify to reject crazy content.
-    if (!Identify(poOpenInfo))
+    if (!GRIBDriverIdentify(poOpenInfo))
         return nullptr;
 #endif
     if (poOpenInfo->fpL == nullptr)
@@ -1495,7 +1475,7 @@ GDALDataset *GRIBDataset::Open(GDALOpenInfo *poOpenInfo)
             gribBand = new GRIBRasterBand(poDS, bandNr, psInv);
 
             if (psInv->GribVersion == 2)
-                gribBand->FindPDSTemplate();
+                gribBand->FindPDSTemplateGRIB2();
 
             gribBand->m_Grib_MetaData = metaData;
         }
@@ -1758,13 +1738,15 @@ void GRIBArray::Init(GRIBGroup *poGroup, GRIBDataset *poDS,
         {
             bool bOK = true;
             auto poVar = oIterX->second->GetIndexingVariable();
+            constexpr double EPSILON = 1e-10;
             if (poVar)
             {
                 GUInt64 nStart = 0;
                 size_t nCount = 1;
                 double dfVal = 0;
                 poVar->Read(&nStart, &nCount, nullptr, nullptr, m_dt, &dfVal);
-                if (dfVal != adfGT[0] + 0.5 * adfGT[1])
+                if (std::fabs(dfVal - (adfGT[0] + 0.5 * adfGT[1])) >
+                    EPSILON * std::fabs(dfVal))
                 {
                     bOK = false;
                 }
@@ -1779,8 +1761,10 @@ void GRIBArray::Init(GRIBGroup *poGroup, GRIBDataset *poDS,
                     double dfVal = 0;
                     poVar->Read(&nStart, &nCount, nullptr, nullptr, m_dt,
                                 &dfVal);
-                    if (dfVal != adfGT[3] + poDS->nRasterYSize * adfGT[5] -
-                                     0.5 * adfGT[5])
+                    if (std::fabs(dfVal -
+                                  (adfGT[3] + poDS->nRasterYSize * adfGT[5] -
+                                   0.5 * adfGT[5])) >
+                        EPSILON * std::fabs(dfVal))
                     {
                         bOK = false;
                     }
@@ -2037,7 +2021,14 @@ void GRIBArray::Finalize(GRIBGroup *poGroup, inventoryType *psInv)
         attr->Write("validity_time");
     }
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
     m_dims.insert(m_dims.begin(), poDimTime);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     if (m_poSRS)
     {
         auto mapping = m_poSRS->GetDataAxisToSRSAxisMapping();
@@ -2222,7 +2213,7 @@ GDALDataset *GRIBDataset::OpenMultiDim(GDALOpenInfo *poOpenInfo)
 
     // Contains an GRIB2 message inventory of the file.
     // We can't use the potential .idx file
-    auto pInventories = cpl::make_unique<InventoryWrapperGrib>(poShared->m_fp);
+    auto pInventories = std::make_unique<InventoryWrapperGrib>(poShared->m_fp);
 
     if (pInventories->result() <= 0)
     {
@@ -2321,7 +2312,7 @@ GDALDataset *GRIBDataset::OpenMultiDim(GDALOpenInfo *poOpenInfo)
             // coverity[tainted_data]
             GRIBRasterBand gribBand(poDS, bandNr, psInv);
             if (psInv->GribVersion == 2)
-                gribBand.FindPDSTemplate();
+                gribBand.FindPDSTemplateGRIB2();
             osElement = psInv->element;
             osShortFstLevel = psInv->shortFstLevel;
             dfRefTime = psInv->refTime;
@@ -2459,12 +2450,45 @@ void GRIBDataset::SetGribMetaData(grib_MetaData *meta)
     }
 
     const bool bHaveEarthModel =
-        meta->gds.majEarth != 0.0 || meta->gds.minEarth != 0.0;
+        meta->gds.majEarth > 0.0 && meta->gds.minEarth > 0.0;
     // In meters.
-    const double a = bHaveEarthModel ? meta->gds.majEarth * 1.0e3 : 6377563.396;
-    const double b = bHaveEarthModel ? meta->gds.minEarth * 1.0e3 : 6356256.910;
+    const double a = bHaveEarthModel
+                         ? meta->gds.majEarth * 1.0e3
+                         : CPLAtof(CPLGetConfigOption("GRIB_DEFAULT_SEMI_MAJOR",
+                                                      "6377563.396"));
+    const double b =
+        bHaveEarthModel
+            ? meta->gds.minEarth * 1.0e3
+            : (meta->gds.f_sphere
+                   ? a
+                   : CPLAtof(CPLGetConfigOption("GRIB_DEFAULT_SEMI_MINOR",
+                                                "6356256.910")));
+    if (meta->gds.majEarth == 0 || meta->gds.minEarth == 0)
+    {
+        CPLDebug("GRIB", "No earth model. Assuming a=%f and b=%f", a, b);
+    }
+    else if (meta->gds.majEarth < 0 || meta->gds.minEarth < 0)
+    {
+        const char *pszUseDefaultSpheroid =
+            CPLGetConfigOption("GRIB_USE_DEFAULT_SPHEROID", nullptr);
+        if (!pszUseDefaultSpheroid)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "The GRIB file contains invalid values for the spheroid. "
+                     "You may set the GRIB_USE_DEFAULT_SPHEROID configuration "
+                     "option to YES to use a default spheroid with "
+                     "a=%f and b=%f",
+                     a, b);
+            return;
+        }
+        else if (!CPLTestBool(pszUseDefaultSpheroid))
+        {
+            return;
+        }
+        CPLDebug("GRIB", "Invalid earth model. Assuming a=%f and b=%f", a, b);
+    }
 
-    if (meta->gds.f_sphere)
+    if (meta->gds.f_sphere || (a == b))
     {
         oSRS.SetGeogCS("Coordinate System imported from GRIB file", nullptr,
                        "Sphere", a, 0.0);
@@ -2691,35 +2715,15 @@ static void GDALDeregister_GRIB(GDALDriver *)
 
 class GDALGRIBDriver : public GDALDriver
 {
-    bool bHasFullInitMetadata;
-    CPLStringList aosMetadata;
+    bool m_bHasFullInitMetadata = false;
 
   public:
-    GDALGRIBDriver();
+    GDALGRIBDriver() = default;
 
-    char **GetMetadata(const char *pszDomain) override;
+    char **GetMetadata(const char *pszDomain = "") override;
     const char *GetMetadataItem(const char *pszName,
                                 const char *pszDomain) override;
-    CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
-                           const char *pszDomain) override;
 };
-
-/************************************************************************/
-/*                          GDALGRIBDriver()                            */
-/************************************************************************/
-
-GDALGRIBDriver::GDALGRIBDriver() : bHasFullInitMetadata(false)
-{
-    aosMetadata.SetNameValue(GDAL_DCAP_RASTER, "YES");
-    aosMetadata.SetNameValue(GDAL_DMD_LONGNAME, "GRIdded Binary (.grb, .grb2)");
-    aosMetadata.SetNameValue(GDAL_DMD_HELPTOPIC, "drivers/raster/grib.html");
-    aosMetadata.SetNameValue(GDAL_DMD_EXTENSIONS, "grb grb2 grib2");
-    aosMetadata.SetNameValue(GDAL_DCAP_VIRTUALIO, "YES");
-
-    aosMetadata.SetNameValue(GDAL_DMD_CREATIONDATATYPES,
-                             "Byte UInt16 Int16 UInt32 Int32 Float32 "
-                             "Float64");
-}
 
 /************************************************************************/
 /*                            GetMetadata()                             */
@@ -2731,9 +2735,9 @@ char **GDALGRIBDriver::GetMetadata(const char *pszDomain)
     {
         // Defer until necessary the setting of the CreationOptionList
         // to let a chance to JPEG2000 drivers to have been loaded.
-        if (!bHasFullInitMetadata)
+        if (!m_bHasFullInitMetadata)
         {
-            bHasFullInitMetadata = true;
+            m_bHasFullInitMetadata = true;
 
             std::vector<CPLString> aosJ2KDrivers;
             for (size_t i = 0; i < CPL_ARRAYSIZE(apszJ2KDrivers); i++)
@@ -2815,20 +2819,10 @@ char **GDALGRIBDriver::GetMetadata(const char *pszDomain)
                 "description='Override options at band level'/>"
                 "</CreationOptionList>";
 
-            aosMetadata.SetNameValue(GDAL_DMD_CREATIONOPTIONLIST,
-                                     osCreationOptionList);
-
-            aosMetadata.SetNameValue(
-                GDAL_DMD_OPENOPTIONLIST,
-                "<OpenOptionList>"
-                "    <Option name='USE_IDX' type='boolean' "
-                "description='Load metadata from "
-                "wgrib2 index file if available' default='YES'/>"
-                "</OpenOptionList>");
+            SetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST, osCreationOptionList);
         }
-        return aosMetadata.List();
     }
-    return nullptr;
+    return GDALDriver::GetMetadata(pszDomain);
 }
 
 /************************************************************************/
@@ -2842,26 +2836,10 @@ const char *GDALGRIBDriver::GetMetadataItem(const char *pszName,
     {
         // Defer until necessary the setting of the CreationOptionList
         // to let a chance to JPEG2000 drivers to have been loaded.
-        if (!EQUAL(pszName, GDAL_DMD_CREATIONOPTIONLIST))
-            return CSLFetchNameValue(aosMetadata, pszName);
+        if (EQUAL(pszName, GDAL_DMD_CREATIONOPTIONLIST))
+            GetMetadata();
     }
-    return CSLFetchNameValue(GetMetadata(pszDomain), pszName);
-}
-
-/************************************************************************/
-/*                          SetMetadataItem()                           */
-/************************************************************************/
-
-CPLErr GDALGRIBDriver::SetMetadataItem(const char *pszName,
-                                       const char *pszValue,
-                                       const char *pszDomain)
-{
-    if (pszDomain == nullptr || EQUAL(pszDomain, ""))
-    {
-        aosMetadata.SetNameValue(pszName, pszValue);
-        return CE_None;
-    }
-    return GDALDriver::SetMetadataItem(pszName, pszValue, pszDomain);
+    return GDALDriver::GetMetadataItem(pszName, pszDomain);
 }
 
 /************************************************************************/
@@ -2871,19 +2849,19 @@ CPLErr GDALGRIBDriver::SetMetadataItem(const char *pszName,
 void GDALRegister_GRIB()
 
 {
-    if (GDALGetDriverByName("GRIB") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALGRIBDriver();
-
-    poDriver->SetMetadataItem(GDAL_DCAP_MULTIDIM_RASTER, "YES");
-
-    poDriver->SetDescription("GRIB");
+    GRIBDriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = GRIBDataset::Open;
-    poDriver->pfnIdentify = GRIBDataset::Identify;
     poDriver->pfnCreateCopy = GRIBDataset::CreateCopy;
     poDriver->pfnUnloadDriver = GDALDeregister_GRIB;
+
+#ifdef USE_AEC
+    poDriver->SetMetadataItem("HAVE_AEC", "YES");
+#endif
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }

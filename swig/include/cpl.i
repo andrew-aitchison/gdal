@@ -77,7 +77,7 @@ void CPLSetCurrentErrorHandlerCatchDebug( int bCatchDebug );
 %{
 extern "C" int CPL_DLL GDALIsInGlobalDestructor();
 
-void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, int err_no, const char* pszErrorMsg)
+void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, CPLErrorNum err_no, const char* pszErrorMsg)
 {
     if( GDALIsInGlobalDestructor() )
     {
@@ -99,6 +99,14 @@ void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, int err_no, const char* psz
 }
 %}
 
+/* We don't want errors to be cleared or thrown by this */
+/* call */
+%exception PushErrorHandler
+{
+    if( GetUseExceptions() ) bLocalUseExceptionsCode = FALSE;
+    $action
+}
+
 %inline %{
   CPLErr PushErrorHandler( CPLErrorHandler pfnErrorHandler = NULL, void* user_data = NULL )
   {
@@ -109,6 +117,12 @@ void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, int err_no, const char* psz
     return CE_None;
   }
 %}
+
+%exception PopErrorHandler
+{
+    if( GetUseExceptions() ) bLocalUseExceptionsCode = FALSE;
+    $action
+}
 
 %inline %{
   void PopErrorHandler()
@@ -184,6 +198,7 @@ void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, int err_no, const char* psz
 %rename (GetFileSystemOptions) VSIGetFileSystemOptions;
 %rename (SetConfigOption) CPLSetConfigOption;
 %rename (GetConfigOption) wrapper_CPLGetConfigOption;
+%rename (GetGlobalConfigOption) wrapper_CPLGetGlobalConfigOption;
 %rename (SetThreadLocalConfigOption) CPLSetThreadLocalConfigOption;
 %rename (GetThreadLocalConfigOption) wrapper_CPLGetThreadLocalConfigOption;
 %rename (SetCredential) wrapper_VSISetCredential;
@@ -272,7 +287,7 @@ void EscapeBinary(int len, char *bin_string, size_t *pnLenOut, char** pOut, int 
 }
 %}
 %clear (int len, char *bin_string);
-%clean  (size_t *pnLenOut, char* pOut);
+%clear (size_t *pnLenOut, char* pOut);
 
 #else
 %apply (int nLen, char *pBuf ) { (int len, char *bin_string)};
@@ -291,7 +306,7 @@ char* EscapeString(int len, char *bin_string , int scheme=CPLES_SQL) {
 {
 #ifdef SWIGPYTHON
 %#ifdef SED_HACKS
-    if( bUseExceptions ) bLocalUseExceptionsCode = FALSE;
+    if( GetUseExceptions() ) bLocalUseExceptionsCode = FALSE;
 %#endif
 #endif
     result = CPLGetLastErrorNo();
@@ -306,7 +321,7 @@ int CPLGetLastErrorNo();
 {
 #ifdef SWIGPYTHON
 %#ifdef SED_HACKS
-    if( bUseExceptions ) bLocalUseExceptionsCode = FALSE;
+    if( GetUseExceptions() ) bLocalUseExceptionsCode = FALSE;
 %#endif
 #endif
     result = CPLGetLastErrorType();
@@ -323,7 +338,7 @@ CPLErr CPLGetLastErrorType();
 {
 #ifdef SWIGPYTHON
 %#ifdef SED_HACKS
-    if( bUseExceptions ) bLocalUseExceptionsCode = FALSE;
+    if( GetUseExceptions() ) bLocalUseExceptionsCode = FALSE;
 %#endif
 #endif
     result = (char*)CPLGetLastErrorMsg();
@@ -339,7 +354,7 @@ const char *CPLGetLastErrorMsg();
 {
 #ifdef SWIGPYTHON
 %#ifdef SED_HACKS
-    if( bUseExceptions ) bLocalUseExceptionsCode = FALSE;
+    if( GetUseExceptions() ) bLocalUseExceptionsCode = FALSE;
 %#endif
 #endif
     result = CPLGetErrorCounter();
@@ -480,11 +495,36 @@ const char *wrapper_CPLGetConfigOption( const char * pszKey, const char * pszDef
 {
     return CPLGetConfigOption( pszKey, pszDefault );
 }
+const char *wrapper_CPLGetGlobalConfigOption( const char * pszKey, const char * pszDefault = NULL )
+{
+    return CPLGetGlobalConfigOption( pszKey, pszDefault );
+}
 const char *wrapper_CPLGetThreadLocalConfigOption( const char * pszKey, const char * pszDefault = NULL )
 {
     return CPLGetThreadLocalConfigOption( pszKey, pszDefault );
 }
 }
+
+
+%rename(GetConfigOptions) wrapper_GetConfigOptions;
+#if defined(SWIGPYTHON) || defined(SWIGJAVA)
+%apply (char **dictAndCSLDestroy) { char ** };
+#else
+%apply (char **) { char ** };
+#endif
+%inline {
+char** wrapper_GetConfigOptions() {
+    char ** papszOpts = CPLGetConfigOptions();
+    char ** papszTLOpts = CPLGetThreadLocalConfigOptions();
+
+    papszOpts = CSLMerge(papszOpts, papszTLOpts);
+
+    CPLFree(papszTLOpts);
+
+    return papszOpts;
+};
+}
+%clear char **;
 
 %apply Pointer NONNULL {const char * pszPathPrefix};
 void VSISetPathSpecificOption( const char* pszPathPrefix, const char * pszKey, const char * pszValue );
@@ -552,14 +592,22 @@ GByte *CPLHexToBinary( const char *pszHex, int *pnBytes );
 
 %apply (GIntBig nLen, char *pBuf) {( GIntBig nBytes, const char *pabyData )};
 %inline {
-void wrapper_VSIFileFromMemBuffer( const char* utf8_path, GIntBig nBytes, const char *pabyData)
+VSI_RETVAL wrapper_VSIFileFromMemBuffer( const char* utf8_path, GIntBig nBytes, const char *pabyData)
 {
     const size_t nSize = static_cast<size_t>(nBytes);
     void* pabyDataDup = VSIMalloc(nSize);
     if (pabyDataDup == NULL)
-            return;
+            return -1;
     memcpy(pabyDataDup, pabyData, nSize);
-    VSIFCloseL(VSIFileFromMemBuffer(utf8_path, (GByte*) pabyDataDup, nSize, TRUE));
+    VSILFILE *fp = VSIFileFromMemBuffer(utf8_path, (GByte*) pabyDataDup, nSize, TRUE);
+
+    if (fp == NULL) {
+        VSIFree(pabyDataDup);
+        return -1;
+    } else {
+        VSIFCloseL(fp);
+        return 0;
+    }
 }
 }
 %clear ( GIntBig nBytes, const GByte *pabyData );
@@ -568,13 +616,21 @@ void wrapper_VSIFileFromMemBuffer( const char* utf8_path, GIntBig nBytes, const 
 %apply (int nLen, unsigned char *pBuf ) {( int nBytes, const GByte *pabyData )};
 #endif
 %inline {
-void wrapper_VSIFileFromMemBuffer( const char* utf8_path, int nBytes, const GByte *pabyData)
+VSI_RETVAL wrapper_VSIFileFromMemBuffer( const char* utf8_path, int nBytes, const GByte *pabyData)
 {
     GByte* pabyDataDup = (GByte*)VSIMalloc(nBytes);
     if (pabyDataDup == NULL)
-            return;
+            return -1;
     memcpy(pabyDataDup, pabyData, nBytes);
-    VSIFCloseL(VSIFileFromMemBuffer(utf8_path, (GByte*) pabyDataDup, nBytes, TRUE));
+    VSILFILE *fp = VSIFileFromMemBuffer(utf8_path, (GByte*) pabyDataDup, nBytes, TRUE);
+
+    if (fp == NULL) {
+        VSIFree(pabyDataDup);
+        return -1;
+    } else {
+        VSIFCloseL(fp);
+        return 0;
+    }
 }
 
 }
@@ -656,6 +712,54 @@ bool wrapper_VSISync(const char* pszSource,
 bool VSIAbortPendingUploads(const char *utf8_path );
 
 #endif
+
+%rename (CopyFile) wrapper_VSICopyFile;
+#if defined(SWIGPYTHON)
+%apply (const char* utf8_path_or_none) {(const char* pszSource)};
+#else
+%apply (const char* utf8_path) {(const char* pszSource)};
+#endif
+%apply (const char* utf8_path) {(const char* pszTarget)};
+
+#if defined(SWIGPYTHON)
+%feature( "kwargs" ) wrapper_VSICopyFile;
+#endif
+
+%inline {
+int wrapper_VSICopyFile(const char* pszSource,
+                        const char* pszTarget,
+                        VSILFILE* fpSource = NULL,
+                        GIntBig nSourceSize = -1,
+                        char** options = NULL,
+                        GDALProgressFunc callback=NULL,
+                        void* callback_data=NULL)
+{
+    return VSICopyFile(
+        pszSource, pszTarget, fpSource,
+        nSourceSize < 0 ? static_cast<vsi_l_offset>(-1) : static_cast<vsi_l_offset>(nSourceSize),
+        options, callback, callback_data );
+}
+
+#if defined(SWIGPYTHON)
+void CopyFileRestartable(const char* pszSource,
+                         const char* pszTarget,
+                         const char* pszInputPayload,
+                         int* pnRetCode,
+                         char** ppszOutputPayload,
+                         char** options = NULL,
+                         GDALProgressFunc callback=NULL,
+                         void* callback_data=NULL)
+{
+    *pnRetCode = VSICopyFileRestartable(pszSource, pszTarget, pszInputPayload,
+                                        ppszOutputPayload, options, callback,
+                                        callback_data);
+}
+#endif
+
+}
+
+%clear (const char* pszSource);
+%clear (const char* pszTarget);
 
 const char* VSIGetActualURL(const char * utf8_path);
 

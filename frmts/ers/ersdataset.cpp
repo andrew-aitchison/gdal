@@ -82,11 +82,13 @@ class ERSDataset final : public RawDataset
   protected:
     int CloseDependentDatasets() override;
 
+    CPLErr Close() override;
+
   public:
     ERSDataset();
     ~ERSDataset() override;
 
-    void FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
     CPLErr GetGeoTransform(double *padfTransform) override;
     CPLErr SetGeoTransform(double *padfTransform) override;
     const OGRSpatialReference *GetSpatialRef() const override;
@@ -137,23 +139,41 @@ ERSDataset::ERSDataset()
 ERSDataset::~ERSDataset()
 
 {
-    ERSDataset::FlushCache(true);
+    ERSDataset::Close();
+}
 
-    if (fpImage != nullptr)
+/************************************************************************/
+/*                              Close()                                 */
+/************************************************************************/
+
+CPLErr ERSDataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
     {
-        VSIFCloseL(fpImage);
+        if (ERSDataset::FlushCache(true) != CE_None)
+            eErr = CE_Failure;
+
+        if (fpImage != nullptr)
+        {
+            VSIFCloseL(fpImage);
+        }
+
+        ERSDataset::CloseDependentDatasets();
+
+        if (nGCPCount > 0)
+        {
+            GDALDeinitGCPs(nGCPCount, pasGCPList);
+            CPLFree(pasGCPList);
+        }
+
+        if (poHeader != nullptr)
+            delete poHeader;
+
+        if (GDALPamDataset::Close() != CE_None)
+            eErr = CE_Failure;
     }
-
-    ERSDataset::CloseDependentDatasets();
-
-    if (nGCPCount > 0)
-    {
-        GDALDeinitGCPs(nGCPCount, pasGCPList);
-        CPLFree(pasGCPList);
-    }
-
-    if (poHeader != nullptr)
-        delete poHeader;
+    return eErr;
 }
 
 /************************************************************************/
@@ -162,7 +182,7 @@ ERSDataset::~ERSDataset()
 
 int ERSDataset::CloseDependentDatasets()
 {
-    int bHasDroppedRef = RawDataset::CloseDependentDatasets();
+    int bHasDroppedRef = GDALPamDataset::CloseDependentDatasets();
 
     if (poDepFile != nullptr)
     {
@@ -186,27 +206,34 @@ int ERSDataset::CloseDependentDatasets()
 /*                             FlushCache()                             */
 /************************************************************************/
 
-void ERSDataset::FlushCache(bool bAtClosing)
+CPLErr ERSDataset::FlushCache(bool bAtClosing)
 
 {
+    CPLErr eErr = CE_None;
     if (bHDRDirty)
     {
         VSILFILE *fpERS = VSIFOpenL(GetDescription(), "w");
         if (fpERS == nullptr)
         {
+            eErr = CE_Failure;
             CPLError(CE_Failure, CPLE_OpenFailed,
                      "Unable to rewrite %s header.", GetDescription());
         }
         else
         {
-            VSIFPrintfL(fpERS, "DatasetHeader Begin\n");
+            if (VSIFPrintfL(fpERS, "DatasetHeader Begin\n") <= 0)
+                eErr = CE_Failure;
             poHeader->WriteSelf(fpERS, 1);
-            VSIFPrintfL(fpERS, "DatasetHeader End\n");
-            VSIFCloseL(fpERS);
+            if (VSIFPrintfL(fpERS, "DatasetHeader End\n") <= 0)
+                eErr = CE_Failure;
+            if (VSIFCloseL(fpERS) != 0)
+                eErr = CE_Failure;
         }
     }
 
-    RawDataset::FlushCache(bAtClosing);
+    if (RawDataset::FlushCache(bAtClosing) != CE_None)
+        eErr = CE_Failure;
+    return eErr;
 }
 
 /************************************************************************/
@@ -827,7 +854,7 @@ class ERSProxyRasterBand final : public GDALProxyRasterBand
     int GetOverviewCount() override;
 
   protected:
-    GDALRasterBand *RefUnderlyingRasterBand() const override
+    GDALRasterBand *RefUnderlyingRasterBand(bool /*bForceOpen*/) const override
     {
         return m_poUnderlyingBand;
     }
@@ -854,15 +881,17 @@ int ERSProxyRasterBand::GetOverviewCount()
 GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
-    if (GetRecLevel())
+    if (!Identify(poOpenInfo) || poOpenInfo->fpL == nullptr)
+        return nullptr;
+
+    int &nRecLevel = GetRecLevel();
+    // cppcheck-suppress knownConditionTrueFalse
+    if (nRecLevel)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Attempt at recursively opening ERS dataset");
         return nullptr;
     }
-
-    if (!Identify(poOpenInfo) || poOpenInfo->fpL == nullptr)
-        return nullptr;
 
     /* -------------------------------------------------------------------- */
     /*      Ingest the file as a tree of header nodes.                      */
@@ -901,7 +930,7 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    ERSDataset *poDS = new ERSDataset();
+    auto poDS = std::make_unique<ERSDataset>();
     poDS->poHeader = poHeader;
     poDS->eAccess = poOpenInfo->eAccess;
 
@@ -915,7 +944,6 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     if (!GDALCheckDatasetDimensions(poDS->nRasterXSize, poDS->nRasterYSize) ||
         !GDALCheckBandCount(nBands, FALSE))
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -923,9 +951,16 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /*     Get the HeaderOffset if it exists in the header                  */
     /* -------------------------------------------------------------------- */
     GIntBig nHeaderOffset = 0;
-    if (poHeader->Find("HeaderOffset") != nullptr)
+    const char *pszHeaderOffset = poHeader->Find("HeaderOffset");
+    if (pszHeaderOffset != nullptr)
     {
-        nHeaderOffset = atoi(poHeader->Find("HeaderOffset"));
+        nHeaderOffset = CPLAtoGIntBig(pszHeaderOffset);
+        if (nHeaderOffset < 0)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Illegal value for HeaderOffset: %s", pszHeaderOffset);
+            return nullptr;
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -986,7 +1021,6 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (EQUAL(poHeader->Find("DataSetType", ""), "Translated"))
     {
-        int &nRecLevel = GetRecLevel();
         nRecLevel++;
         poDS->poDepFile = GDALDataset::FromHandle(
             GDALOpen(osDataFilePath, poOpenInfo->eAccess));
@@ -1023,7 +1057,7 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
         else
             poDS->fpImage = VSIFOpenL(osDataFilePath, "r");
 
-        poDS->osRawFilename = osDataFilePath;
+        poDS->osRawFilename = std::move(osDataFilePath);
 
         if (poDS->fpImage != nullptr && nBands > 0)
         {
@@ -1033,31 +1067,41 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
             if (nBands > knIntMax / iWordSize ||
                 poDS->nRasterXSize > knIntMax / (nBands * iWordSize))
             {
-                CPLError(CE_Failure, CPLE_AppDefined, "int overflow");
-                delete poDS;
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "int overflow: too large nBands and/or nRasterXSize");
                 return nullptr;
             }
 
             if (!RAWDatasetCheckMemoryUsage(
                     poDS->nRasterXSize, poDS->nRasterYSize, nBands, iWordSize,
                     iWordSize, iWordSize * nBands * poDS->nRasterXSize,
-                    nHeaderOffset, iWordSize * poDS->nRasterXSize,
+                    nHeaderOffset,
+                    static_cast<vsi_l_offset>(iWordSize) * poDS->nRasterXSize,
                     poDS->fpImage))
             {
-                delete poDS;
+                return nullptr;
+            }
+            if (nHeaderOffset > std::numeric_limits<GIntBig>::max() -
+                                    static_cast<GIntBig>(nBands - 1) *
+                                        iWordSize * poDS->nRasterXSize)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "int overflow: too large nHeaderOffset");
                 return nullptr;
             }
 
             for (int iBand = 0; iBand < nBands; iBand++)
             {
                 // Assume pixel interleaved.
-                poDS->SetBand(
-                    iBand + 1,
-                    new ERSRasterBand(
-                        poDS, iBand + 1, poDS->fpImage,
-                        nHeaderOffset + iWordSize * iBand * poDS->nRasterXSize,
-                        iWordSize, iWordSize * nBands * poDS->nRasterXSize,
-                        eType, bNative));
+                auto poBand = std::make_unique<ERSRasterBand>(
+                    poDS.get(), iBand + 1, poDS->fpImage,
+                    nHeaderOffset + static_cast<vsi_l_offset>(iWordSize) *
+                                        iBand * poDS->nRasterXSize,
+                    iWordSize, iWordSize * nBands * poDS->nRasterXSize, eType,
+                    bNative);
+                if (!poBand->IsValid())
+                    return nullptr;
+                poDS->SetBand(iBand + 1, std::move(poBand));
             }
         }
     }
@@ -1067,7 +1111,6 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poDS->nBands == 0)
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -1268,8 +1311,8 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poSRS == nullptr)
     {
         // try aux
-        GDALDataset *poAuxDS = GDALFindAssociatedAuxFile(
-            poOpenInfo->pszFilename, GA_ReadOnly, poDS);
+        auto poAuxDS = std::unique_ptr<GDALDataset>(GDALFindAssociatedAuxFile(
+            poOpenInfo->pszFilename, GA_ReadOnly, poDS.get()));
         if (poAuxDS)
         {
             poSRS = poAuxDS->GetSpatialRef();
@@ -1277,16 +1320,14 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
             {
                 poDS->m_oSRS = *poSRS;
             }
-
-            GDALClose(poAuxDS);
         }
     }
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

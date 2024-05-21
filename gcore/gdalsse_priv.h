@@ -36,7 +36,8 @@
 
 /* We restrict to 64bit processors because they are guaranteed to have SSE2 */
 /* Could possibly be used too on 32bit, but we would need to check at runtime */
-#if (defined(__x86_64) || defined(_M_X64)) && !defined(USE_SSE2_EMULATION)
+#if (defined(__x86_64) || defined(_M_X64) || defined(USE_SSE2)) &&             \
+    !defined(USE_SSE2_EMULATION)
 
 /* Requires SSE2 */
 #include <emmintrin.h>
@@ -50,46 +51,33 @@
 
 static inline __m128i GDALCopyInt16ToXMM(const void *ptr)
 {
-#ifdef CPL_CPU_REQUIRES_ALIGNED_ACCESS
     unsigned short s;
     memcpy(&s, ptr, 2);
     return _mm_cvtsi32_si128(s);
-#else
-    return _mm_cvtsi32_si128(*static_cast<const unsigned short *>(ptr));
-#endif
 }
 
 static inline __m128i GDALCopyInt32ToXMM(const void *ptr)
 {
-#ifdef CPL_CPU_REQUIRES_ALIGNED_ACCESS
     GInt32 i;
     memcpy(&i, ptr, 4);
     return _mm_cvtsi32_si128(i);
-#else
-    return _mm_cvtsi32_si128(*static_cast<const GInt32 *>(ptr));
-#endif
 }
 
 static inline __m128i GDALCopyInt64ToXMM(const void *ptr)
 {
-#ifdef CPL_CPU_REQUIRES_ALIGNED_ACCESS
+#if defined(__i386__) || defined(_M_IX86)
+    return _mm_loadl_epi64(static_cast<const __m128i *>(ptr));
+#else
     GInt64 i;
     memcpy(&i, ptr, 8);
     return _mm_cvtsi64_si128(i);
-#else
-    return _mm_cvtsi64_si128(*static_cast<const GInt64 *>(ptr));
 #endif
 }
 
 static inline void GDALCopyXMMToInt16(const __m128i xmm, void *pDest)
 {
-#ifdef CPL_CPU_REQUIRES_ALIGNED_ACCESS
     GInt16 i = static_cast<GInt16>(_mm_extract_epi16(xmm, 0));
     memcpy(pDest, &i, 2);
-#else
-    *static_cast<GInt16 *>(pDest) =
-        static_cast<GInt16>(_mm_extract_epi16(xmm, 0));
-#endif
 }
 
 class XMMReg2Double
@@ -110,6 +98,7 @@ class XMMReg2Double
     XMMReg2Double(double val) : xmm(_mm_load_sd(&val))
     {
     }
+
     XMMReg2Double(const XMMReg2Double &other) : xmm(other.xmm)
     {
     }
@@ -447,11 +436,13 @@ class XMMReg2Double
     XMMReg2Double()
     {
     }
+
     XMMReg2Double(double val)
     {
         low = val;
         high = 0.0;
     }
+
     XMMReg2Double(const XMMReg2Double &other) : low(other.low), high(other.high)
     {
     }
@@ -809,6 +800,7 @@ class XMMReg4Double
     XMMReg4Double() : ymm(_mm256_setzero_pd())
     {
     }
+
     XMMReg4Double(const XMMReg4Double &other) : ymm(other.ymm)
     {
     }

@@ -76,6 +76,7 @@ class OGROpenFileGDBGroup final : public GDALGroup
     {
         m_osDefinition = osDefinition;
     }
+
     const std::string &GetDefinition() const
     {
         return m_osDefinition;
@@ -97,8 +98,7 @@ class OGROpenFileGDBGroup final : public GDALGroup
 /*                      OGROpenFileGDBDataSource()                      */
 /************************************************************************/
 OGROpenFileGDBDataSource::OGROpenFileGDBDataSource()
-    : m_pszName(nullptr), m_papszFiles(nullptr),
-      bLastSQLUsedOptimizedImplementation(false)
+    : m_papszFiles(nullptr), bLastSQLUsedOptimizedImplementation(false)
 {
 }
 
@@ -108,15 +108,32 @@ OGROpenFileGDBDataSource::OGROpenFileGDBDataSource()
 OGROpenFileGDBDataSource::~OGROpenFileGDBDataSource()
 
 {
-    if (m_bInTransaction)
-        OGROpenFileGDBDataSource::RollbackTransaction();
+    OGROpenFileGDBDataSource::Close();
+}
 
-    for (auto &poLayer : m_apoLayers)
-        poLayer->SyncToDisk();
-    m_apoLayers.clear();
-    m_apoHiddenLayers.clear();
-    CPLFree(m_pszName);
-    CSLDestroy(m_papszFiles);
+/************************************************************************/
+/*                              Close()                                 */
+/************************************************************************/
+
+CPLErr OGROpenFileGDBDataSource::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (m_bInTransaction)
+            OGROpenFileGDBDataSource::RollbackTransaction();
+
+        if (OGROpenFileGDBDataSource::FlushCache(true) != CE_None)
+            eErr = CE_Failure;
+
+        m_apoLayers.clear();
+        m_apoHiddenLayers.clear();
+        CSLDestroy(m_papszFiles);
+
+        if (GDALDataset::Close() != CE_None)
+            eErr = CE_Failure;
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -137,20 +154,55 @@ int OGROpenFileGDBDataSource::FileExists(const char *pszFilename)
 /*                                Open()                                */
 /************************************************************************/
 
-int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
+bool OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo,
+                                    bool &bRetryFileGDBOut)
 {
-    const char *pszFilename = poOpenInfo->pszFilename;
+    bRetryFileGDBOut = false;
+
+    if (poOpenInfo->nOpenFlags == (GDAL_OF_RASTER | GDAL_OF_UPDATE))
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Update mode of rasters is not supported");
+        return false;
+    }
+
+    m_osDirName = poOpenInfo->pszFilename;
+
+    std::string osRasterLayerName;
+    if (STARTS_WITH(poOpenInfo->pszFilename, "OpenFileGDB:"))
+    {
+        const CPLStringList aosTokens(CSLTokenizeString2(
+            poOpenInfo->pszFilename, ":", CSLT_HONOURSTRINGS));
+        if (aosTokens.size() == 4 && strlen(aosTokens[1]) == 1)
+        {
+            m_osDirName = aosTokens[1];
+            m_osDirName += ':';
+            m_osDirName += aosTokens[2];
+            osRasterLayerName = aosTokens[3];
+        }
+        else if (aosTokens.size() == 3)
+        {
+            m_osDirName = aosTokens[1];
+            osRasterLayerName = aosTokens[2];
+        }
+        else
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "Invalid connection string");
+            return false;
+        }
+    }
 
     FileGDBTable oTable;
 
-    m_pszName = CPLStrdup(pszFilename);
-
-    m_osDirName = pszFilename;
+    // Whether to open directly a given .gdbtable file (mostly for debugging
+    // purposes)
     int nInterestTable = 0;
     unsigned int unInterestTable = 0;
-    const char *pszFilenameWithoutPath = CPLGetFilename(pszFilename);
-    if (strlen(pszFilenameWithoutPath) == strlen("a00000000.gdbtable") &&
+    const char *pszFilenameWithoutPath = CPLGetFilename(m_osDirName.c_str());
+    if (poOpenInfo->nHeaderBytes > 0 &&
+        strlen(pszFilenameWithoutPath) == strlen("a00000000.gdbtable") &&
         pszFilenameWithoutPath[0] == 'a' &&
+        EQUAL(pszFilenameWithoutPath + strlen("a00000000"), ".gdbtable") &&
         sscanf(pszFilenameWithoutPath, "a%08x.gdbtable", &unInterestTable) == 1)
     {
         nInterestTable = static_cast<int>(unInterestTable);
@@ -214,7 +266,7 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
                 "Either manually restore the previous state from that "
                 "directory or remove it, before opening in update mode.",
                 osTransactionBackupDirname.c_str());
-            return FALSE;
+            return false;
         }
         else
         {
@@ -235,25 +287,28 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
     m_osGDBSystemCatalogFilename =
         CPLFormFilename(m_osDirName, "a00000001", "gdbtable");
     if (!FileExists(m_osGDBSystemCatalogFilename.c_str()) ||
-        !oTable.Open(m_osGDBSystemCatalogFilename.c_str(), false))
+        !oTable.Open(m_osGDBSystemCatalogFilename.c_str(),
+                     poOpenInfo->eAccess == GA_Update))
     {
-        if (nInterestTable > 0 && FileExists(m_pszName))
+        if (nInterestTable > 0 && FileExists(poOpenInfo->pszFilename))
         {
             const char *pszLyrName = CPLSPrintf("a%08x", nInterestTable);
-            auto poLayer = cpl::make_unique<OGROpenFileGDBLayer>(
-                this, m_pszName, pszLyrName, "", "", eAccess == GA_Update);
-            const char *pszTablX = CPLResetExtension(m_pszName, "gdbtablx");
+            auto poLayer = std::make_unique<OGROpenFileGDBLayer>(
+                this, poOpenInfo->pszFilename, pszLyrName, "", "",
+                eAccess == GA_Update);
+            const char *pszTablX =
+                CPLResetExtension(poOpenInfo->pszFilename, "gdbtablx");
             if ((!FileExists(pszTablX) &&
                  poLayer->GetLayerDefn()->GetFieldCount() == 0 &&
                  poLayer->GetFeatureCount() == 0) ||
                 !poLayer->IsValidLayerDefn())
             {
-                return FALSE;
+                return false;
             }
             m_apoLayers.push_back(std::move(poLayer));
-            return TRUE;
+            return true;
         }
-        return FALSE;
+        return false;
     }
 
     const int idxName = oTable.GetFieldIdx("Name");
@@ -263,7 +318,7 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
           (oTable.GetField(idxFileformat)->GetType() == FGFT_INT16 ||
            oTable.GetField(idxFileformat)->GetType() == FGFT_INT32)))
     {
-        return FALSE;
+        return false;
     }
 
     int iGDBItems = -1;          /* V10 */
@@ -331,18 +386,21 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
     }
     catch (const std::exception &)
     {
-        return FALSE;
+        return false;
     }
 
     oTable.Close();
 
+    std::set<int> oSetIgnoredRasterLayerTableNum;
     if (iGDBItems >= 0)
     {
         eAccess = poOpenInfo->eAccess;
 
-        int bRet = OpenFileGDBv10(iGDBItems, nInterestTable);
+        const bool bRet = OpenFileGDBv10(
+            iGDBItems, nInterestTable, poOpenInfo, osRasterLayerName,
+            oSetIgnoredRasterLayerTableNum, bRetryFileGDBOut);
         if (!bRet)
-            return FALSE;
+            return false;
     }
     else if (iGDBFeatureClasses >= 0 && iGDBObjectClasses >= 0)
     {
@@ -354,33 +412,35 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
         }
 
         int bRet = OpenFileGDBv9(iGDBFeatureClasses, iGDBObjectClasses,
-                                 nInterestTable);
+                                 nInterestTable, poOpenInfo, osRasterLayerName,
+                                 oSetIgnoredRasterLayerTableNum);
         if (!bRet)
-            return FALSE;
+            return false;
     }
     else
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "No GDB_Items nor GDB_FeatureClasses table");
-        return FALSE;
+        return false;
     }
 
     if (m_apoLayers.empty() && nInterestTable > 0)
     {
-        if (FileExists(m_pszName))
+        if (FileExists(poOpenInfo->pszFilename))
         {
             const char *pszLyrName = nullptr;
-            if (nInterestTable <= (int)aosTableNames.size() &&
+            if (nInterestTable <= static_cast<int>(aosTableNames.size()) &&
                 !aosTableNames[nInterestTable - 1].empty())
                 pszLyrName = aosTableNames[nInterestTable - 1].c_str();
             else
                 pszLyrName = CPLSPrintf("a%08x", nInterestTable);
-            m_apoLayers.push_back(cpl::make_unique<OGROpenFileGDBLayer>(
-                this, m_pszName, pszLyrName, "", "", eAccess == GA_Update));
+            m_apoLayers.push_back(std::make_unique<OGROpenFileGDBLayer>(
+                this, poOpenInfo->pszFilename, pszLyrName, "", "",
+                eAccess == GA_Update));
         }
         else
         {
-            return FALSE;
+            return false;
         }
     }
 
@@ -402,10 +462,12 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
                 const int idx = oIter.second;
                 CPLString osFilename(CPLFormFilename(
                     m_osDirName, CPLSPrintf("a%08x", idx), "gdbtable"));
-                if (FileExists(osFilename))
+                if (oSetIgnoredRasterLayerTableNum.find(idx) ==
+                        oSetIgnoredRasterLayerTableNum.end() &&
+                    FileExists(osFilename))
                 {
                     m_apoLayers.emplace_back(
-                        cpl::make_unique<OGROpenFileGDBLayer>(
+                        std::make_unique<OGROpenFileGDBLayer>(
                             this, osFilename, oIter.first.c_str(), "", "",
                             eAccess == GA_Update));
                     if (m_poRootGroup)
@@ -420,7 +482,40 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
         }
     }
 
-    return TRUE;
+    if (!osRasterLayerName.empty())
+    {
+        m_aosSubdatasets.Clear();
+        SetDescription(poOpenInfo->pszFilename);
+        return nBands != 0;
+    }
+
+    // If opening in raster-only mode, return false if there are no raster
+    // layers
+    if ((poOpenInfo->nOpenFlags & GDAL_OF_RASTER) != 0 &&
+        (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR) == 0)
+    {
+        if (m_aosSubdatasets.empty())
+        {
+            return false;
+        }
+        else if (m_aosSubdatasets.size() == 2)
+        {
+            // If there is a single raster dataset, open it right away.
+            return true;
+        }
+    }
+    // If opening in vector-only mode, return false if there are no vector
+    // layers and opened in read-only mode
+    else if ((poOpenInfo->nOpenFlags & GDAL_OF_RASTER) == 0 &&
+             (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR) != 0)
+    {
+        if (m_apoLayers.empty() && poOpenInfo->eAccess == GA_ReadOnly)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /***********************************************************************/
@@ -429,7 +524,7 @@ int OGROpenFileGDBDataSource::Open(const GDALOpenInfo *poOpenInfo)
 
 OGRLayer *OGROpenFileGDBDataSource::AddLayer(
     const CPLString &osName, int nInterestTable, int &nCandidateLayers,
-    int &nLayersSDCOrCDF, const CPLString &osDefinition,
+    int &nLayersCDF, const CPLString &osDefinition,
     const CPLString &osDocumentation, OGRwkbGeometryType eGeomType,
     const std::string &osParentDefinition)
 {
@@ -450,32 +545,79 @@ OGRLayer *OGROpenFileGDBDataSource::AddLayer(
 
             if (m_papszFiles != nullptr)
             {
-                CPLString osSDC = CPLResetExtension(osFilename, "gdbtable.sdc");
-                CPLString osCDF = CPLResetExtension(osFilename, "gdbtable.cdf");
-                if (FileExists(osSDC) || FileExists(osCDF))
+                const CPLString osSDC =
+                    CPLResetExtension(osFilename, "gdbtable.sdc");
+                const CPLString osCDF =
+                    CPLResetExtension(osFilename, "gdbtable.cdf");
+                if (FileExists(osCDF))
                 {
-                    nLayersSDCOrCDF++;
-                    if (GDALGetDriverByName("FileGDB") == nullptr)
-                    {
-                        CPLError(
-                            CE_Warning, CPLE_AppDefined,
-                            "%s layer has a %s file whose format is unhandled",
-                            osName.c_str(),
-                            FileExists(osSDC) ? osSDC.c_str() : osCDF.c_str());
-                    }
-                    else
+                    nLayersCDF++;
+
+                    if (GDALGetDriverByName("FileGDB"))
                     {
                         CPLDebug(
                             "OpenFileGDB",
-                            "%s layer has a %s file whose format is unhandled",
-                            osName.c_str(),
-                            FileExists(osSDC) ? osSDC.c_str() : osCDF.c_str());
+                            "%s layer has a %s file using Compressed Data "
+                            "Format (CDF) that is unhandled by the OpenFileGDB "
+                            "driver, but could be handled by the FileGDB "
+                            "driver (which will be attempted).",
+                            osName.c_str(), osCDF.c_str());
                     }
+                    else
+                    {
+                        // Look into hidden drivers, that is drivers that have
+                        // been built as plugins, but are not currently available
+                        // on the system.
+                        std::string osFileGDBDriverMsg;
+                        auto poDM = GetGDALDriverManager();
+                        const int nAllDrivercount =
+                            poDM->GetDriverCount(/* bIncludeHidden = */ true);
+                        for (int i = 0; i < nAllDrivercount; ++i)
+                        {
+                            auto poMissingPluginDriver =
+                                poDM->GetDriver(i, /* bIncludeHidden = */ true);
+                            if (EQUAL(poMissingPluginDriver->GetDescription(),
+                                      "FileGDB"))
+                            {
+                                osFileGDBDriverMsg += " However the plugin ";
+                                osFileGDBDriverMsg +=
+                                    poMissingPluginDriver->GetMetadataItem(
+                                        "MISSING_PLUGIN_FILENAME");
+                                osFileGDBDriverMsg +=
+                                    " is not available in your "
+                                    "installation.";
+                                if (const char *pszInstallationMsg =
+                                        poMissingPluginDriver->GetMetadataItem(
+                                            GDAL_DMD_PLUGIN_INSTALLATION_MESSAGE))
+                                {
+                                    osFileGDBDriverMsg += " ";
+                                    osFileGDBDriverMsg += pszInstallationMsg;
+                                }
+                                break;
+                            }
+                        }
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "%s layer has a %s file using Compressed Data "
+                                 "Format (CDF) that is unhandled by the "
+                                 "OpenFileGDB driver, but could be handled by "
+                                 "the FileGDB driver.%s",
+                                 osName.c_str(), osCDF.c_str(),
+                                 osFileGDBDriverMsg.c_str());
+                    }
+                    return nullptr;
+                }
+                else if (FileExists(osSDC))
+                {
+                    // SDC is not handled by the FileGDB driver
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "%s layer has a %s file using Smart Data "
+                             "Compression (SDC) that is unhandled.",
+                             osName.c_str(), osSDC.c_str());
                     return nullptr;
                 }
             }
 
-            m_apoLayers.emplace_back(cpl::make_unique<OGROpenFileGDBLayer>(
+            m_apoLayers.emplace_back(std::make_unique<OGROpenFileGDBLayer>(
                 this, osFilename, osName, osDefinition, osDocumentation,
                 eAccess == GA_Update, eGeomType, osParentDefinition));
             return m_apoLayers.back().get();
@@ -527,7 +669,10 @@ OGRLayer *OGROpenFileGDBGroup::OpenVectorLayer(const std::string &osName,
 /*                         OpenFileGDBv10()                            */
 /***********************************************************************/
 
-int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
+bool OGROpenFileGDBDataSource::OpenFileGDBv10(
+    int iGDBItems, int nInterestTable, const GDALOpenInfo *poOpenInfo,
+    const std::string &osRasterLayerName,
+    std::set<int> &oSetIgnoredRasterLayerTableNum, bool &bRetryFileGDBOut)
 {
 
     CPLDebug("OpenFileGDB", "FileGDB v10 or later");
@@ -537,7 +682,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
     CPLString osFilename(CPLFormFilename(
         m_osDirName, CPLSPrintf("a%08x.gdbtable", iGDBItems + 1), nullptr));
     if (!oTable.Open(osFilename, false))
-        return FALSE;
+        return false;
 
     const int iUUID = oTable.GetFieldIdx("UUID");
     const int iType = oTable.GetFieldIdx("Type");
@@ -556,7 +701,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Wrong structure for GDB_Items table");
-        return FALSE;
+        return false;
     }
 
     auto poRootGroup = std::make_shared<OGROpenFileGDBGroup>(std::string(), "");
@@ -634,16 +779,17 @@ int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
             auto poRelationship = ParseXMLRelationshipDef(psField->String);
             if (poRelationship)
             {
-                const auto relationshipName = poRelationship->GetName();
-                m_osMapRelationships[relationshipName] =
-                    std::move(poRelationship);
+                const auto &relationshipName = poRelationship->GetName();
+                m_osMapRelationships.insert(std::pair(
+                    std::string(relationshipName), std::move(poRelationship)));
             }
         }
     }
 
     // Now collect layers
     int nCandidateLayers = 0;
-    int nLayersSDCOrCDF = 0;
+    int nLayersCDF = 0;
+    bool bRet = true;
     for (int i = 0; i < oTable.GetTotalRecordCount(); i++)
     {
         if (!oTable.SelectRow(i))
@@ -654,7 +800,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
         }
 
         const OGRField *psField = oTable.GetFieldValue(iDefinition);
-        if (psField != nullptr &&
+        if (psField && (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR) != 0 &&
             (strstr(psField->String, "DEFeatureClassInfo") != nullptr ||
              strstr(psField->String, "DETableInfo") != nullptr))
         {
@@ -698,7 +844,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
             {
                 OGRLayer *poLayer = AddLayer(
                     psField->String, nInterestTable, nCandidateLayers,
-                    nLayersSDCOrCDF, osDefinition, osDocumentation, wkbUnknown,
+                    nLayersCDF, osDefinition, osDocumentation, wkbUnknown,
                     poParent ? poParent->GetDefinition() : std::string());
 
                 if (poLayer)
@@ -716,35 +862,134 @@ int OGROpenFileGDBDataSource::OpenFileGDBv10(int iGDBItems, int nInterestTable)
                 }
             }
         }
-        else if (psField != nullptr &&
+        else if (psField && (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR) != 0 &&
                  (strstr(psField->String, "GPCodedValueDomain2") != nullptr ||
                   strstr(psField->String, "GPRangeDomain2") != nullptr))
         {
             auto poDomain = ParseXMLFieldDomainDef(psField->String);
             if (poDomain)
             {
-                const auto domainName = poDomain->GetName();
-                m_oMapFieldDomains[domainName] = std::move(poDomain);
+                const auto &domainName = poDomain->GetName();
+                m_oMapFieldDomains.insert(
+                    std::pair(std::string(domainName), std::move(poDomain)));
+            }
+        }
+        else if (psField && (poOpenInfo->nOpenFlags & GDAL_OF_RASTER) != 0 &&
+                 strstr(psField->String, "DERasterDataset"))
+        {
+            const std::string osDefinition(psField->String);
+
+            psField = oTable.GetFieldValue(iName);
+            if (psField)
+            {
+                const std::string osLayerName(psField->String);
+
+                psField = oTable.GetFieldValue(iDocumentation);
+                const std::string osDocumentation(psField ? psField->String
+                                                          : "");
+
+                if (!osRasterLayerName.empty())
+                {
+                    if (osRasterLayerName == osLayerName)
+                    {
+                        bRet = OpenRaster(poOpenInfo, osLayerName, osDefinition,
+                                          osDocumentation);
+                    }
+                }
+                else
+                {
+                    const int iSubDSNum = 1 + m_aosSubdatasets.size() / 2;
+                    m_aosSubdatasets.SetNameValue(
+                        CPLSPrintf("SUBDATASET_%d_NAME", iSubDSNum),
+                        CPLSPrintf("OpenFileGDB:\"%s\":%s",
+                                   poOpenInfo->pszFilename,
+                                   osLayerName.c_str()));
+
+                    std::string osDesc(osLayerName);
+                    if (!osDocumentation.empty())
+                    {
+                        CPLXMLTreeCloser psTree(
+                            CPLParseXMLString(osDocumentation.c_str()));
+                        if (psTree)
+                        {
+                            const auto psRastInfo = CPLGetXMLNode(
+                                psTree.get(), "=metadata.spdoinfo.rastinfo");
+                            if (psRastInfo)
+                            {
+                                const char *pszRowCount = CPLGetXMLValue(
+                                    psRastInfo, "rowcount", nullptr);
+                                const char *pszColCount = CPLGetXMLValue(
+                                    psRastInfo, "colcount", nullptr);
+                                const char *pszRastBand = CPLGetXMLValue(
+                                    psRastInfo, "rastband", nullptr);
+                                const char *pszRastBPP = CPLGetXMLValue(
+                                    psRastInfo, "rastbpp", nullptr);
+                                if (pszRowCount && pszColCount && pszRastBand &&
+                                    pszRastBPP)
+                                {
+                                    osDesc += CPLSPrintf(
+                                        " [%sx%sx%s], %s bits", pszColCount,
+                                        pszRowCount, pszRastBand, pszRastBPP);
+                                }
+                            }
+                        }
+                    }
+
+                    m_aosSubdatasets.SetNameValue(
+                        CPLSPrintf("SUBDATASET_%d_DESC", iSubDSNum),
+                        ("Raster " + osDesc).c_str());
+                }
+            }
+        }
+        else if (psField && (poOpenInfo->nOpenFlags & GDAL_OF_RASTER) == 0 &&
+                 strstr(psField->String, "DERasterDataset"))
+        {
+            psField = oTable.GetFieldValue(iName);
+            if (psField)
+            {
+                const std::string osLayerName(psField->String);
+                auto oIter = m_osMapNameToIdx.find(osLayerName);
+                if (oIter != m_osMapNameToIdx.end())
+                {
+                    oSetIgnoredRasterLayerTableNum.insert(oIter->second);
+
+                    for (const char *pszPrefix :
+                         {"fras_ras_", "fras_aux_", "fras_bnd_", "fras_blk_"})
+                    {
+                        oIter = m_osMapNameToIdx.find(
+                            std::string(pszPrefix).append(osLayerName).c_str());
+                        if (oIter != m_osMapNameToIdx.end())
+                        {
+                            oSetIgnoredRasterLayerTableNum.insert(
+                                oIter->second);
+                        }
+                    }
+                }
             }
         }
     }
 
-    if (m_apoLayers.empty() && nCandidateLayers > 0 &&
-        nCandidateLayers == nLayersSDCOrCDF)
-        return FALSE;
+    // If there's at least one .cdf layer and the FileGDB driver is present,
+    // retry with it.
+    if (nLayersCDF > 0 && GDALGetDriverByName("FileGDB") != nullptr)
+    {
+        bRetryFileGDBOut = true;
+        return false;
+    }
 
-    return TRUE;
+    return bRet;
 }
 
 /***********************************************************************/
 /*                         OpenFileGDBv9()                             */
 /***********************************************************************/
 
-int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
-                                            int iGDBObjectClasses,
-                                            int nInterestTable)
+int OGROpenFileGDBDataSource::OpenFileGDBv9(
+    int iGDBFeatureClasses, int iGDBObjectClasses, int nInterestTable,
+    const GDALOpenInfo *poOpenInfo, const std::string &osRasterLayerName,
+    std::set<int> &oSetIgnoredRasterLayerTableNum)
 {
-    auto poTable = cpl::make_unique<FileGDBTable>();
+    auto poTable = std::make_unique<FileGDBTable>();
 
     CPLDebug("OpenFileGDB", "FileGDB v9");
 
@@ -765,7 +1010,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
     }
 
     std::vector<std::string> aosName;
-    int nCandidateLayers = 0, nLayersSDCOrCDF = 0;
+    int nCandidateLayers = 0, nLayersCDF = 0;
     for (int i = 0; i < poTable->GetTotalRecordCount(); i++)
     {
         if (!poTable->SelectRow(i))
@@ -789,7 +1034,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
                 {
                     aosName.push_back("");
                     AddLayer(osName, nInterestTable, nCandidateLayers,
-                             nLayersSDCOrCDF, "", "", wkbNone, std::string());
+                             nLayersCDF, "", "", wkbNone, std::string());
                 }
                 else
                 {
@@ -802,7 +1047,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
     }
     poTable->Close();
 
-    poTable = cpl::make_unique<FileGDBTable>();
+    poTable = std::make_unique<FileGDBTable>();
 
     /* Find tables that are spatial layers */
     osFilename = CPLFormFilename(
@@ -810,10 +1055,12 @@ int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
     if (!poTable->Open(osFilename, false))
         return FALSE;
 
-    int iObjectClassID = poTable->GetFieldIdx("ObjectClassID");
-    int iGeometryType = poTable->GetFieldIdx("GeometryType");
-    if (iObjectClassID < 0 || iGeometryType < 0 ||
+    const int iObjectClassID = poTable->GetFieldIdx("ObjectClassID");
+    const int iFeatureType = poTable->GetFieldIdx("FeatureType");
+    const int iGeometryType = poTable->GetFieldIdx("GeometryType");
+    if (iObjectClassID < 0 || iGeometryType < 0 || iFeatureType < 0 ||
         poTable->GetField(iObjectClassID)->GetType() != FGFT_INT32 ||
+        poTable->GetField(iFeatureType)->GetType() != FGFT_INT32 ||
         poTable->GetField(iGeometryType)->GetType() != FGFT_INT32)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -821,6 +1068,7 @@ int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
         return FALSE;
     }
 
+    bool bRet = true;
     for (int i = 0; i < poTable->GetTotalRecordCount(); i++)
     {
         if (!poTable->SelectRow(i))
@@ -860,21 +1108,69 @@ int OGROpenFileGDBDataSource::OpenFileGDBv9(int iGDBFeatureClasses,
         if (psField == nullptr)
             continue;
 
-        int idx = psField->Integer;
+        const int idx = psField->Integer;
         if (idx > 0 && idx <= static_cast<int>(aosName.size()) &&
             !aosName[idx - 1].empty())
         {
             const std::string osName(aosName[idx - 1]);
-            AddLayer(osName, nInterestTable, nCandidateLayers, nLayersSDCOrCDF,
-                     "", "", eGeomType, std::string());
+
+            psField = poTable->GetFieldValue(iFeatureType);
+            const bool bIsRaster = psField && psField->Integer == 14;
+
+            if (bIsRaster && (poOpenInfo->nOpenFlags & GDAL_OF_RASTER) != 0)
+            {
+                if (!osRasterLayerName.empty())
+                {
+                    if (osRasterLayerName == osName)
+                    {
+                        bRet = OpenRaster(poOpenInfo, osName, "", "");
+                    }
+                }
+                else
+                {
+                    const int iSubDSNum = 1 + m_aosSubdatasets.size() / 2;
+                    m_aosSubdatasets.SetNameValue(
+                        CPLSPrintf("SUBDATASET_%d_NAME", iSubDSNum),
+                        CPLSPrintf("OpenFileGDB:\"%s\":%s",
+                                   poOpenInfo->pszFilename, osName.c_str()));
+                    m_aosSubdatasets.SetNameValue(
+                        CPLSPrintf("SUBDATASET_%d_DESC", iSubDSNum),
+                        ("Raster " + osName).c_str());
+                }
+            }
+            else if (bIsRaster)
+            {
+                auto oIter = m_osMapNameToIdx.find(osName);
+                if (oIter != m_osMapNameToIdx.end())
+                {
+                    oSetIgnoredRasterLayerTableNum.insert(oIter->second);
+
+                    for (const char *pszPrefix :
+                         {"fras_ras_", "fras_aux_", "fras_bnd_", "fras_blk_"})
+                    {
+                        oIter = m_osMapNameToIdx.find(
+                            std::string(pszPrefix).append(osName).c_str());
+                        if (oIter != m_osMapNameToIdx.end())
+                        {
+                            oSetIgnoredRasterLayerTableNum.insert(
+                                oIter->second);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                AddLayer(osName, nInterestTable, nCandidateLayers, nLayersCDF,
+                         "", "", eGeomType, std::string());
+            }
         }
     }
 
     if (m_apoLayers.empty() && nCandidateLayers > 0 &&
-        nCandidateLayers == nLayersSDCOrCDF)
+        nCandidateLayers == nLayersCDF)
         return FALSE;
 
-    return TRUE;
+    return bRet;
 }
 
 /***********************************************************************/
@@ -911,9 +1207,33 @@ int OGROpenFileGDBDataSource::TestCapability(const char *pszCap)
 
 OGRLayer *OGROpenFileGDBDataSource::GetLayer(int iIndex)
 {
-    if (iIndex < 0 || iIndex >= (int)m_apoLayers.size())
+    if (iIndex < 0 || iIndex >= static_cast<int>(m_apoLayers.size()))
         return nullptr;
     return m_apoLayers[iIndex].get();
+}
+
+/***********************************************************************/
+/*                      BuildLayerFromName()                           */
+/***********************************************************************/
+
+std::unique_ptr<OGROpenFileGDBLayer>
+OGROpenFileGDBDataSource::BuildLayerFromName(const char *pszName)
+{
+
+    std::map<std::string, int>::const_iterator oIter =
+        m_osMapNameToIdx.find(pszName);
+    if (oIter != m_osMapNameToIdx.end())
+    {
+        int idx = oIter->second;
+        CPLString osFilename(
+            CPLFormFilename(m_osDirName, CPLSPrintf("a%08x", idx), "gdbtable"));
+        if (FileExists(osFilename))
+        {
+            return std::make_unique<OGROpenFileGDBLayer>(
+                this, osFilename, pszName, "", "", eAccess == GA_Update);
+        }
+    }
+    return nullptr;
 }
 
 /***********************************************************************/
@@ -935,20 +1255,11 @@ OGROpenFileGDBDataSource::GetLayerByName(const char *pszName)
             return poLayer.get();
     }
 
-    std::map<std::string, int>::const_iterator oIter =
-        m_osMapNameToIdx.find(pszName);
-    if (oIter != m_osMapNameToIdx.end())
+    auto poLayer = BuildLayerFromName(pszName);
+    if (poLayer)
     {
-        int idx = oIter->second;
-        CPLString osFilename(
-            CPLFormFilename(m_osDirName, CPLSPrintf("a%08x", idx), "gdbtable"));
-        if (FileExists(osFilename))
-        {
-            m_apoHiddenLayers.emplace_back(
-                cpl::make_unique<OGROpenFileGDBLayer>(
-                    this, osFilename, pszName, "", "", eAccess == GA_Update));
-            return m_apoHiddenLayers.back().get();
-        }
+        m_apoHiddenLayers.emplace_back(std::move(poLayer));
+        return m_apoHiddenLayers.back().get();
     }
     return nullptr;
 }
@@ -962,7 +1273,9 @@ bool OGROpenFileGDBDataSource::IsPrivateLayerName(const CPLString &osName)
     const CPLString osLCTableName(CPLString(osName).tolower());
 
     // tables beginning with "GDB_" are private tables
-    return osLCTableName.size() >= 4 && osLCTableName.substr(0, 4) == "gdb_";
+    // Also consider "VAT_" tables as private ones.
+    return osLCTableName.size() >= 4 && (osLCTableName.substr(0, 4) == "gdb_" ||
+                                         osLCTableName.substr(0, 4) == "vat_");
 }
 
 /***********************************************************************/
@@ -976,6 +1289,17 @@ bool OGROpenFileGDBDataSource::IsLayerPrivate(int iLayer) const
 
     const std::string osName(m_apoLayers[iLayer]->GetName());
     return IsPrivateLayerName(osName);
+}
+
+/***********************************************************************/
+/*                           GetMetadata()                             */
+/***********************************************************************/
+
+char **OGROpenFileGDBDataSource::GetMetadata(const char *pszDomain)
+{
+    if (pszDomain && EQUAL(pszDomain, "SUBDATASETS"))
+        return m_aosSubdatasets.List();
+    return OGRDataSource::GetMetadata(pszDomain);
 }
 
 /************************************************************************/
@@ -1034,6 +1358,8 @@ class OGROpenFileGDBSimpleSQLLayer final : public OGRLayer
     GIntBig m_nSkipped = 0;
     GIntBig m_nIterated = 0;
 
+    CPL_DISALLOW_COPY_ASSIGN(OGROpenFileGDBSimpleSQLLayer)
+
   public:
     OGROpenFileGDBSimpleSQLLayer(OGRLayer *poBaseLayer, FileGDBIterator *poIter,
                                  int nColumns, const swq_col_def *pasColDefs,
@@ -1043,24 +1369,30 @@ class OGROpenFileGDBSimpleSQLLayer final : public OGRLayer
     virtual void ResetReading() override;
     virtual OGRFeature *GetNextFeature() override;
     virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
+
     virtual OGRFeatureDefn *GetLayerDefn() override
     {
         return poFeatureDefn;
     }
+
     virtual int TestCapability(const char *) override;
+
     virtual const char *GetFIDColumn() override
     {
         return poBaseLayer->GetFIDColumn();
     }
+
     virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override
     {
         return poBaseLayer->GetExtent(psExtent, bForce);
     }
+
     virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
                              int bForce) override
     {
         return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
     }
+
     virtual GIntBig GetFeatureCount(int bForce) override;
 };
 
@@ -1518,7 +1850,7 @@ OGRLayer *OGROpenFileGDBDataSource::ExecuteSQL(const char *pszSQLCommand,
                 OGRMemLayer *poMemLayer = nullptr;
 
                 int i = 0;  // Used after for.
-                for (; i < oSelect.result_columns; i++)
+                for (; i < oSelect.result_columns(); i++)
                 {
                     swq_col_func col_func = oSelect.column_defs[i].col_func;
                     if (!(col_func == SWQCF_MIN || col_func == SWQCF_MAX ||
@@ -1579,7 +1911,7 @@ OGRLayer *OGROpenFileGDBDataSource::ExecuteSQL(const char *pszSQLCommand,
                                 {
                                     eOutOGRType = OFTDateTime;
                                     FileGDBDoubleDateToOGRDate(dfSum / nCount,
-                                                               &sField);
+                                                               false, &sField);
                                 }
                                 else
                                 {
@@ -1619,19 +1951,19 @@ OGRLayer *OGROpenFileGDBDataSource::ExecuteSQL(const char *pszSQLCommand,
                                    : (col_func == SWQCF_SUM) ? "SUM"
                                                              : "COUNT",
                                    oSelect.column_defs[i].field_name);
-                    OGRFieldDefn oFieldDefn(pszMinMaxFieldName,
-                                            (OGRFieldType)eOutOGRType);
+                    OGRFieldDefn oFieldDefn(
+                        pszMinMaxFieldName,
+                        static_cast<OGRFieldType>(eOutOGRType));
                     poMemLayer->CreateField(&oFieldDefn);
                     if (psField != nullptr)
                     {
                         OGRFeature *poFeature = poMemLayer->GetFeature(0);
-                        poFeature->SetField(oFieldDefn.GetNameRef(),
-                                            (OGRField *)psField);
+                        poFeature->SetField(oFieldDefn.GetNameRef(), psField);
                         CPL_IGNORE_RET_VAL(poMemLayer->SetFeature(poFeature));
                         delete poFeature;
                     }
                 }
-                if (i != oSelect.result_columns)
+                if (i != oSelect.result_columns())
                 {
                     delete poMemLayer;
                 }
@@ -1690,7 +2022,7 @@ OGRLayer *OGROpenFileGDBDataSource::ExecuteSQL(const char *pszSQLCommand,
                 if (eErr == OGRERR_NONE)
                 {
                     int i = 0;  // Used after for.
-                    for (; i < oSelect.result_columns; i++)
+                    for (; i < oSelect.result_columns(); i++)
                     {
                         if (oSelect.column_defs[i].col_func != SWQCF_NONE)
                             break;
@@ -1706,7 +2038,7 @@ OGRLayer *OGROpenFileGDBDataSource::ExecuteSQL(const char *pszSQLCommand,
                                 oSelect.column_defs[i].field_name) < 0)
                             break;
                     }
-                    if (i != oSelect.result_columns)
+                    if (i != oSelect.result_columns())
                         eErr = OGRERR_FAILURE;
                 }
                 if (eErr == OGRERR_NONE)
@@ -1738,8 +2070,9 @@ OGRLayer *OGROpenFileGDBDataSource::ExecuteSQL(const char *pszSQLCommand,
                                  "Using OGROpenFileGDBSimpleSQLLayer");
                         bLastSQLUsedOptimizedImplementation = true;
                         return new OGROpenFileGDBSimpleSQLLayer(
-                            poLayer, poIter, oSelect.result_columns,
-                            oSelect.column_defs, oSelect.offset, oSelect.limit);
+                            poLayer, poIter, oSelect.result_columns(),
+                            oSelect.column_defs.data(), oSelect.offset,
+                            oSelect.limit);
                     }
                 }
             }
@@ -1766,7 +2099,7 @@ void OGROpenFileGDBDataSource::ReleaseResultSet(OGRLayer *poResultsSet)
 char **OGROpenFileGDBDataSource::GetFileList()
 {
     int nInterestTable = -1;
-    const char *pszFilenameWithoutPath = CPLGetFilename(m_pszName);
+    const char *pszFilenameWithoutPath = CPLGetFilename(m_osDirName.c_str());
     CPLString osFilenameRadix;
     unsigned int unInterestTable = 0;
     if (strlen(pszFilenameWithoutPath) == strlen("a00000000.gdbtable") &&
@@ -1793,4 +2126,168 @@ char **OGROpenFileGDBDataSource::GetFileList()
     }
     CSLDestroy(papszFiles);
     return osStringList.StealList();
+}
+
+/************************************************************************/
+/*                           BuildSRS()                                 */
+/************************************************************************/
+
+OGRSpatialReference *
+OGROpenFileGDBDataSource::BuildSRS(const CPLXMLNode *psInfo)
+{
+    const char *pszWKT =
+        CPLGetXMLValue(psInfo, "SpatialReference.WKT", nullptr);
+    const int nWKID =
+        atoi(CPLGetXMLValue(psInfo, "SpatialReference.WKID", "0"));
+    // The concept of LatestWKID is explained in
+    // https://support.esri.com/en/technical-article/000013950
+    int nLatestWKID =
+        atoi(CPLGetXMLValue(psInfo, "SpatialReference.LatestWKID", "0"));
+
+    std::unique_ptr<OGRSpatialReference, OGRSpatialReferenceReleaser> poSRS;
+    if (nWKID > 0 || nLatestWKID > 0)
+    {
+        const auto ImportFromCode =
+            [](OGRSpatialReference &oSRS, int nLatestCode, int nCode)
+        {
+            bool bSuccess = false;
+            CPLPushErrorHandler(CPLQuietErrorHandler);
+            // Try first with nLatestWKID as there is a higher chance it is a
+            // EPSG code and not an ESRI one.
+            if (nLatestCode > 0)
+            {
+                if (nLatestCode > 32767)
+                {
+                    if (oSRS.SetFromUserInput(
+                            CPLSPrintf("ESRI:%d", nLatestCode)) == OGRERR_NONE)
+                    {
+                        bSuccess = true;
+                    }
+                }
+                else if (oSRS.importFromEPSG(nLatestCode) == OGRERR_NONE)
+                {
+                    bSuccess = true;
+                }
+                if (!bSuccess)
+                {
+                    CPLDebug("OpenFileGDB", "Cannot import SRID %d",
+                             nLatestCode);
+                }
+            }
+            if (!bSuccess && nCode > 0)
+            {
+                if (nCode > 32767)
+                {
+                    if (oSRS.SetFromUserInput(CPLSPrintf("ESRI:%d", nCode)) ==
+                        OGRERR_NONE)
+                    {
+                        bSuccess = true;
+                    }
+                }
+                else if (oSRS.importFromEPSG(nCode) == OGRERR_NONE)
+                {
+                    bSuccess = true;
+                }
+                if (!bSuccess)
+                {
+                    CPLDebug("OpenFileGDB", "Cannot import SRID %d", nCode);
+                }
+            }
+            CPLPopErrorHandler();
+            CPLErrorReset();
+            return bSuccess;
+        };
+
+        poSRS =
+            std::unique_ptr<OGRSpatialReference, OGRSpatialReferenceReleaser>(
+                new OGRSpatialReference());
+        poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        if (!ImportFromCode(*poSRS.get(), nLatestWKID, nWKID))
+        {
+            poSRS.reset();
+        }
+        else
+        {
+            const int nLatestVCSWKID = atoi(
+                CPLGetXMLValue(psInfo, "SpatialReference.LatestVCSWKID", "0"));
+            const int nVCSWKID =
+                atoi(CPLGetXMLValue(psInfo, "SpatialReference.VCSWKID", "0"));
+            if (nVCSWKID > 0 || nLatestVCSWKID > 0)
+            {
+                auto poVertSRS = std::unique_ptr<OGRSpatialReference,
+                                                 OGRSpatialReferenceReleaser>(
+                    new OGRSpatialReference());
+                if (ImportFromCode(*poVertSRS.get(), nLatestVCSWKID, nVCSWKID))
+                {
+                    auto poCompoundSRS =
+                        std::unique_ptr<OGRSpatialReference,
+                                        OGRSpatialReferenceReleaser>(
+                            new OGRSpatialReference());
+                    if (poCompoundSRS->SetCompoundCS(
+                            std::string(poSRS->GetName())
+                                .append(" + ")
+                                .append(poVertSRS->GetName())
+                                .c_str(),
+                            poSRS.get(), poVertSRS.get()) == OGRERR_NONE)
+                    {
+                        poCompoundSRS->SetAxisMappingStrategy(
+                            OAMS_TRADITIONAL_GIS_ORDER);
+                        poSRS = std::move(poCompoundSRS);
+                    }
+                }
+                if (!poSRS->IsCompound() &&
+                    !(pszWKT != nullptr && pszWKT[0] != '{'))
+                {
+                    poSRS.reset();
+                }
+            }
+        }
+    }
+    if (pszWKT != nullptr && pszWKT[0] != '{' &&
+        (poSRS == nullptr ||
+         (strstr(pszWKT, "VERTCS") && !poSRS->IsCompound())))
+    {
+        poSRS.reset(BuildSRS(pszWKT));
+    }
+    return poSRS.release();
+}
+
+/************************************************************************/
+/*                           BuildSRS()                                 */
+/************************************************************************/
+
+OGRSpatialReference *OGROpenFileGDBDataSource::BuildSRS(const char *pszWKT)
+{
+    std::shared_ptr<OGRSpatialReference> poSharedObj;
+    m_oCacheWKTToSRS.tryGet(pszWKT, poSharedObj);
+    if (poSharedObj)
+        return poSharedObj->Clone();
+
+    OGRSpatialReference *poSRS = new OGRSpatialReference();
+    poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    if (poSRS->importFromWkt(pszWKT) != OGRERR_NONE)
+    {
+        delete poSRS;
+        poSRS = nullptr;
+    }
+    if (poSRS != nullptr)
+    {
+        if (CPLTestBool(CPLGetConfigOption("USE_OSR_FIND_MATCHES", "YES")))
+        {
+            auto poSRSMatch = poSRS->FindBestMatch(100);
+            if (poSRSMatch)
+            {
+                poSRS->Release();
+                poSRS = poSRSMatch;
+                poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            }
+            m_oCacheWKTToSRS.insert(
+                pszWKT, std::shared_ptr<OGRSpatialReference>(poSRS->Clone()));
+        }
+        else
+        {
+            poSRS->AutoIdentifyEPSG();
+        }
+    }
+    return poSRS;
 }

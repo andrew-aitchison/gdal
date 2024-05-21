@@ -86,6 +86,8 @@ typedef struct
 } GDALRasterIOExtraArg;
 
 DEFINE_EXTERNAL_CLASS(OGRLayerShadow, OSGeo.OGR.Layer)
+DEFINE_EXTERNAL_CLASS(OGRFeatureShadow, OSGeo.OGR.Feature)
+
 
 %define %rasterio_functions(GDALTYPE,CSTYPE)
  public CPLErr ReadRaster(int xOff, int yOff, int xSize, int ySize, CSTYPE[] buffer, int buf_xSize, int buf_ySize, int pixelSpace, int lineSpace) {
@@ -345,6 +347,46 @@ public CPLErr SetGCPs(GCP[] pGCPs, string pszGCPProjection) {
             Marshal.WriteIntPtr(nativeArray, i * intPtrSize, Dataset.getCPtr(poObjects[i]).Handle);
 
           retval  = wrapper_GDALWarpDestName(dest, poObjects.Length, nativeArray, warpAppOptions, callback, callback_data);
+      } finally {
+          Marshal.FreeHGlobal(nativeArray);
+      }
+      return retval;
+   }
+
+   public static Dataset BuildVRT(string dest, string[] poObjects, GDALBuildVRTOptions buildVrtAppOptions, $module.GDALProgressFuncDelegate callback, string callback_data) {
+      return wrapper_GDALBuildVRT_names(dest, poObjects, buildVrtAppOptions, callback, callback_data); 
+   }
+
+   public static Dataset BuildVRT(string dest, Dataset[] poObjects, GDALBuildVRTOptions buildVrtAppOptions, $module.GDALProgressFuncDelegate callback, string callback_data) {
+      Dataset retval = null;
+      if (poObjects.Length <= 0)
+        throw new ArgumentException("poObjects size is small (BuildVRT)");
+
+      int intPtrSize = Marshal.SizeOf(typeof(IntPtr));
+      IntPtr nativeArray = Marshal.AllocHGlobal(poObjects.Length * intPtrSize);
+      try {
+          for (int i=0; i < poObjects.Length; i++)
+            Marshal.WriteIntPtr(nativeArray, i * intPtrSize, Dataset.getCPtr(poObjects[i]).Handle);
+
+          retval  = wrapper_GDALBuildVRT_objects(dest, poObjects.Length, nativeArray, buildVrtAppOptions, callback, callback_data);
+      } finally {
+          Marshal.FreeHGlobal(nativeArray);
+      }
+      return retval;
+   }
+
+   public static Dataset MultiDimTranslate(string dest, Dataset[] poObjects, GDALMultiDimTranslateOptions multiDimAppOptions, $module.GDALProgressFuncDelegate callback, string callback_data) {
+      Dataset retval = null;
+      if (poObjects.Length <= 0)
+        throw new ArgumentException("poObjects size is small (GDALMultiDimTranslateDestName)");
+
+      int intPtrSize = Marshal.SizeOf(typeof(IntPtr));
+      IntPtr nativeArray = Marshal.AllocHGlobal(poObjects.Length * intPtrSize);
+      try {
+          for (int i=0; i < poObjects.Length; i++)
+            Marshal.WriteIntPtr(nativeArray, i * intPtrSize, Dataset.getCPtr(poObjects[i]).Handle);
+
+          retval  = wrapper_GDALMultiDimTranslateDestName(dest, poObjects.Length, nativeArray, multiDimAppOptions, callback, callback_data);
       } finally {
           Marshal.FreeHGlobal(nativeArray);
       }

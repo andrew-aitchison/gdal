@@ -374,6 +374,13 @@ int TABFeature::ReadRecordFromDATFile(TABDATFile *poDATFile)
                 SetField(iField, nValue);
                 break;
             }
+            case TABFLargeInt:
+            {
+                const GInt64 nValue = poDATFile->ReadLargeIntField(
+                    poDATFile->GetFieldWidth(iField));
+                SetField(iField, nValue);
+                break;
+            }
             case TABFFloat:
             {
                 const double dValue =
@@ -383,9 +390,9 @@ int TABFeature::ReadRecordFromDATFile(TABDATFile *poDATFile)
             }
             case TABFLogical:
             {
-                const char *pszValue = poDATFile->ReadLogicalField(
+                const bool bValue = poDATFile->ReadLogicalField(
                     poDATFile->GetFieldWidth(iField));
-                SetField(iField, pszValue);
+                SetField(iField, bValue ? 1 : 0);
                 break;
             }
             case TABFDate:
@@ -540,13 +547,19 @@ int TABFeature::WriteRecordToDATFile(TABDATFile *poDATFile,
                     static_cast<GInt16>(GetFieldAsInteger(iField)), poINDFile,
                     panIndexNo[iField]);
                 break;
+            case TABFLargeInt:
+                nStatus = poDATFile->WriteLargeIntField(
+                    static_cast<GInt64>(GetFieldAsInteger64(iField)), poINDFile,
+                    panIndexNo[iField]);
+                break;
             case TABFFloat:
                 nStatus = poDATFile->WriteFloatField(
                     GetFieldAsDouble(iField), poINDFile, panIndexNo[iField]);
                 break;
             case TABFLogical:
-                nStatus = poDATFile->WriteLogicalField(
-                    GetFieldAsString(iField), poINDFile, panIndexNo[iField]);
+                nStatus =
+                    poDATFile->WriteLogicalField(GetFieldAsInteger(iField) == 1,
+                                                 poINDFile, panIndexNo[iField]);
                 break;
             case TABFDate:
 #ifdef MITAB_USE_OFTDATETIME
@@ -1807,7 +1820,8 @@ const char *TABCustomPoint::GetSymbolStyleString(double dfAngle) const
 
     for (i = 0; i < 7 && *pszPtr != '\0' && *pszPtr != ' '; i++, pszPtr++)
     {
-        szLowerExt[i] = static_cast<char>(tolower(*pszPtr));
+        szLowerExt[i] =
+            static_cast<char>(CPLTolower(static_cast<unsigned char>(*pszPtr)));
     }
     szLowerExt[i] = '\0';
 
@@ -2138,7 +2152,6 @@ int TABPolyline::ReadGeometryFromMAPFile(
     double dXMax = 0.0;
     double dYMax = 0.0;
     OGRGeometry *poGeometry = nullptr;
-    OGRLineString *poLine = nullptr;
     GBool bComprCoord = poObjHdr->IsCompressedType();
     TABMAPCoordBlock *poCoordBlock = nullptr;
 
@@ -2156,7 +2169,7 @@ int TABPolyline::ReadGeometryFromMAPFile(
 
         m_bSmooth = FALSE;
 
-        poLine = new OGRLineString();
+        auto poLine = new OGRLineString();
         poGeometry = poLine;
         poLine->setNumPoints(2);
 
@@ -2238,7 +2251,7 @@ int TABPolyline::ReadGeometryFromMAPFile(
 
         poCoordBlock->SetComprCoordOrigin(m_nComprOrgX, m_nComprOrgY);
 
-        poLine = new OGRLineString();
+        auto poLine = new OGRLineString();
         poGeometry = poLine;
         poLine->setNumPoints(numPoints);
 
@@ -2391,7 +2404,7 @@ int TABPolyline::ReadGeometryFromMAPFile(
             const int numSectionVertices = pasSecHdrs[iSection].numVertices;
             GInt32 *pnXYPtr = panXY + (pasSecHdrs[iSection].nVertexOffset * 2);
 
-            poLine = new OGRLineString();
+            auto poLine = new OGRLineString();
             poLine->setNumPoints(numSectionVertices);
 
             for (int i = 0; i < numSectionVertices; i++)
@@ -2407,7 +2420,6 @@ int TABPolyline::ReadGeometryFromMAPFile(
             {
                 CPLAssert(false);  // Just in case lower-level lib is modified
             }
-            poLine = nullptr;
         }
 
         CPLFree(pasSecHdrs);
@@ -3424,7 +3436,7 @@ int TABRegion::WriteGeometryToMAPFile(
          * to write the coordinates themselves...
          *------------------------------------------------------------*/
 
-        GInt32 nX, nY;
+        GInt32 nX = 0, nY = 0;
         for (int iRing = 0; iRing < numRingsTotal; iRing++)
         {
             OGRLinearRing *poRing = GetRingRef(iRing);
@@ -5713,7 +5725,7 @@ int TABText::WriteGeometryToMAPFile(TABMAPFile *poMapFile,
     GInt32 nCoordBlockPtr = poCoordBlock->GetCurAddress();
 
     // This string was escaped before 20050714
-    CPLString oTmpString(m_pszString);
+    CPLString oTmpString(m_pszString ? m_pszString : "");
     if (!poMapFile->GetEncoding().empty())
     {
         oTmpString.Recode(CPL_ENC_UTF8, poMapFile->GetEncoding());
@@ -6301,8 +6313,9 @@ const char *TABText::GetLabelStyleString() const
 
     if (QueryFontStyle(TABFSAllCaps))
         for (int i = 0; pszTextString[i]; ++i)
-            if (isalpha(pszTextString[i]))
-                pszTextString[i] = static_cast<char>(toupper(pszTextString[i]));
+            if (isalpha(static_cast<unsigned char>(pszTextString[i])))
+                pszTextString[i] = static_cast<char>(
+                    CPLToupper(static_cast<unsigned char>(pszTextString[i])));
 
     /* Escape the double quote chars and expand the text */
     char *pszTmpTextString = nullptr;
@@ -6380,7 +6393,7 @@ const char *TABText::GetStyleString() const
 void TABText::SetLabelFromStyleString(const char *pszStyleString)
 {
     // Use the Style Manager to retrieve all the information we need.
-    auto poStyleMgr = cpl::make_unique<OGRStyleMgr>(nullptr);
+    auto poStyleMgr = std::make_unique<OGRStyleMgr>(nullptr);
     std::unique_ptr<OGRStyleTool> poStylePart;
 
     // Init the StyleMgr with the StyleString.
@@ -8393,9 +8406,10 @@ void TABDebugFeature::DumpMIF(FILE *fpOut /*=NULL*/)
  **********************************************************************/
 
 // MI default is PEN(1, 2, 0)
-static const TABPenDef csDefaultPen = MITAB_PEN_DEFAULT;
+static const TABPenDef MITABcsDefaultPen = MITAB_PEN_DEFAULT;
 
-ITABFeaturePen::ITABFeaturePen() : m_nPenDefIndex(-1), m_sPenDef(csDefaultPen)
+ITABFeaturePen::ITABFeaturePen()
+    : m_nPenDefIndex(-1), m_sPenDef(MITABcsDefaultPen)
 {
 }
 
@@ -8833,10 +8847,10 @@ void ITABFeaturePen::DumpPenDef(FILE *fpOut /*=NULL*/)
  **********************************************************************/
 
 // MI default is BRUSH(2, 16777215, 16777215)
-static const TABBrushDef csDefaultBrush = MITAB_BRUSH_DEFAULT;
+static const TABBrushDef MITABcsDefaultBrush = MITAB_BRUSH_DEFAULT;
 
 ITABFeatureBrush::ITABFeatureBrush()
-    : m_nBrushDefIndex(-1), m_sBrushDef(csDefaultBrush)
+    : m_nBrushDefIndex(-1), m_sBrushDef(MITABcsDefaultBrush)
 {
 }
 
@@ -9052,10 +9066,10 @@ void ITABFeatureBrush::DumpBrushDef(FILE *fpOut /*=NULL*/)
  **********************************************************************/
 
 // MI default is Font("Arial", 0, 0, 0)
-static const TABFontDef csDefaultFont = MITAB_FONT_DEFAULT;
+static const TABFontDef MITABcsDefaultFont = MITAB_FONT_DEFAULT;
 
 ITABFeatureFont::ITABFeatureFont()
-    : m_nFontDefIndex(-1), m_sFontDef(csDefaultFont)
+    : m_nFontDefIndex(-1), m_sFontDef(MITABcsDefaultFont)
 {
 }
 
@@ -9094,10 +9108,10 @@ void ITABFeatureFont::DumpFontDef(FILE *fpOut /*=NULL*/)
  **********************************************************************/
 
 // MI default is Symbol(35, 0, 12)
-static const TABSymbolDef csDefaultSymbol = MITAB_SYMBOL_DEFAULT;
+static const TABSymbolDef MITABcsDefaultSymbol = MITAB_SYMBOL_DEFAULT;
 
 ITABFeatureSymbol::ITABFeatureSymbol()
-    : m_nSymbolDefIndex(-1), m_sSymbolDef(csDefaultSymbol)
+    : m_nSymbolDefIndex(-1), m_sSymbolDef(MITABcsDefaultSymbol)
 {
 }
 

@@ -84,6 +84,12 @@ int VSIPluginHandle::ReadMultiRange(int nRanges, void **ppData,
     return poFS->ReadMultiRange(cbData, nRanges, ppData, panOffsets, panSizes);
 }
 
+void VSIPluginHandle::AdviseRead(int nRanges, const vsi_l_offset *panOffsets,
+                                 const size_t *panSizes)
+{
+    poFS->AdviseRead(cbData, nRanges, panOffsets, panSizes);
+}
+
 VSIRangeStatus VSIPluginHandle::GetRangeStatus(vsi_l_offset nOffset,
                                                vsi_l_offset nLength)
 {
@@ -324,6 +330,24 @@ int VSIPluginFilesystemHandler::ReadMultiRange(void *pFile, int nRanges,
     return ret;
 }
 
+void VSIPluginFilesystemHandler::AdviseRead(void *pFile, int nRanges,
+                                            const vsi_l_offset *panOffsets,
+                                            const size_t *panSizes)
+{
+    if (m_cb->advise_read != nullptr)
+    {
+        m_cb->advise_read(pFile, nRanges, panOffsets, panSizes);
+    }
+    else
+    {
+        if (!m_bWarnedAdviseReadImplemented)
+        {
+            m_bWarnedAdviseReadImplemented = true;
+            CPLDebug("VSIPlugin", "AdviseRead() not implemented");
+        }
+    }
+}
+
 int VSIPluginFilesystemHandler::Eof(void *pFile)
 {
     if (m_cb->eof != nullptr)
@@ -411,6 +435,7 @@ int VSIPluginFilesystemHandler::Unlink(const char *pszFilename)
         return -1;
     return unlink(GetCallbackFilename(pszFilename));
 }
+
 int VSIPluginFilesystemHandler::Rename(const char *oldpath, const char *newpath)
 {
     if (m_cb->rename == nullptr || !IsValidFilename(oldpath) ||
@@ -419,12 +444,14 @@ int VSIPluginFilesystemHandler::Rename(const char *oldpath, const char *newpath)
     return m_cb->rename(m_cb->pUserData, GetCallbackFilename(oldpath),
                         GetCallbackFilename(newpath));
 }
+
 int VSIPluginFilesystemHandler::Mkdir(const char *pszDirname, long nMode)
 {
     if (m_cb->mkdir == nullptr || !IsValidFilename(pszDirname))
         return -1;
     return m_cb->mkdir(m_cb->pUserData, GetCallbackFilename(pszDirname), nMode);
 }
+
 int VSIPluginFilesystemHandler::Rmdir(const char *pszDirname)
 {
     if (m_cb->rmdir == nullptr || !IsValidFilename(pszDirname))
@@ -446,12 +473,19 @@ int VSIInstallPluginHandler(const char *pszPrefix,
     return 0;
 }
 
+int VSIRemovePluginHandler(const char *pszPrefix)
+{
+    VSIFileManager::RemoveHandler(pszPrefix);
+    return 0;
+}
+
 VSIFilesystemPluginCallbacksStruct *
 VSIAllocFilesystemPluginCallbacksStruct(void)
 {
     return static_cast<VSIFilesystemPluginCallbacksStruct *>(
         VSI_CALLOC_VERBOSE(1, sizeof(VSIFilesystemPluginCallbacksStruct)));
 }
+
 void VSIFreeFilesystemPluginCallbacksStruct(
     VSIFilesystemPluginCallbacksStruct *poCb)
 {

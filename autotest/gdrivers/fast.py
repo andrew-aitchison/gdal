@@ -34,16 +34,7 @@ import pytest
 
 from osgeo import gdal
 
-###############################################################################
-# Verify we have the driver.
-
-
-def test_fast_1():
-
-    gdaltest.fast_drv = gdal.GetDriverByName("FAST")
-    if gdaltest.fast_drv is None:
-        pytest.skip()
-
+pytestmark = pytest.mark.require_driver("FAST")
 
 ###############################################################################
 # Perform simple read test.
@@ -51,30 +42,31 @@ def test_fast_1():
 
 def test_fast_2():
 
-    if gdaltest.fast_drv is None:
-        pytest.skip()
-
     # Actually, the band (a placeholder) is of 0 bytes size,
     # so the checksum is 0 expected.
 
     tst = gdaltest.GDALTest(
         "fast", "fast/L71118038_03820020111_HPN.FST", 1, 60323, 0, 0, 5000, 1
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 # Verify metadata.
 
 
-def test_fast_3():
+@pytest.fixture()
+def fast_ds():
+    ds = gdal.Open("data/fast/L71118038_03820020111_HPN.FST")
 
-    if gdaltest.fast_drv is None:
-        pytest.skip()
-
-    gdaltest.fast_ds = gdal.Open("data/fast/L71118038_03820020111_HPN.FST")
-    ds = gdaltest.fast_ds
     assert ds is not None, "Missing test dataset"
+
+    return ds
+
+
+def test_fast_3(fast_ds):
+
+    ds = fast_ds
 
     md = ds.GetMetadata()
     assert md is not None, "Missing metadata in test dataset"
@@ -103,18 +95,9 @@ def test_fast_3():
 # Test geotransform data.
 
 
-def test_fast_4():
+def test_fast_4(fast_ds):
 
-    if gdaltest.fast_drv is None:
-        pytest.skip()
-
-    ds = gdaltest.fast_ds
-    assert ds is not None, "Missing test dataset"
-
-    gt = ds.GetGeoTransform()
-
-    gdaltest.fast_ds = None
-    ds = None
+    gt = fast_ds.GetGeoTransform()
 
     tolerance = 0.01
     assert (
@@ -132,9 +115,6 @@ def test_fast_4():
 
 
 def test_fast_5():
-
-    if gdaltest.fast_drv is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest(
         "fast", "fast/L71230079_07920021111_HTM.FST", 2, 19110, 0, 0, 7000, 1
@@ -165,7 +145,7 @@ def test_fast_5():
         PARAMETER["false_northing",10002288.3],
         UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -173,9 +153,6 @@ def test_fast_5():
 
 
 def test_fast_6():
-
-    if gdaltest.fast_drv is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("fast", "fast/n0o0y867.0fl", 1, 0, 0, 0, 2741, 1)
 
@@ -193,7 +170,7 @@ def test_fast_6():
     proj = """LOCAL_CS["GCTP projection number 22",
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -201,9 +178,6 @@ def test_fast_6():
 
 
 def test_fast_7():
-
-    if gdaltest.fast_drv is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("fast", "fast/h0o0y867.1ah", 1, 0, 0, 0, 5815, 1)
 
@@ -226,7 +200,7 @@ def test_fast_7():
     PARAMETER["false_northing",0],
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -234,9 +208,6 @@ def test_fast_7():
 
 
 def test_fast_8():
-
-    if gdaltest.fast_drv is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("fast", "fast/w0y13a4t.010", 1, 0, 0, 0, 4748, 1)
 
@@ -267,7 +238,7 @@ def test_fast_8():
     PARAMETER["false_northing",0],
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -275,9 +246,6 @@ def test_fast_8():
 
 
 def test_fast_9():
-
-    if gdaltest.fast_drv is None:
-        pytest.skip()
 
     ds = gdal.Open("data/fast/HEADER.DAT")
     assert ds.GetMetadataItem("SENSOR") == "", "Did not get expected SENSOR value."

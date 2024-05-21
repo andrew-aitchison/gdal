@@ -142,12 +142,13 @@ class OGRSQLiteBaseDataSource CPL_NON_FINAL : public GDALPamDataset
         nullptr; /* Set by the VFS layer when it opens the DB */
                  /* Must *NOT* be closed by the datasource explicitly. */
 
-    int OpenOrCreateDB(int flags, bool bRegisterOGR2SQLiteExtensions);
+    bool OpenOrCreateDB(int flags, bool bRegisterOGR2SQLiteExtensions,
+                        bool bLoadExtensions);
     bool SetSynchronous();
     bool SetCacheSize();
     void LoadExtensions();
 
-    void CloseDB();
+    bool CloseDB();
 
     std::map<CPLString, OGREnvelope> oMapSQLEnvelope{};
 
@@ -156,8 +157,8 @@ class OGRSQLiteBaseDataSource CPL_NON_FINAL : public GDALPamDataset
         m_osMapRelationships{};
 
     void *hSpatialiteCtxt = nullptr;
-    bool InitNewSpatialite();
-    void FinishNewSpatialite();
+    bool InitSpatialite();
+    void FinishSpatialite();
 
     int bUserTransactionActive = FALSE;
     int nSoftTransactionLevel = 0;
@@ -174,14 +175,17 @@ class OGRSQLiteBaseDataSource CPL_NON_FINAL : public GDALPamDataset
     {
         return hDB;
     }
+
     sqlite3_vfs *GetVFS()
     {
         return pMyVFS;
     }
+
     inline bool GetUpdate() const
     {
         return eAccess == GA_Update;
     }
+
     VSILFILE *GetVSILFILE() const
     {
         return fpMainFile;
@@ -215,7 +219,25 @@ class OGRSQLiteBaseDataSource CPL_NON_FINAL : public GDALPamDataset
     OGRErr PragmaCheck(const char *pszPragma, const char *pszExpected,
                        int nRowsExpected);
 
-    void LoadRelationshipsFromForeignKeys() const;
+    virtual void LoadRelationships() const;
+    void LoadRelationshipsFromForeignKeys(
+        const std::vector<std::string> &excludedTables) const;
+    std::vector<std::string>
+    GetRelationshipNames(CSLConstList papszOptions = nullptr) const override;
+    const GDALRelationship *
+    GetRelationship(const std::string &name) const override;
+
+    bool IsSpatialiteLoaded();
+
+    static int MakeSpatialiteVersionNumber(int x, int y, int z)
+    {
+        return x * 10000 + y * 100 + z;
+    }
+
+    int GetSpatialiteVersionNumber();
+
+    bool SpatialiteRequiresTrustedSchemaOn();
+    bool AreSpatialiteTriggersSafe();
 
     // sqlite3_prepare_v2 error logging wrapper
     int
@@ -257,6 +279,8 @@ class IOGRSQLiteSelectLayer
     virtual OGRErr BaseGetExtent(OGREnvelope *psExtent, int bForce) = 0;
     virtual OGRErr BaseGetExtent(int iGeomField, OGREnvelope *psExtent,
                                  int bForce) = 0;
+    virtual bool ValidateGeometryFieldIndexForSetSpatialFilter(
+        int iGeomField, const OGRGeometry *poGeomIn, bool bIsSelectLayer) = 0;
 };
 
 /************************************************************************/

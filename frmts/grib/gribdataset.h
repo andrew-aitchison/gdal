@@ -100,6 +100,7 @@ class GRIBDataset final : public GDALPamDataset
                                    void *pProgressData);
 
     CPLErr GetGeoTransform(double *padfTransform) override;
+
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return m_poSRS.get();
@@ -158,7 +159,7 @@ class GRIBRasterBand final : public GDALPamRasterBand
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
 
-    void FindPDSTemplate();
+    void FindPDSTemplateGRIB2();
 
     void UncacheData();
 
@@ -215,6 +216,7 @@ class InventoryWrapper
     InventoryWrapper()
     {
     }
+
     virtual ~InventoryWrapper()
     {
     }
@@ -231,10 +233,12 @@ class InventoryWrapper
     {
         return inv_len_;
     }
+
     size_t num_messages() const
     {
         return num_messages_;
     }
+
     int result() const
     {
         return result_;

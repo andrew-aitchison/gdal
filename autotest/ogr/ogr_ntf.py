@@ -83,18 +83,17 @@ import pytest
 
 from osgeo import ogr
 
-pytestmark = pytest.mark.require_driver("NTF")
+pytestmark = pytest.mark.require_driver("UK .NTF")
 
 ###############################################################################
 
 
 def test_ogr_ntf_1():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://www.ordnancesurvey.co.uk/oswebsite/products/strategi/sampledata/stratntf.exe",
         "stratntf.exe",
-    ):
-        pytest.skip()
+    )
 
     try:
         os.stat("tmp/cache/SS.ntf")
@@ -130,17 +129,14 @@ def test_ogr_ntf_1():
     feat = lyr.GetNextFeature()
     assert feat.GetGeometryRef().ExportToWkt() == "POINT (222904 127850)"
 
-    ds.Destroy()
-
 
 ###############################################################################
 def test_ogr_ntf_2():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://www.ordnancesurvey.co.uk/oswebsite/products/meridian2/sampledata/meridian2ntf.exe",
         "meridian2ntf.exe",
-    ):
-        pytest.skip()
+    )
 
     try:
         os.stat("tmp/cache/Port_Talbot_NTF/SS78.ntf")
@@ -182,5 +178,3 @@ def test_ogr_ntf_2():
         feat.GetGeometryRef().ExportToWkt()
         == "LINESTRING (275324 189274,275233 189114,275153 189048)"
     )
-
-    ds.Destroy()

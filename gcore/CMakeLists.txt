@@ -38,16 +38,30 @@ add_library(
   gdalarraybandblockcache.cpp
   gdalhashsetbandblockcache.cpp
   gdalrelationship.cpp
+  gdalsubdatasetinfo.cpp
   gdalorienteddataset.cpp
   overview.cpp
   rasterio.cpp
   rawdataset.cpp
   gdalmultidim.cpp
+  gdalmultidim_gridded.cpp
+  gdalmultidim_gltorthorectification.cpp
+  gdalmultidim_subsetdimension.cpp
+  gdalmultidim_rat.cpp
   gdalpython.cpp
   gdalpythondriverloader.cpp
   tilematrixset.cpp
   gdal_thread_pool.cpp
   nasakeywordhandler.cpp)
+
+get_property(IS_UNITY_BUILD TARGET gcore PROPERTY UNITY_BUILD)
+if(IS_UNITY_BUILD)
+  set_property(
+    SOURCE gdal_misc.cpp
+    APPEND
+    PROPERTY COMPILE_DEFINITIONS CMAKE_UNITY_BUILD)
+endif()
+
 gdal_standard_includes(gcore)
 add_dependencies(gcore generate_gdal_version_h)
 target_compile_options(gcore PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
@@ -133,6 +147,12 @@ if (GDAL_USE_GEOS)
   gdal_target_link_libraries(gcore PRIVATE ${GEOS_TARGET})
 endif ()
 
+if (GDAL_USE_CURL)
+  # Just for gdal_misc.cpp in fact
+  target_compile_definitions(gcore PRIVATE -DHAVE_CURL)
+  gdal_target_link_libraries(gcore PRIVATE CURL::libcurl)
+endif ()
+
 gdal_target_link_libraries(gcore PRIVATE PROJ::proj)
 
 # Windows(Mingw/MSVC) link libraries
@@ -158,4 +178,17 @@ target_public_header(
   gdalcachedpixelaccessor.h
   rawdataset.h
   gdalgeorefpamdataset.h
-  gdal_mdreader.h)
+  gdal_mdreader.h
+  gdalsubdatasetinfo.h
+)
+
+set(GDAL_DATA_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_LINZAntarticaMapTileGrid.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_MapML_APSTILE.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_MapML_CBMTILE.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_NZTM2000.json
+)
+set_property(
+  TARGET ${GDAL_LIB_TARGET_NAME}
+  APPEND
+  PROPERTY RESOURCE "${GDAL_DATA_FILES}")

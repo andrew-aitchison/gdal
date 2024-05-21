@@ -101,9 +101,11 @@ class GDALGeoLocCArrayAccessors
     bool AllocateBackMap();
 
     GDALDataset *GetBackmapDataset();
+
     static void FlushBackmapCaches()
     {
     }
+
     static void ReleaseBackmapDataset(GDALDataset *poDS)
     {
         delete poDS;
@@ -286,8 +288,8 @@ bool GDALGeoLocCArrayAccessors::LoadGeoloc(bool bIsRegularGrid)
     geolocYAccessor.m_array = m_padfGeoLocY;
     geolocYAccessor.m_nXSize = m_psTransform->nGeoLocXSize;
 
-    return GDALGeoLoc<GDALGeoLocCArrayAccessors>::LoadGeolocFinish(
-        m_psTransform);
+    GDALGeoLoc<GDALGeoLocCArrayAccessors>::LoadGeolocFinish(m_psTransform);
+    return true;
 }
 
 /*! @endcond */

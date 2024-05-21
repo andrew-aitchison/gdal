@@ -56,7 +56,7 @@ gdal_version = tuple(int(s) for s in str(gdal_version_str).split(".") if s.isdig
 
 def DoesDriverHandleExtension(drv: gdal.Driver, ext: str) -> bool:
     exts = drv.GetMetadataItem(gdal.DMD_EXTENSIONS)
-    return exts is not None and exts.lower().find(ext.lower()) >= 0
+    return exts is not None and ext.lower() in exts.lower().split(" ")
 
 
 def GetOutputDriversFor(filename: PathLikeOrStr, is_raster=True) -> List[str]:
@@ -241,9 +241,18 @@ class OpenDS:
     def __enter__(self) -> gdal.Dataset:
 
         if self.ds is None:
-            self.ds = self._open_ds(self.filename, *self.args, **self.kwargs)
+            try:
+                self.ds = self._open_ds(self.filename, *self.args, **self.kwargs)
+            except Exception as e:
+                if self.silent_fail:
+                    return None
+                msg = str(e)
+                prefix = f"{self.filename}: "
+                if msg.startswith(prefix):
+                    msg = msg[len(prefix) :]
+                raise IOError(f'Could not open file "{self.filename}": {msg}')
             if self.ds is None and not self.silent_fail:
-                raise IOError('could not open file "{}"'.format(self.filename))
+                raise IOError(f'Could not open file "{self.filename}"')
             self.own = True
         return self.ds
 

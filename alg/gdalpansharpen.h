@@ -104,15 +104,6 @@ typedef struct
      * threaded mode is enabled unless the GDAL_NUM_THREADS configuration option
      * is set to an integer or ALL_CPUS. */
     int nThreads;
-
-    /** Shift in pixels of multispectral bands w.r.t panchromatic band, in X
-     * direction */
-    double dfMSShiftX;
-
-    /** Shift in pixels of multispectral bands w.r.t panchromatic band, in Y
-     * direction */
-    double dfMSShiftY;
-
 } GDALPansharpenOptions;
 
 GDALPansharpenOptions CPL_DLL *GDALCreatePansharpenOptions(void);
@@ -135,9 +126,9 @@ CPL_C_END
 
 #ifdef __cplusplus
 
+#include <array>
 #include <vector>
 #include "gdal_priv.h"
-#include "cpl_worker_thread_pool.h"
 
 #ifdef DEBUG_TIMING
 #include <sys/time.h>
@@ -188,6 +179,9 @@ typedef struct
     struct timeval *ptv;
 #endif
 } GDALPansharpenResampleJob;
+
+class CPLWorkerThreadPool;
+
 //! @endcond
 
 /** Pansharpening operation class.
@@ -204,6 +198,7 @@ class GDALPansharpenOperation
     int bPositiveWeights = TRUE;
     CPLWorkerThreadPool *poThreadPool = nullptr;
     int nKernelRadius = 0;
+    std::array<double, 6> m_adfPanToMSGT = {{0.0, 1.0, 0, 0.0, 0.0, 1.0}};
 
     static void PansharpenJobThreadFunc(void *pUserData);
     static void PansharpenResampleJobThreadFunc(void *pUserData);

@@ -111,14 +111,20 @@ void RegisterOGRMEM()
         GDAL_DMD_CREATIONFIELDDATATYPES,
         "Integer Integer64 Real String Date DateTime Time IntegerList "
         "Integer64List RealList StringList Binary");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "WidthPrecision Nullable Default Unique "
+                              "Comment AlternativeName Domain");
     poDriver->SetMetadataItem(GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
-                              "Name WidthPrecision");
+                              "Name Type WidthPrecision Nullable Default "
+                              "Unique Domain AlternativeName Comment");
 
     poDriver->SetMetadataItem(
         GDAL_DS_LAYER_CREATIONOPTIONLIST,
         "<LayerCreationOptionList>"
         "  <Option name='ADVERTIZE_UTF8' type='boolean' description='Whether "
         "the layer will contain UTF-8 strings' default='NO'/>"
+        "  <Option name='FID' type='string' description="
+        "'Name of the FID column to create' default='' />"
         "</LayerCreationOptionList>");
 
     poDriver->SetMetadataItem(GDAL_DCAP_COORDINATE_EPOCH, "YES");

@@ -34,9 +34,11 @@
 #include "ogr_api.h"
 #include "cpl_time.h"
 #include <algorithm>
+#include <limits>
 #include <vector>
 
 //! @cond Doxygen_Suppress
+extern const swq_field_type SpecialFieldTypes[SPECIAL_FIELD_COUNT];
 
 class OGRGenSQLGeomFieldDefn final : public OGRGeomFieldDefn
 {
@@ -56,8 +58,8 @@ class OGRGenSQLGeomFieldDefn final : public OGRGeomFieldDefn
 /*               OGRGenSQLResultsLayerHasSpecialField()                 */
 /************************************************************************/
 
-static int OGRGenSQLResultsLayerHasSpecialField(swq_expr_node *expr,
-                                                int nMinIndexForSpecialField)
+static bool OGRGenSQLResultsLayerHasSpecialField(swq_expr_node *expr,
+                                                 int nMinIndexForSpecialField)
 {
     if (expr->eNodeType == SNT_COLUMN)
     {
@@ -74,10 +76,10 @@ static int OGRGenSQLResultsLayerHasSpecialField(swq_expr_node *expr,
         {
             if (OGRGenSQLResultsLayerHasSpecialField(expr->papoSubExpr[i],
                                                      nMinIndexForSpecialField))
-                return TRUE;
+                return true;
         }
     }
-    return FALSE;
+    return false;
 }
 
 /************************************************************************/
@@ -90,7 +92,7 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
                                              const char *pszWHEREIn,
                                              const char *pszDialect)
     : poSrcDS(poSrcDSIn), poSrcLayer(nullptr), pSelectInfo(pSelectInfoIn),
-      pszWHERE(nullptr), papoTableLayers(nullptr), poDefn(nullptr),
+      papoTableLayers(nullptr), poDefn(nullptr),
       panGeomFieldToSrcGeomField(nullptr), nIndexSize(0), panFIDIndex(nullptr),
       bOrderByValid(FALSE), nNextIndexFID(0), poSummaryFeature(nullptr),
       iFIDFieldIndex(), nExtraDSCount(0), papoExtraDS(nullptr),
@@ -146,24 +148,20 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
     /*      we should avoid to forward the where clause to the source layer */
     /*      when there is a risk it cannot understand it (#4022)            */
     /* -------------------------------------------------------------------- */
-    int bForwardWhereToSourceLayer = TRUE;
+    m_bForwardWhereToSourceLayer = true;
     if (pszWHEREIn)
     {
         if (psSelectInfo->where_expr && pszDialect != nullptr &&
             EQUAL(pszDialect, "OGRSQL"))
         {
-            int nMinIndexForSpecialField =
+            const int nMinIndexForSpecialField =
                 poSrcLayer->GetLayerDefn()->GetFieldCount();
-            bForwardWhereToSourceLayer = !OGRGenSQLResultsLayerHasSpecialField(
-                psSelectInfo->where_expr, nMinIndexForSpecialField);
+            m_bForwardWhereToSourceLayer =
+                !OGRGenSQLResultsLayerHasSpecialField(psSelectInfo->where_expr,
+                                                      nMinIndexForSpecialField);
         }
-        if (bForwardWhereToSourceLayer)
-            pszWHERE = CPLStrdup(pszWHEREIn);
-        else
-            pszWHERE = nullptr;
+        m_osInitialWHERE = pszWHEREIn;
     }
-    else
-        pszWHERE = nullptr;
 
     /* -------------------------------------------------------------------- */
     /*      Prepare a feature definition based on the query.                */
@@ -179,11 +177,12 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
 
     /* + 1 since we can add an implicit geometry field */
     panGeomFieldToSrcGeomField = static_cast<int *>(
-        CPLMalloc(sizeof(int) * (1 + psSelectInfo->result_columns)));
+        CPLMalloc(sizeof(int) * (1 + psSelectInfo->column_defs.size())));
 
-    for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+    for (std::size_t iField = 0; iField < psSelectInfo->column_defs.size();
+         iField++)
     {
-        swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+        swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
         OGRFieldDefn oFDefn("", OFTInteger);
         OGRGeomFieldDefn oGFDefn("", wkbUnknown);
         OGRFieldDefn *poSrcFDefn = nullptr;
@@ -422,7 +421,7 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
             }
 
             auto poMyGeomFieldDefn =
-                cpl::make_unique<OGRGenSQLGeomFieldDefn>(&oGFDefn);
+                std::make_unique<OGRGenSQLGeomFieldDefn>(&oGFDefn);
             poMyGeomFieldDefn->bForceGeomType = bForceGeomType;
             poDefn->AddGeomFieldDefn(std::move(poMyGeomFieldDefn));
         }
@@ -434,16 +433,12 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
     /*      Add implicit geometry field.                                    */
     /* -------------------------------------------------------------------- */
     if (psSelectInfo->query_mode == SWQM_RECORDSET &&
-        poDefn->GetGeomFieldCount() == 0 && poSrcDefn->GetGeomFieldCount() == 1)
+        poDefn->GetGeomFieldCount() == 0 &&
+        poSrcDefn->GetGeomFieldCount() == 1 && !psSelectInfo->bExcludedGeometry)
     {
-        psSelectInfo->result_columns++;
+        psSelectInfo->column_defs.emplace_back();
 
-        psSelectInfo->column_defs = static_cast<swq_col_def *>(
-            CPLRealloc(psSelectInfo->column_defs,
-                       sizeof(swq_col_def) * psSelectInfo->result_columns));
-
-        swq_col_def *col_def =
-            psSelectInfo->column_defs + psSelectInfo->result_columns - 1;
+        swq_col_def *col_def = &psSelectInfo->column_defs.back();
 
         memset(col_def, 0, sizeof(swq_col_def));
         const char *pszName = poSrcDefn->GetGeomFieldDefn(0)->GetNameRef();
@@ -461,7 +456,7 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
 
         panGeomFieldToSrcGeomField[poDefn->GetGeomFieldCount()] = 0;
 
-        poDefn->AddGeomFieldDefn(cpl::make_unique<OGRGenSQLGeomFieldDefn>(
+        poDefn->AddGeomFieldDefn(std::make_unique<OGRGenSQLGeomFieldDefn>(
             poSrcDefn->GetGeomFieldDefn(0)));
 
         /* Hack while drivers haven't been updated so that */
@@ -485,8 +480,8 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer(GDALDataset *poSrcDSIn,
 
     FindAndSetIgnoredFields();
 
-    if (!bForwardWhereToSourceLayer)
-        OGRGenSQLResultsLayer::SetAttributeFilter(pszWHEREIn);
+    if (!m_bForwardWhereToSourceLayer)
+        OGRLayer::SetAttributeFilter(m_osInitialWHERE.c_str());
 }
 
 /************************************************************************/
@@ -528,7 +523,6 @@ OGRGenSQLResultsLayer::~OGRGenSQLResultsLayer()
         GDALClose(GDALDataset::ToHandle(papoExtraDS[iEDS]));
 
     CPLFree(papoExtraDS);
-    CPLFree(pszWHERE);
 }
 
 /************************************************************************/
@@ -605,7 +599,14 @@ int OGRGenSQLResultsLayer::MustEvaluateSpatialFilterOnGenSQL()
 
 void OGRGenSQLResultsLayer::ApplyFiltersToSource()
 {
-    poSrcLayer->SetAttributeFilter(pszWHERE);
+    if (m_bForwardWhereToSourceLayer && !m_osInitialWHERE.empty())
+    {
+        poSrcLayer->SetAttributeFilter(m_osInitialWHERE.c_str());
+    }
+    else
+    {
+        poSrcLayer->SetAttributeFilter(nullptr);
+    }
     if (m_iGeomFieldFilter >= 0 &&
         m_iGeomFieldFilter < GetLayerDefn()->GetGeomFieldCount())
     {
@@ -633,6 +634,7 @@ void OGRGenSQLResultsLayer::ResetReading()
 
     nNextIndexFID = psSelectInfo->offset;
     nIteratedFeatures = -1;
+    m_bEOF = false;
 }
 
 /************************************************************************/
@@ -650,10 +652,22 @@ OGRErr OGRGenSQLResultsLayer::SetNextByIndex(GIntBig nIndex)
 
     swq_select *psSelectInfo = static_cast<swq_select *>(pSelectInfo);
 
-    nIteratedFeatures = 0;
+    if (psSelectInfo->limit >= 0)
+    {
+        nIteratedFeatures = nIndex;
+        if (nIteratedFeatures >= psSelectInfo->limit)
+        {
+            return OGRERR_FAILURE;
+        }
+    }
 
     CreateOrderByIndex();
 
+    if (nIndex > std::numeric_limits<GIntBig>::max() - psSelectInfo->offset)
+    {
+        m_bEOF = true;
+        return OGRERR_FAILURE;
+    }
     if (psSelectInfo->query_mode == SWQM_SUMMARY_RECORD ||
         psSelectInfo->query_mode == SWQM_DISTINCT_LIST ||
         panFIDIndex != nullptr)
@@ -663,7 +677,10 @@ OGRErr OGRGenSQLResultsLayer::SetNextByIndex(GIntBig nIndex)
     }
     else
     {
-        return poSrcLayer->SetNextByIndex(nIndex + psSelectInfo->offset);
+        OGRErr eErr = poSrcLayer->SetNextByIndex(nIndex + psSelectInfo->offset);
+        if (eErr != OGRERR_NONE)
+            m_bEOF = true;
+        return eErr;
     }
 }
 
@@ -772,6 +789,13 @@ int OGRGenSQLResultsLayer::TestCapability(const char *pszCap)
         if (EQUAL(pszCap, OLCFastFeatureCount))
             return TRUE;
     }
+
+    if (EQUAL(pszCap, OLCStringsAsUTF8) || EQUAL(pszCap, OLCCurveGeometries) ||
+        EQUAL(pszCap, OLCMeasuredGeometries) || EQUAL(pszCap, OLCZGeometries))
+    {
+        return poSrcLayer->TestCapability(pszCap);
+    }
+
     return FALSE;
 }
 
@@ -841,9 +865,9 @@ int OGRGenSQLResultsLayer::PrepareSummary()
          !ContainGeomSpecialField(psSelectInfo->where_expr)))
     {
         int bFoundGeomExpr = FALSE;
-        for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+        for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
         {
-            swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+            swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
             if (psColDef->table_index == 0 && psColDef->field_index != -1)
             {
                 OGRLayer *poLayer = papoTableLayers[psColDef->table_index];
@@ -880,7 +904,7 @@ int OGRGenSQLResultsLayer::PrepareSummary()
     /*      GetFeatureCount().                                            */
     /* -------------------------------------------------------------------- */
 
-    if (psSelectInfo->result_columns == 1 &&
+    if (psSelectInfo->result_columns() == 1 &&
         psSelectInfo->column_defs[0].col_func == SWQCF_COUNT &&
         psSelectInfo->column_defs[0].field_index < 0)
     {
@@ -909,9 +933,9 @@ int OGRGenSQLResultsLayer::PrepareSummary()
 
     while ((poSrcFeature = poSrcLayer->GetNextFeature()) != nullptr)
     {
-        for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+        for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
         {
-            swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+            swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
 
             if (psColDef->col_func == SWQCF_COUNT)
             {
@@ -979,12 +1003,13 @@ int OGRGenSQLResultsLayer::PrepareSummary()
     /* -------------------------------------------------------------------- */
     if (psSelectInfo->query_mode == SWQM_SUMMARY_RECORD)
     {
-        for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+        for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
         {
-            swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+            swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
             if (!psSelectInfo->column_summary.empty())
             {
-                swq_summary &oSummary = psSelectInfo->column_summary[iField];
+                const swq_summary &oSummary =
+                    psSelectInfo->column_summary[iField];
                 if (psColDef->col_func == SWQCF_COUNT)
                 {
                     if (CPL_INT64_FITS_ON_INT32(oSummary.count))
@@ -1003,12 +1028,13 @@ int OGRGenSQLResultsLayer::PrepareSummary()
             poSummaryFeature->SetFID(0);
         }
 
-        for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+        for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
         {
-            swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+            swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
             if (!psSelectInfo->column_summary.empty())
             {
-                swq_summary &oSummary = psSelectInfo->column_summary[iField];
+                const swq_summary &oSummary =
+                    psSelectInfo->column_summary[iField];
 
                 if (psColDef->col_func == SWQCF_AVG && oSummary.count > 0)
                 {
@@ -1036,7 +1062,8 @@ int OGRGenSQLResultsLayer::PrepareSummary()
                 {
                     if (psColDef->field_type == SWQ_DATE ||
                         psColDef->field_type == SWQ_TIME ||
-                        psColDef->field_type == SWQ_TIMESTAMP)
+                        psColDef->field_type == SWQ_TIMESTAMP ||
+                        psColDef->field_type == SWQ_STRING)
                         poSummaryFeature->SetField(iField,
                                                    oSummary.osMin.c_str());
                     else
@@ -1046,7 +1073,8 @@ int OGRGenSQLResultsLayer::PrepareSummary()
                 {
                     if (psColDef->field_type == SWQ_DATE ||
                         psColDef->field_type == SWQ_TIME ||
-                        psColDef->field_type == SWQ_TIMESTAMP)
+                        psColDef->field_type == SWQ_TIMESTAMP ||
+                        psColDef->field_type == SWQ_STRING)
                         poSummaryFeature->SetField(iField,
                                                    oSummary.osMax.c_str());
                     else
@@ -1349,9 +1377,10 @@ OGRFeature *OGRGenSQLResultsLayer::TranslateFeature(OGRFeature *poSrcFeat)
     /* -------------------------------------------------------------------- */
     int iRegularField = 0;
     int iGeomField = 0;
-    for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+    swq_evaluation_context sContext;
+    for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
     {
-        swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+        swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
         if (psColDef->field_index != -1)
         {
             if (psColDef->field_type == SWQ_GEOMETRY ||
@@ -1362,8 +1391,8 @@ OGRFeature *OGRGenSQLResultsLayer::TranslateFeature(OGRFeature *poSrcFeat)
             continue;
         }
 
-        swq_expr_node *poResult =
-            psColDef->expr->Evaluate(OGRMultiFeatureFetcher, &apoFeatures);
+        swq_expr_node *poResult = psColDef->expr->Evaluate(
+            OGRMultiFeatureFetcher, &apoFeatures, sContext);
 
         if (poResult == nullptr)
         {
@@ -1452,9 +1481,9 @@ OGRFeature *OGRGenSQLResultsLayer::TranslateFeature(OGRFeature *poSrcFeat)
     /* -------------------------------------------------------------------- */
     iRegularField = 0;
     iGeomField = 0;
-    for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+    for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
     {
-        swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+        swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
 
         if (psColDef->table_index != 0)
         {
@@ -1556,9 +1585,9 @@ OGRFeature *OGRGenSQLResultsLayer::TranslateFeature(OGRFeature *poSrcFeat)
 
         // Copy over selected field values.
         iRegularField = 0;
-        for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+        for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
         {
-            swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+            swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
 
             if (psColDef->field_type == SWQ_GEOMETRY ||
                 psColDef->target_type == SWQ_GEOMETRY)
@@ -1587,6 +1616,8 @@ OGRFeature *OGRGenSQLResultsLayer::GetNextFeature()
 {
     swq_select *psSelectInfo = static_cast<swq_select *>(pSelectInfo);
 
+    if (m_bEOF)
+        return nullptr;
     if (psSelectInfo->limit >= 0 &&
         (nIteratedFeatures < 0 ? 0 : nIteratedFeatures) >= psSelectInfo->limit)
         return nullptr;
@@ -1783,9 +1814,9 @@ OGRFeatureDefn *OGRGenSQLResultsLayer::GetLayerDefn()
     {
         // Run PrepareSummary() is we have a COUNT column so as to be
         // able to downcast it from OFTInteger64 to OFTInteger
-        for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+        for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
         {
-            swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+            swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
             if (psColDef->col_func == SWQCF_COUNT)
             {
                 PrepareSummary();
@@ -1939,8 +1970,7 @@ void OGRGenSQLResultsLayer::CreateOrderByIndex()
     swq_select *psSelectInfo = static_cast<swq_select *>(pSelectInfo);
     const int nOrderItems = psSelectInfo->order_specs;
 
-    if (!(psSelectInfo->order_specs > 0 &&
-          psSelectInfo->query_mode == SWQM_RECORDSET && nOrderItems != 0))
+    if (!(nOrderItems > 0 && psSelectInfo->query_mode == SWQM_RECORDSET))
         return;
 
     if (bOrderByValid)
@@ -2364,9 +2394,9 @@ void OGRGenSQLResultsLayer::FindAndSetIgnoredFields()
     /*      1st phase : explore the whole select infos to determine which   */
     /*      source fields are used                                          */
     /* -------------------------------------------------------------------- */
-    for (int iField = 0; iField < psSelectInfo->result_columns; iField++)
+    for (int iField = 0; iField < psSelectInfo->result_columns(); iField++)
     {
-        swq_col_def *psColDef = psSelectInfo->column_defs + iField;
+        swq_col_def *psColDef = &psSelectInfo->column_defs[iField];
         AddFieldDefnToSet(psColDef->table_index, psColDef->field_index, hSet);
         if (psColDef->expr)
             ExploreExprForIgnoredFields(psColDef->expr, hSet);
@@ -2436,8 +2466,26 @@ void OGRGenSQLResultsLayer::InvalidateOrderByIndex()
 
 OGRErr OGRGenSQLResultsLayer::SetAttributeFilter(const char *pszAttributeFilter)
 {
+    const std::string osAdditionalWHERE =
+        pszAttributeFilter ? pszAttributeFilter : "";
+    std::string osWHERE;
+    if (!m_bForwardWhereToSourceLayer && !m_osInitialWHERE.empty())
+    {
+        if (!osAdditionalWHERE.empty())
+            osWHERE += '(';
+        osWHERE += m_osInitialWHERE;
+        if (!osAdditionalWHERE.empty())
+            osWHERE += ") AND (";
+    }
+    osWHERE += osAdditionalWHERE;
+    if (!m_bForwardWhereToSourceLayer && !m_osInitialWHERE.empty() &&
+        !osAdditionalWHERE.empty())
+    {
+        osWHERE += ')';
+    }
     InvalidateOrderByIndex();
-    return OGRLayer::SetAttributeFilter(pszAttributeFilter);
+    return OGRLayer::SetAttributeFilter(osWHERE.empty() ? nullptr
+                                                        : osWHERE.c_str());
 }
 
 /************************************************************************/

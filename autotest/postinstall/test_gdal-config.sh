@@ -11,7 +11,7 @@ echo "Running post-install tests with gdal-config"
 
 prefix=$1
 if [ -z "$prefix" ]; then
-    echo "First positional argument to the the installed prefix is required"
+    echo "First positional argument to the installed prefix is required"
     exit 1
 fi
 
@@ -64,6 +64,11 @@ check_version(){
   esac
 }
 
+if ! ${GDAL_CONFIG} --plugindir >/dev/null; then
+  echo "${GDAL_CONFIG} --plugindir does not work"
+  exit 1
+fi
+
 cd $(dirname $0)
 
 echo Testing C app
@@ -91,6 +96,14 @@ check_version test_cpp
 
 make clean
 cd ..
+
+set -eu
+
+CXX="${CXX:-c++}"
+echo "Test that we can compile all headers with C++11 using ${CXX}"
+for i in $prefix/include/*.h; do
+  ${CXX} -std=c++11 -c $(${GDAL_CONFIG} --cflags) $i;
+done
 
 echo "$ERRORS tests failed out of $NTESTS"
 exit $ERRORS

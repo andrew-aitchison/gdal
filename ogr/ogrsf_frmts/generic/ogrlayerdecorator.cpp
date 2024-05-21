@@ -158,6 +158,20 @@ OGRErr OGRLayerDecorator::IUpsertFeature(OGRFeature *poFeature)
     return m_poDecoratedLayer->UpsertFeature(poFeature);
 }
 
+OGRErr OGRLayerDecorator::IUpdateFeature(OGRFeature *poFeature,
+                                         int nUpdatedFieldsCount,
+                                         const int *panUpdatedFieldsIdx,
+                                         int nUpdatedGeomFieldsCount,
+                                         const int *panUpdatedGeomFieldsIdx,
+                                         bool bUpdateStyleString)
+{
+    if (!m_poDecoratedLayer)
+        return OGRERR_FAILURE;
+    return m_poDecoratedLayer->UpdateFeature(
+        poFeature, nUpdatedFieldsCount, panUpdatedFieldsIdx,
+        nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx, bUpdateStyleString);
+}
+
 OGRErr OGRLayerDecorator::DeleteFeature(GIntBig nFID)
 {
     if (!m_poDecoratedLayer)
@@ -222,7 +236,8 @@ int OGRLayerDecorator::TestCapability(const char *pszCapability)
     return m_poDecoratedLayer->TestCapability(pszCapability);
 }
 
-OGRErr OGRLayerDecorator::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRLayerDecorator::CreateField(const OGRFieldDefn *poField,
+                                      int bApproxOK)
 {
     if (!m_poDecoratedLayer)
         return OGRERR_FAILURE;
@@ -261,7 +276,7 @@ OGRErr OGRLayerDecorator::AlterGeomFieldDefn(
                                                   poNewGeomFieldDefn, nFlagsIn);
 }
 
-OGRErr OGRLayerDecorator::CreateGeomField(OGRGeomFieldDefn *poField,
+OGRErr OGRLayerDecorator::CreateGeomField(const OGRGeomFieldDefn *poField,
                                           int bApproxOK)
 {
     if (!m_poDecoratedLayer)
@@ -332,7 +347,7 @@ const char *OGRLayerDecorator::GetGeometryColumn()
     return m_poDecoratedLayer->GetGeometryColumn();
 }
 
-OGRErr OGRLayerDecorator::SetIgnoredFields(const char **papszFields)
+OGRErr OGRLayerDecorator::SetIgnoredFields(CSLConstList papszFields)
 {
     if (!m_poDecoratedLayer)
         return OGRERR_FAILURE;

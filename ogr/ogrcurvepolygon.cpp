@@ -432,6 +432,30 @@ OGRErr OGRCurvePolygon::addRingDirectlyInternal(OGRCurve *poNewRing,
 }
 
 /************************************************************************/
+/*                             addRing()                                */
+/************************************************************************/
+
+/**
+ * \brief Add a ring to a polygon.
+ *
+ * If the polygon has no external ring (it is empty) this will be used as
+ * the external ring, otherwise it is used as an internal ring.
+ *
+ * This method has no SFCOM analog.
+ *
+ * @param poNewRing ring to be added to the polygon.
+ * @return OGRERR_NONE in case of success
+ */
+OGRErr OGRCurvePolygon::addRing(std::unique_ptr<OGRCurve> poNewRing)
+{
+    OGRCurve *poNewRingPtr = poNewRing.release();
+    OGRErr eErr = addRingDirectlyInternal(poNewRingPtr, TRUE);
+    if (eErr != OGRERR_NONE)
+        delete poNewRingPtr;
+    return eErr;
+}
+
+/************************************************************************/
 /*                              WkbSize()                               */
 /*                                                                      */
 /*      Return the size of this object in well known binary             */
@@ -491,15 +515,16 @@ OGRErr OGRCurvePolygon::importFromWkb(const unsigned char *pabyData,
 /*      Build a well known binary representation of this object.        */
 /************************************************************************/
 
-OGRErr OGRCurvePolygon::exportToWkb(OGRwkbByteOrder eByteOrder,
-                                    unsigned char *pabyData,
-                                    OGRwkbVariant eWkbVariant) const
-
+OGRErr OGRCurvePolygon::exportToWkb(unsigned char *pabyData,
+                                    const OGRwkbExportOptions *psOptions) const
 {
-    if (eWkbVariant == wkbVariantOldOgc)
-        // Does not make sense for new geometries, so patch it.
-        eWkbVariant = wkbVariantIso;
-    return oCC.exportToWkb(this, eByteOrder, pabyData, eWkbVariant);
+    OGRwkbExportOptions sOptions(psOptions ? *psOptions
+                                           : OGRwkbExportOptions());
+
+    // Does not make sense for new geometries, so patch it.
+    if (sOptions.eWkbVariant == wkbVariantOldOgc)
+        sOptions.eWkbVariant = wkbVariantIso;
+    return oCC.exportToWkb(this, pabyData, &sOptions);
 }
 
 /************************************************************************/
@@ -679,6 +704,33 @@ double OGRCurvePolygon::get_Area() const
 }
 
 /************************************************************************/
+/*                        get_GeodesicArea()                            */
+/************************************************************************/
+
+double OGRCurvePolygon::get_GeodesicArea(
+    const OGRSpatialReference *poSRSOverride) const
+
+{
+    if (getExteriorRingCurve() == nullptr)
+        return 0.0;
+
+    if (!poSRSOverride)
+        poSRSOverride = getSpatialReference();
+
+    double dfArea = getExteriorRingCurve()->get_GeodesicArea(poSRSOverride);
+    if (dfArea > 0)
+    {
+        for (int iRing = 0; iRing < getNumInteriorRings(); iRing++)
+        {
+            dfArea -=
+                getInteriorRingCurve(iRing)->get_GeodesicArea(poSRSOverride);
+        }
+    }
+
+    return dfArea;
+}
+
+/************************************************************************/
 /*                       setCoordinateDimension()                       */
 /************************************************************************/
 
@@ -702,7 +754,7 @@ void OGRCurvePolygon::setMeasured(OGRBoolean bIsMeasured)
 /*                       assignSpatialReference()                       */
 /************************************************************************/
 
-void OGRCurvePolygon::assignSpatialReference(OGRSpatialReference *poSR)
+void OGRCurvePolygon::assignSpatialReference(const OGRSpatialReference *poSR)
 {
     oCC.assignSpatialReference(this, poSR);
 }
@@ -875,4 +927,5 @@ OGRSurfaceCasterToCurvePolygon OGRCurvePolygon::GetCasterToCurvePolygon() const
 {
     return ::CasterToCurvePolygon;
 }
+
 //! @endcond

@@ -34,6 +34,14 @@ import pytest
 
 from osgeo import gdal, ogr
 
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
 ###############################################################################
 
 
@@ -355,9 +363,8 @@ def test_ogr_wkbwkt_test_broken_geom():
         "CURVEPOLYGON Z((0 1,2 3)",
     ]
     for wkt in list_broken:
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        geom = ogr.CreateGeometryFromWkt(wkt)
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            geom = ogr.CreateGeometryFromWkt(wkt)
         assert geom is None, "geom %s instantiated but not expected" % wkt
 
 
@@ -603,9 +610,8 @@ def test_ogr_wkbwkt_test_import_bad_multipoint_wkb():
         0,
         0,
     )
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    geom = ogr.CreateGeometryFromWkb(wkb)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        geom = ogr.CreateGeometryFromWkb(wkb)
     assert geom is None
 
 
@@ -650,9 +656,8 @@ def test_ogr_wkbwkt_test_geometrycollection_wkt_recursion():
 
     wkt = "GEOMETRYCOLLECTION (" * 32 + "GEOMETRYCOLLECTION EMPTY" + ")" * 32
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    geom = ogr.CreateGeometryFromWkt(wkt)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        geom = ogr.CreateGeometryFromWkt(wkt)
     assert geom is None, "expected None"
 
 
@@ -674,9 +679,8 @@ def test_ogr_wkbwkt_test_geometrycollection_wkb_recursion():
 
     wkb = struct.pack("B" * 0) + wkb_repeat * 32 + wkb_end
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    geom = ogr.CreateGeometryFromWkb(wkb)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        geom = ogr.CreateGeometryFromWkb(wkb)
     assert geom is None, "expected None"
 
 
@@ -710,7 +714,7 @@ def test_ogr_wkt_inf_nan():
 
 def test_ogr_wkt_multicurve_compoundcurve_corrupted():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         g = ogr.CreateGeometryFromWkt("MULTICURVE(COMPOUNDCURVE")
     assert g is None
 
@@ -721,7 +725,7 @@ def test_ogr_wkt_multicurve_compoundcurve_corrupted():
 
 def test_ogr_wkt_multipolygon_corrupted():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         g = ogr.CreateGeometryFromWkt("MULTIPOLYGON(POLYGON((N")
     assert g is None
 
@@ -748,6 +752,34 @@ def test_ogr_wkt_multipoint_postgis():
     g = ogr.CreateGeometryFromWkt("MULTIPOINT Z (1 2 3,4 5 6)")
     assert g is not None
     assert g.ExportToIsoWkt() == "MULTIPOINT Z ((1 2 3),(4 5 6))"
+
+
+###############################################################################
+# Test accepting nan which is an extension to the WKT spec, but both
+# GEOS (https://github.com/libgeos/geos/pull/817) and PostGIS
+# (https://trac.osgeo.org/postgis/ticket/4827) can now output such things...
+# (actually GDAL too could output, but not ingest it back...)
+
+
+@pytest.mark.parametrize(
+    "wkt",
+    [
+        "POINT (nan nan)",
+        "POINT (1.5 nan)",
+        "POINT (nan 1.5)",
+        "POINT Z (nan nan nan)",
+        "POINT Z (1.5 1.5 nan)",
+        "POINT M (nan nan nan)",
+        "POINT M (1.5 1.5 nan)",
+        "POINT ZM (nan nan nan nan)",
+        "POINT ZM (1.5 1.5 nan nan)",
+        "LINESTRING ZM (nan nan nan nan)",
+    ],
+)
+def test_ogr_wkt_nan(wkt):
+    g = ogr.CreateGeometryFromWkt(wkt)
+    assert g is not None
+    assert g.ExportToIsoWkt() == wkt
 
 
 ###############################################################################

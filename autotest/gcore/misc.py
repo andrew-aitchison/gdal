@@ -37,6 +37,14 @@ import pytest
 
 from osgeo import gdal
 
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
 ###############################################################################
 # Test that the constructor of GDALDataset() behaves well with a big number of
 # opened/created datasets
@@ -70,17 +78,15 @@ def test_misc_2():
 # Test OpenShared() with a dataset whose filename != description (#2797)
 
 
+@pytest.mark.require_driver("PAUX")
 def test_misc_3():
 
-    if gdal.GetDriverByName("PAUX") is None:
-        pytest.skip("PAUX driver missing")
-
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenShared("../gdrivers/data/paux/small16.aux")
     ds.GetRasterBand(1).Checksum()
     cache_size = gdal.GetCacheUsed()
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds2 = gdal.OpenShared("../gdrivers/data/paux/small16.aux")
     ds2.GetRasterBand(1).Checksum()
     cache_size2 = gdal.GetCacheUsed()
@@ -98,16 +104,14 @@ def test_misc_3():
 
 def test_misc_4():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
+    with gdal.quiet_errors():
 
-    # Test a few invalid argument
-    drv = gdal.GetDriverByName("GTiff")
-    drv.Create("tmp/foo", 0, 100, 1)
-    drv.Create("tmp/foo", 100, 1, 1)
-    drv.Create("tmp/foo", 100, 100, -1)
-    drv.Delete("tmp/foo")
-
-    gdal.PopErrorHandler()
+        # Test a few invalid argument
+        drv = gdal.GetDriverByName("GTiff")
+        drv.Create("tmp/foo", 0, 100, 1)
+        drv.Create("tmp/foo", 100, 1, 1)
+        drv.Create("tmp/foo", 100, 100, -1)
+        drv.Delete("tmp/foo")
 
 
 ###############################################################################
@@ -185,9 +189,17 @@ def _misc_5_internal(drv, datatype, nBands):
         # gdaltest.post_reason(reason)
         # TODO: Why not return -1?
         pass
-    # else:
-    #    if ds.RasterCount > 0:
-    #        print ds.GetRasterBand(1).Checksum()
+    elif ds.RasterCount and drv.ShortName not in ["GSBG", "GS7BG", "NWT_GRD", "netCDF"]:
+        creation_data_types = drv.GetMetadataItem(gdal.DMD_CREATIONDATATYPES)
+        if creation_data_types and gdal.GetDataTypeName(
+            datatype
+        ) in creation_data_types.split(" "):
+            assert ds.GetRasterBand(1).DataType == datatype, (
+                dirname,
+                drv.ShortName,
+                nBands,
+                gdal.GetDataTypeName(datatype),
+            )
     ds = None
 
     try:
@@ -201,58 +213,59 @@ def _misc_5_internal(drv, datatype, nBands):
 
 def test_misc_5():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
+    with gdal.quiet_errors():
 
-    try:
-        shutil.rmtree("tmp/tmp")
-    except OSError:
-        pass
-
-    try:
-        os.mkdir("tmp/tmp")
-    except OSError:
         try:
-            os.stat("tmp/tmp")
-            # Hum the directory already exists... Not expected, but let's try to go on
+            shutil.rmtree("tmp/tmp")
         except OSError:
-            pytest.fail("Cannot create tmp/tmp")
+            pass
 
-    # This is to speed-up the runtime of tests on EXT4 filesystems
-    # Do not use this for production environment if you care about data safety
-    # w.r.t system/OS crashes, unless you know what you are doing.
-    gdal.SetConfigOption("OGR_SQLITE_SYNCHRONOUS", "OFF")
+        try:
+            os.mkdir("tmp/tmp")
+        except OSError:
+            try:
+                os.stat("tmp/tmp")
+                # Hum the directory already exists... Not expected, but let's try to go on
+            except OSError:
+                pytest.fail("Cannot create tmp/tmp")
 
-    # Test Create() with various band numbers, including 0
-    for i in range(gdal.GetDriverCount()):
-        drv = gdal.GetDriver(i)
-        md = drv.GetMetadata()
-        if drv.ShortName == "PDF":
-            # PDF Create() is vector-only
-            continue
-        if drv.ShortName == "MBTiles":
-            # MBTiles only support some precise resolutions
-            continue
-        if "DCAP_CREATE" in md and "DCAP_RASTER" in md:
-            datatype = gdal.GDT_Byte
-            for nBands in range(6):
-                _misc_5_internal(drv, datatype, nBands)
+        # This is to speed-up the runtime of tests on EXT4 filesystems
+        # Do not use this for production environment if you care about data safety
+        # w.r.t system/OS crashes, unless you know what you are doing.
+        with gdal.config_option("OGR_SQLITE_SYNCHRONOUS", "OFF"):
 
-            for nBands in [1, 3]:
-                for datatype in (
-                    gdal.GDT_UInt16,
-                    gdal.GDT_Int16,
-                    gdal.GDT_UInt32,
-                    gdal.GDT_Int32,
-                    gdal.GDT_Float32,
-                    gdal.GDT_Float64,
-                    gdal.GDT_CInt16,
-                    gdal.GDT_CInt32,
-                    gdal.GDT_CFloat32,
-                    gdal.GDT_CFloat64,
-                ):
-                    _misc_5_internal(drv, datatype, nBands)
+            # Test Create() with various band numbers, including 0
+            for i in range(gdal.GetDriverCount()):
+                drv = gdal.GetDriver(i)
+                md = drv.GetMetadata()
+                if drv.ShortName == "PDF":
+                    # PDF Create() is vector-only
+                    continue
+                if drv.ShortName == "MBTiles":
+                    # MBTiles only support some precise resolutions
+                    continue
+                if "DCAP_CREATE" in md and "DCAP_RASTER" in md:
+                    datatype = gdal.GDT_Byte
+                    for nBands in range(6):
+                        _misc_5_internal(drv, datatype, nBands)
 
-    gdal.PopErrorHandler()
+                    for nBands in [1, 3]:
+                        for datatype in (
+                            gdal.GDT_Int8,
+                            gdal.GDT_UInt16,
+                            gdal.GDT_Int16,
+                            gdal.GDT_UInt32,
+                            gdal.GDT_Int32,
+                            gdal.GDT_UInt64,
+                            gdal.GDT_Int64,
+                            gdal.GDT_Float32,
+                            gdal.GDT_Float64,
+                            gdal.GDT_CInt16,
+                            gdal.GDT_CInt32,
+                            gdal.GDT_CFloat32,
+                            gdal.GDT_CFloat64,
+                        ):
+                            _misc_5_internal(drv, datatype, nBands)
 
 
 ###############################################################################
@@ -358,7 +371,14 @@ def misc_6_internal(datatype, nBands, setDriversDone):
                         "DCAP_VIRTUALIO" in md
                         and size != 0
                         and drv.ShortName
-                        not in ["JPEG2000", "KMLSUPEROVERLAY", "HF2", "ZMap", "DDS"]
+                        not in [
+                            "JPEG2000",
+                            "KMLSUPEROVERLAY",
+                            "HF2",
+                            "ZMap",
+                            "DDS",
+                            "TileDB",
+                        ]
                         and drv.ShortName not in ["GIF", "JP2ECW", "JP2Lura"]
                     ):
 
@@ -380,7 +400,7 @@ def misc_6_internal(datatype, nBands, setDriversDone):
                                     error_detected = True
                             if not error_detected:
                                 msg = (
-                                    "write error not decteded with with drv = %s, nBands = %d, datatype = %s, truncated_size = %d"
+                                    "write error not detected with with drv = %s, nBands = %d, datatype = %s, truncated_size = %d"
                                     % (
                                         drv.ShortName,
                                         nBands,
@@ -389,7 +409,6 @@ def misc_6_internal(datatype, nBands, setDriversDone):
                                     )
                                 )
                                 print(msg)
-                                gdaltest.post_reason(msg)
 
                             fl = gdal.ReadDirRecursive("/vsimem/test_truncate")
                             if fl is not None:
@@ -456,54 +475,46 @@ def misc_6_internal(datatype, nBands, setDriversDone):
 
 def test_misc_6():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
+    with gdal.quiet_errors():
 
-    try:
-        shutil.rmtree("tmp/tmp")
-    except OSError:
-        pass
-
-    try:
-        os.mkdir("tmp/tmp")
-    except OSError:
         try:
-            os.stat("tmp/tmp")
-            # Hum the directory already exists... Not expected, but let's try to go on
+            shutil.rmtree("tmp/tmp")
         except OSError:
-            pytest.fail("Cannot create tmp/tmp")
+            pass
 
-    # This is to speed-up the runtime of tests on EXT4 filesystems
-    # Do not use this for production environment if you care about data safety
-    # w.r.t system/OS crashes, unless you know what you are doing.
-    gdal.SetConfigOption("OGR_SQLITE_SYNCHRONOUS", "OFF")
+        try:
+            os.mkdir("tmp/tmp")
+        except OSError:
+            try:
+                os.stat("tmp/tmp")
+                # Hum the directory already exists... Not expected, but let's try to go on
+            except OSError:
+                pytest.fail("Cannot create tmp/tmp")
 
-    datatype = gdal.GDT_Byte
-    setDriversDone = set()
-    for nBands in range(6):
-        ret = misc_6_internal(datatype, nBands, setDriversDone)
-        if ret != "success":
-            gdal.PopErrorHandler()
-            return ret
+        # This is to speed-up the runtime of tests on EXT4 filesystems
+        # Do not use this for production environment if you care about data safety
+        # w.r.t system/OS crashes, unless you know what you are doing.
+        with gdal.config_option("OGR_SQLITE_SYNCHRONOUS", "OFF"):
 
-    nBands = 1
-    for datatype in (
-        gdal.GDT_UInt16,
-        gdal.GDT_Int16,
-        gdal.GDT_UInt32,
-        gdal.GDT_Int32,
-        gdal.GDT_Float32,
-        gdal.GDT_Float64,
-        gdal.GDT_CInt16,
-        gdal.GDT_CInt32,
-        gdal.GDT_CFloat32,
-        gdal.GDT_CFloat64,
-    ):
-        ret = misc_6_internal(datatype, nBands, setDriversDone)
-        if ret != "success":
-            gdal.PopErrorHandler()
-            return ret
+            datatype = gdal.GDT_Byte
+            setDriversDone = set()
+            for nBands in range(6):
+                misc_6_internal(datatype, nBands, setDriversDone)
 
-    gdal.PopErrorHandler()
+            nBands = 1
+            for datatype in (
+                gdal.GDT_UInt16,
+                gdal.GDT_Int16,
+                gdal.GDT_UInt32,
+                gdal.GDT_Int32,
+                gdal.GDT_Float32,
+                gdal.GDT_Float64,
+                gdal.GDT_CInt16,
+                gdal.GDT_CInt32,
+                gdal.GDT_CFloat32,
+                gdal.GDT_CFloat64,
+            ):
+                misc_6_internal(datatype, nBands, setDriversDone)
 
 
 ###############################################################################
@@ -570,10 +581,8 @@ def test_misc_8():
 
 def test_misc_9():
 
-    old_val = gdal.GetCacheMax()
-    gdal.SetCacheMax(3000000000)
-    ret_val = gdal.GetCacheMax()
-    gdal.SetCacheMax(old_val)
+    with gdaltest.SetCacheMax(3000000000):
+        ret_val = gdal.GetCacheMax()
 
     assert ret_val == 3000000000, "did not get expected value"
 
@@ -678,9 +687,8 @@ def test_misc_12():
             )
 
             # Test to detect crashes
-            gdal.PushErrorHandler("CPLQuietErrorHandler")
-            ds = drv.CreateCopy("/nonexistingpath" + get_filename(drv, ""), src_ds)
-            gdal.PopErrorHandler()
+            with gdal.quiet_errors():
+                ds = drv.CreateCopy("/nonexistingpath" + get_filename(drv, ""), src_ds)
             if ds is None and gdal.GetLastErrorMsg() == "":
                 gdal.Unlink("/vsimem/misc_12_src.tif")
                 pytest.fail(
@@ -730,16 +738,16 @@ def test_misc_13():
 
     # Raster-only -> vector-only
     ds = gdal.Open("data/byte.tif")
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("ESRI Shapefile").CreateCopy("/vsimem/out.shp", ds)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdal.GetDriverByName("ESRI Shapefile").CreateCopy(
+            "/vsimem/out.shp", ds
+        )
     assert out_ds is None
 
     # Raster-only -> vector-only
     ds = gdal.OpenEx("../ogr/data/poly.shp", gdal.OF_VECTOR)
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("GTiff").CreateCopy("/vsimem/out.tif", ds)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdal.GetDriverByName("GTiff").CreateCopy("/vsimem/out.tif", ds)
     assert out_ds is None
 
 
@@ -870,6 +878,122 @@ def test_misc_15():
     finally:
         gdal.SetErrorHandler("CPLDefaultErrorHandler")
         gdal.SetConfigOption("CPL_DEBUG", prev_debug)
+
+
+###############################################################################
+# Test config option context managers
+
+
+def test_misc_config_context_mgrs_1():
+    # Make sure that config_options context manager does not convert a
+    # global config option to a thread-local config option
+
+    try:
+        gdal.SetConfigOption("A", "1")
+
+        assert gdal.GetConfigOption("A") == "1"
+        assert gdal.GetThreadLocalConfigOption("A") is None
+
+        # temporarily set new thread-local value for A
+        with gdal.config_option("A", "2", thread_local=True):
+            assert gdal.GetConfigOption("A") == "2"
+            assert gdal.GetThreadLocalConfigOption("A") == "2"
+
+        # value of A is restored, and thread-local value is unset
+        assert gdal.GetConfigOption("A") == "1"
+        assert gdal.GetThreadLocalConfigOption("A") is None
+
+    finally:
+        gdal.SetConfigOption("A", None)
+
+
+def test_misc_config_context_mgrs_2():
+    # Make sure that config_options context manager does not convert a
+    # thread-local config option to a global config option
+
+    try:
+        gdal.SetThreadLocalConfigOption("B", "5")
+        assert gdal.GetConfigOption("B") == "5"
+        assert gdal.GetThreadLocalConfigOption("B") == "5"
+
+        # temporarily set new global value for B
+        # this has no effect, because the thread-local value overrides it
+        with gdal.config_option("B", "6", thread_local=False):
+            assert gdal.GetConfigOption("B") == "5"
+            assert gdal.GetThreadLocalConfigOption("B") == "5"
+
+        # value of B is restored
+        assert gdal.GetThreadLocalConfigOption("B") == "5"
+
+        gdal.SetThreadLocalConfigOption("B", None)
+        assert gdal.GetConfigOption("B") is None
+
+    finally:
+        gdal.SetThreadLocalConfigOption("B", None)
+
+
+def test_misc_config_context_mgrs_3():
+    # Make sure that config_options correctly restores state when
+    # a configuration option is set in both thread-local and global
+    # contexts.
+
+    try:
+        gdal.SetConfigOption("C", "GLOBAL")
+        gdal.SetThreadLocalConfigOption("C", "TL")
+
+        # temporarily set new global value for C
+        # this has no effect, because the thread-local value overrides it
+        with gdal.config_option("C", "XX", thread_local=False):
+            assert gdal.GetConfigOption("C") == "TL"
+            assert gdal.GetThreadLocalConfigOption("C") == "TL"
+
+        # value of C is restored
+        assert gdal.GetThreadLocalConfigOption("C") == "TL"
+
+        # clear thread-local value of C, exposing global value
+        gdal.SetThreadLocalConfigOption("C", None)
+        assert gdal.GetConfigOption("C") == "GLOBAL"
+
+    finally:
+        gdal.SetConfigOption("C", None)
+        gdal.SetThreadLocalConfigOption("C", None)
+
+
+###############################################################################
+# Test GetConfigOptions
+
+
+def test_misc_get_config_options():
+
+    assert gdal.GetConfigOptions() == {}
+
+    try:
+        gdal.SetConfigOption("A", "1")
+
+        assert gdal.GetConfigOptions() == {"A": "1"}
+
+        gdal.SetConfigOption("B", "2")
+
+        with gdal.config_options({"A": "9", "C": "8"}):
+            assert gdal.GetConfigOptions() == {"A": "9", "B": "2", "C": "8"}
+
+        assert gdal.GetConfigOptions() == {"A": "1", "B": "2"}
+
+    finally:
+        gdal.SetConfigOption("A", None)
+        gdal.SetConfigOption("B", None)
+
+
+###############################################################################
+# Test GeneralCmdLineProcessor
+
+
+def test_misc_general_cmd_line_processor(tmp_path):
+
+    processed = gdal.GeneralCmdLineProcessor(
+        ["program", 2, tmp_path / "a_path", "a_string"]
+    )
+    assert processed == ["program", "2", str(tmp_path / "a_path"), "a_string"]
 
 
 ###############################################################################

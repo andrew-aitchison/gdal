@@ -28,6 +28,7 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
+import sys
 import time
 
 import gdaltest
@@ -36,16 +37,15 @@ import webserver
 
 from osgeo import gdal, ogr
 
+pytestmark = pytest.mark.require_curl()
+
 ###############################################################################
 #
 
 
+@pytest.mark.slow()
+@pytest.mark.skip("File is no longer available")
 def test_vsicurl_1():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     ds = ogr.Open(
         "/vsizip/vsicurl/http://publicfiles.dep.state.fl.us/dear/BWR_GIS/2007NWFLULC/NWFWMD2007LULC.zip"
@@ -57,12 +57,9 @@ def test_vsicurl_1():
 #
 
 
-def vsicurl_2():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
+@pytest.mark.slow()
+@pytest.mark.skip("File is no longer available")
+def test_vsicurl_2():
 
     ds = gdal.Open(
         "/vsizip//vsicurl/http://eros.usgs.gov/archive/nslrsda/GeoTowns/HongKong/srtm/n22e113.zip/n22e113.bil"
@@ -74,12 +71,9 @@ def vsicurl_2():
 # This server doesn't support range downloading
 
 
-def vsicurl_3():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
+@pytest.mark.slow()
+@pytest.mark.skip("File is no longer available")
+def test_vsicurl_3():
 
     ds = ogr.Open(
         "/vsizip/vsicurl/http://www.iucnredlist.org/spatial-data/MAMMALS_TERRESTRIAL.zip"
@@ -91,12 +85,9 @@ def vsicurl_3():
 # This server doesn't support range downloading
 
 
+@pytest.mark.slow()
+@gdaltest.disable_exceptions()
 def test_vsicurl_4():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     ds = ogr.Open(
         "/vsizip/vsicurl/http://lelserver.env.duke.edu:8080/LandscapeTools/export/49/Downloads/1_Habitats.zip"
@@ -108,12 +99,9 @@ def test_vsicurl_4():
 # Test URL unescaping when reading HTTP file list
 
 
+@pytest.mark.slow()
+@pytest.mark.skip("File is no longer available")
 def test_vsicurl_5():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     ds = gdal.Open(
         "/vsicurl/http://dds.cr.usgs.gov/srtm/SRTM_image_sample/picture%20examples/N34W119_DEM.tif"
@@ -125,12 +113,9 @@ def test_vsicurl_5():
 # Test with FTP server that doesn't support EPSV command
 
 
-def vsicurl_6_disabled():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
+@pytest.mark.slow()
+@pytest.mark.skip("Server is no longer available")
+def test_vsicurl_6():
 
     fl = gdal.ReadDir("/vsicurl/ftp://ftp2.cits.rncan.gc.ca/pub/cantopo/250k_tif")
     assert fl
@@ -140,12 +125,9 @@ def vsicurl_6_disabled():
 # Test Microsoft-IIS/6.0 listing
 
 
+@pytest.mark.slow()
+@pytest.mark.skip("Server is no longer available")
 def test_vsicurl_7():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     fl = gdal.ReadDir("/vsicurl/http://ortho.linz.govt.nz/tifs/2005_06")
     assert fl
@@ -155,12 +137,9 @@ def test_vsicurl_7():
 # Test interleaved reading between 2 datasets
 
 
-def vsicurl_8():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
+@pytest.mark.slow()
+@pytest.mark.skip("File is no longer available")
+def test_vsicurl_8():
 
     ds1 = gdal.Open(
         "/vsigzip//vsicurl/http://dds.cr.usgs.gov/pub/data/DEM/250/notavail/C/chipicoten-w.gz"
@@ -177,12 +156,8 @@ def vsicurl_8():
 # returns escaped sequences instead of the Chinese characters.
 
 
+@pytest.mark.slow()
 def test_vsicurl_9():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     ds = gdal.Open(
         "/vsicurl/http://download.osgeo.org/gdal/data/gtiff/"
@@ -195,12 +170,8 @@ def test_vsicurl_9():
 # Test reading a file with escaped Chinese characters.
 
 
+@pytest.mark.slow()
 def test_vsicurl_10():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     ds = gdal.Open(
         "/vsicurl/http://download.osgeo.org/gdal/data/gtiff/xx%E4%B8%AD%E6%96%87.%E4%B8%AD%E6%96%87"
@@ -212,12 +183,8 @@ def test_vsicurl_10():
 # Test ReadDir() after reading a file on the same server
 
 
+@pytest.mark.slow()
 def test_vsicurl_11():
-    if not gdaltest.run_slow_tests():
-        pytest.skip()
-
-    if not gdaltest.built_against_curl():
-        pytest.skip()
 
     f = gdal.VSIFOpenL(
         "/vsicurl/http://download.osgeo.org/gdal/data/bmp/Bug2236.bmp", "rb"
@@ -235,29 +202,31 @@ def test_vsicurl_11():
 ###############################################################################
 
 
-def test_vsicurl_start_webserver():
+@pytest.fixture(scope="module")
+def server():
 
-    gdaltest.webserver_process = None
-    gdaltest.webserver_port = 0
-
-    if not gdaltest.built_against_curl():
+    process, port = webserver.launch(handler=webserver.DispatcherHttpHandler)
+    if port == 0:
         pytest.skip()
 
-    (gdaltest.webserver_process, gdaltest.webserver_port) = webserver.launch(
-        handler=webserver.DispatcherHttpHandler
-    )
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+    import collections
+
+    WebServer = collections.namedtuple("WebServer", "process port")
+
+    yield WebServer(process, port)
+
+    # Clearcache needed to close all connections, since the Python server
+    # can only handle one connection at a time
+    gdal.VSICurlClearCache()
+
+    webserver.server_stop(process, port)
 
 
 ###############################################################################
 # Test redirection with Expires= type of signed URLs
 
 
-def test_vsicurl_test_redirect():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_test_redirect(server):
 
     gdal.VSICurlClearCache()
 
@@ -276,7 +245,7 @@ def test_vsicurl_test_redirect():
         )
         response += "Location: %s\r\n" % (
             "http://localhost:%d/foo.s3.amazonaws.com/test_redirected/test.bin?Signature=foo&Expires=%d"
-            % (gdaltest.webserver_port, current_time + 30)
+            % (server.port, current_time + 30)
         )
         response += "\r\n"
         request.wfile.write(response.encode("ascii"))
@@ -336,8 +305,7 @@ def test_vsicurl_test_redirect():
 
     with webserver.install_http_handler(handler):
         f = gdal.VSIFOpenL(
-            "/vsicurl/http://localhost:%d/test_redirect/test.bin"
-            % gdaltest.webserver_port,
+            "/vsicurl/http://localhost:%d/test_redirect/test.bin" % server.port,
             "rb",
         )
     assert f is not None
@@ -408,26 +376,21 @@ def test_vsicurl_test_redirect():
     )
 
     with webserver.install_http_handler(handler):
-        content = gdal.VSIFReadL(1, 16383, f).decode("ascii")
-        if len(content) != 16383 or content[0] != "x":
+        try:
+            content = gdal.VSIFReadL(1, 16383, f).decode("ascii")
+            assert len(content) == 16383
+            assert content[0] == "x"
+            content = gdal.VSIFReadL(1, 2, f).decode("ascii")
+            assert content == "xy"
+        finally:
             gdal.VSIFCloseL(f)
-            pytest.fail(content)
-        content = gdal.VSIFReadL(1, 2, f).decode("ascii")
-        if content != "xy":
-            gdal.VSIFCloseL(f)
-            pytest.fail(content)
-
-    gdal.VSIFCloseL(f)
 
 
 ###############################################################################
 # Test redirection with X-Amz-Expires= + X-Amz-Date= type of signed URLs
 
 
-def test_vsicurl_test_redirect_x_amz():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_test_redirect_x_amz(server):
 
     gdal.VSICurlClearCache()
 
@@ -447,7 +410,7 @@ def test_vsicurl_test_redirect_x_amz():
         response += "Location: %s\r\n" % (
             "http://localhost:%d/foo.s3.amazonaws.com/test_redirected/test.bin?X-Amz-Signature=foo&X-Amz-Expires=30&X-Amz-Date=%s"
             % (
-                gdaltest.webserver_port,
+                server.port,
                 time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(current_time)),
             )
         )
@@ -509,8 +472,7 @@ def test_vsicurl_test_redirect_x_amz():
 
     with webserver.install_http_handler(handler):
         f = gdal.VSIFOpenL(
-            "/vsicurl/http://localhost:%d/test_redirect/test.bin"
-            % gdaltest.webserver_port,
+            "/vsicurl/http://localhost:%d/test_redirect/test.bin" % server.port,
             "rb",
         )
     assert f is not None
@@ -584,16 +546,14 @@ def test_vsicurl_test_redirect_x_amz():
     )
 
     with webserver.install_http_handler(handler):
-        content = gdal.VSIFReadL(1, 16383, f).decode("ascii")
-        if len(content) != 16383 or content[0] != "x":
+        try:
+            content = gdal.VSIFReadL(1, 16383, f).decode("ascii")
+            assert len(content) == 16383
+            assert content[0] == "x"
+            content = gdal.VSIFReadL(1, 2, f).decode("ascii")
+            assert content == "xy"
+        finally:
             gdal.VSIFCloseL(f)
-            pytest.fail(content)
-        content = gdal.VSIFReadL(1, 2, f).decode("ascii")
-        if content != "xy":
-            gdal.VSIFCloseL(f)
-            pytest.fail(content)
-
-    gdal.VSIFCloseL(f)
 
 
 ###############################################################################
@@ -609,10 +569,7 @@ def test_vsicurl_test_clear_cache():
 ###############################################################################
 
 
-def test_vsicurl_test_retry():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_test_retry(server):
 
     handler = webserver.SequentialHandler()
     handler.add("GET", "/test_retry/", 404)
@@ -620,8 +577,7 @@ def test_vsicurl_test_retry():
     handler.add("GET", "/test_retry/test.txt", 502)
     with webserver.install_http_handler(handler):
         f = gdal.VSIFOpenL(
-            "/vsicurl/http://localhost:%d/test_retry/test.txt"
-            % gdaltest.webserver_port,
+            "/vsicurl/http://localhost:%d/test_retry/test.txt" % server.port,
             "rb",
         )
         data_len = 0
@@ -641,12 +597,12 @@ def test_vsicurl_test_retry():
     with webserver.install_http_handler(handler):
         f = gdal.VSIFOpenL(
             "/vsicurl?max_retry=2&retry_delay=0.01&url=http://localhost:%d/test_retry/test.txt"
-            % gdaltest.webserver_port,
+            % server.port,
             "rb",
         )
         assert f is not None
         gdal.ErrorReset()
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             data = gdal.VSIFReadL(1, 3, f).decode("ascii")
         error_msg = gdal.GetLastErrorMsg()
         gdal.VSIFCloseL(f)
@@ -657,10 +613,7 @@ def test_vsicurl_test_retry():
 ###############################################################################
 
 
-def test_vsicurl_test_fallback_from_head_to_get():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_test_fallback_from_head_to_get(server):
 
     gdal.VSICurlClearCache()
 
@@ -669,8 +622,7 @@ def test_vsicurl_test_fallback_from_head_to_get():
     handler.add("GET", "/test_fallback_from_head_to_get", 200, {}, "foo")
     with webserver.install_http_handler(handler):
         statres = gdal.VSIStatL(
-            "/vsicurl/http://localhost:%d/test_fallback_from_head_to_get"
-            % gdaltest.webserver_port
+            "/vsicurl/http://localhost:%d/test_fallback_from_head_to_get" % server.port
         )
     assert statres.size == 3
 
@@ -680,10 +632,7 @@ def test_vsicurl_test_fallback_from_head_to_get():
 ###############################################################################
 
 
-def test_vsicurl_test_parse_html_filelist_apache():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_test_parse_html_filelist_apache(server):
 
     handler = webserver.SequentialHandler()
     handler.add(
@@ -707,15 +656,12 @@ def test_vsicurl_test_parse_html_filelist_apache():
 </body></html>""",
     )
     with webserver.install_http_handler(handler):
-        fl = gdal.ReadDir(
-            "/vsicurl/http://localhost:%d/mydir" % gdaltest.webserver_port
-        )
+        fl = gdal.ReadDir("/vsicurl/http://localhost:%d/mydir" % server.port)
     assert fl == ["foo.tif", "foo%20with%20space.tif"]
 
     assert (
         gdal.VSIStatL(
-            "/vsicurl/http://localhost:%d/mydir/foo%%20with%%20space.tif"
-            % gdaltest.webserver_port,
+            "/vsicurl/http://localhost:%d/mydir/foo%%20with%%20space.tif" % server.port,
             gdal.VSI_STAT_EXISTS_FLAG,
         )
         is not None
@@ -726,8 +672,7 @@ def test_vsicurl_test_parse_html_filelist_apache():
     with webserver.install_http_handler(handler):
         assert (
             gdal.VSIStatL(
-                "/vsicurl/http://localhost:%d/mydir/i_dont_exist"
-                % gdaltest.webserver_port,
+                "/vsicurl/http://localhost:%d/mydir/i_dont_exist" % server.port,
                 gdal.VSI_STAT_EXISTS_FLAG,
             )
             is None
@@ -737,10 +682,7 @@ def test_vsicurl_test_parse_html_filelist_apache():
 ###############################################################################
 
 
-def test_vsicurl_no_size_in_HEAD():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_no_size_in_HEAD(server):
 
     handler = webserver.SequentialHandler()
     handler.add(
@@ -754,7 +696,7 @@ def test_vsicurl_no_size_in_HEAD():
     with webserver.install_http_handler(handler):
         statres = gdal.VSIStatL(
             "/vsicurl/http://localhost:%d/test_vsicurl_no_size_in_HEAD.bin"
-            % gdaltest.webserver_port
+            % server.port
         )
     assert statres.size == 10
 
@@ -762,10 +704,7 @@ def test_vsicurl_no_size_in_HEAD():
 ###############################################################################
 
 
-def test_vsicurl_test_CPL_CURL_VERBOSE():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_test_CPL_CURL_VERBOSE(server):
 
     gdal.VSICurlClearCache()
 
@@ -793,7 +732,7 @@ def test_vsicurl_test_CPL_CURL_VERBOSE():
             with webserver.install_http_handler(handler):
                 statres = gdal.VSIStatL(
                     "/vsicurl/http://localhost:%d/test_vsicurl_test_CPL_CURL_VERBOSE"
-                    % gdaltest.webserver_port
+                    % server.port
                 )
     assert statres.size == 3
 
@@ -807,10 +746,7 @@ def test_vsicurl_test_CPL_CURL_VERBOSE():
 ###############################################################################
 
 
-def test_vsicurl_planetary_computer_url_signing():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_planetary_computer_url_signing(server):
 
     gdal.VSICurlClearCache()
 
@@ -818,11 +754,11 @@ def test_vsicurl_planetary_computer_url_signing():
     handler.add(
         "GET",
         "/pc_sas_sign_href?href=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-        % gdaltest.webserver_port,
+        % server.port,
         200,
         {},
         '{"msft:expiry":"1970-01-01T00:00:00","href":"http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin?my_token"}'
-        % gdaltest.webserver_port,
+        % server.port,
     )
     handler.add(
         "HEAD",
@@ -832,15 +768,30 @@ def test_vsicurl_planetary_computer_url_signing():
     )
 
     with webserver.install_http_handler(handler):
-        with gdaltest.config_option(
-            "VSICURL_PC_SAS_SIGN_HREF_URL",
-            "http://localhost:%d/pc_sas_sign_href?href=" % gdaltest.webserver_port,
-        ):
-            statres = gdal.VSIStatL(
-                "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-                % gdaltest.webserver_port
+        try:
+            gdal.SetPathSpecificOption(
+                "/vsicurl/http://localhost:%d/test_vsicurl_planetary_computer_url_signing"
+                % server.port,
+                "VSICURL_PC_URL_SIGNING",
+                "YES",
             )
-            assert statres.size == 3
+
+            with gdaltest.config_option(
+                "VSICURL_PC_SAS_SIGN_HREF_URL",
+                "http://localhost:%d/pc_sas_sign_href?href=" % server.port,
+            ):
+                statres = gdal.VSIStatL(
+                    "/vsicurl/http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
+                    % server.port
+                )
+                assert statres.size == 3
+        finally:
+            gdal.SetPathSpecificOption(
+                "/vsicurl/http://localhost:%d/test_vsicurl_planetary_computer_url_signing"
+                % server.port,
+                "VSICURL_PC_URL_SIGNING",
+                None,
+            )
 
     # Check that signing request is done since it has expired
     gdal.VSICurlClearCache()
@@ -849,65 +800,15 @@ def test_vsicurl_planetary_computer_url_signing():
     handler.add(
         "GET",
         "/pc_sas_sign_href?href=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-        % gdaltest.webserver_port,
+        % server.port,
         200,
         {},
-        '{"msft:expiry":"9999-01-01T00:00:00","href":"http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin?my_token"}'
-        % gdaltest.webserver_port,
+        '{"msft:expiry":"9999-01-01T00:00:00","href":"http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin?my_token2"}'
+        % server.port,
     )
     handler.add(
         "HEAD",
-        "/test_vsicurl_planetary_computer_url_signing.bin?my_token",
-        200,
-        {"Content-Length": "3"},
-    )
-
-    with webserver.install_http_handler(handler):
-        with gdaltest.config_option(
-            "VSICURL_PC_SAS_SIGN_HREF_URL",
-            "http://localhost:%d/pc_sas_sign_href?href=" % gdaltest.webserver_port,
-        ):
-            statres = gdal.VSIStatL(
-                "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-                % gdaltest.webserver_port
-            )
-            assert statres.size == 3
-
-    # Check that signing request is not needed
-    gdal.VSICurlClearCache()
-
-    handler = webserver.SequentialHandler()
-    handler.add(
-        "HEAD",
-        "/test_vsicurl_planetary_computer_url_signing.bin?my_token",
-        200,
-        {"Content-Length": "3"},
-    )
-
-    with webserver.install_http_handler(handler):
-        with gdaltest.config_option(
-            "VSICURL_PC_SAS_SIGN_HREF_URL",
-            "http://localhost:%d/pc_sas_sign_href?href=" % gdaltest.webserver_port,
-        ):
-            statres = gdal.VSIStatL(
-                "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-                % gdaltest.webserver_port
-            )
-            assert statres.size == 3
-
-    handler = webserver.SequentialHandler()
-    handler.add(
-        "GET",
-        "/pc_sas_sign_href?href=http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin"
-        % gdaltest.webserver_port,
-        200,
-        {},
-        '{"msft:expiry":"9999-01-01T00:00:00","href":"http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin?my_token2"}'
-        % gdaltest.webserver_port,
-    )
-    handler.add(
-        "HEAD",
-        "/test_vsicurl_planetary_computer_url_signing2.bin?my_token2",
+        "/test_vsicurl_planetary_computer_url_signing.bin?my_token2",
         200,
         {"Content-Length": "4"},
     )
@@ -915,11 +816,61 @@ def test_vsicurl_planetary_computer_url_signing():
     with webserver.install_http_handler(handler):
         with gdaltest.config_option(
             "VSICURL_PC_SAS_SIGN_HREF_URL",
-            "http://localhost:%d/pc_sas_sign_href?href=" % gdaltest.webserver_port,
+            "http://localhost:%d/pc_sas_sign_href?href=" % server.port,
+        ):
+            statres = gdal.VSIStatL(
+                "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
+                % server.port
+            )
+            assert statres.size == 4
+
+    # Check that signing request is not needed
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "HEAD",
+        "/test_vsicurl_planetary_computer_url_signing.bin?my_token2",
+        200,
+        {"Content-Length": "3"},
+    )
+
+    with webserver.install_http_handler(handler):
+        with gdaltest.config_option(
+            "VSICURL_PC_SAS_SIGN_HREF_URL",
+            "http://localhost:%d/pc_sas_sign_href?href=" % server.port,
+        ):
+            statres = gdal.VSIStatL(
+                "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
+                % server.port
+            )
+            assert statres.size == 3
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "GET",
+        "/pc_sas_sign_href?href=http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin"
+        % server.port,
+        200,
+        {},
+        '{"msft:expiry":"9999-01-01T00:00:00","href":"http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin?my_token3"}'
+        % server.port,
+    )
+    handler.add(
+        "HEAD",
+        "/test_vsicurl_planetary_computer_url_signing2.bin?my_token3",
+        200,
+        {"Content-Length": "4"},
+    )
+
+    with webserver.install_http_handler(handler):
+        with gdaltest.config_option(
+            "VSICURL_PC_SAS_SIGN_HREF_URL",
+            "http://localhost:%d/pc_sas_sign_href?href=" % server.port,
         ):
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 4
 
@@ -930,14 +881,14 @@ def test_vsicurl_planetary_computer_url_signing():
 
     handler.add(
         "HEAD",
-        "/test_vsicurl_planetary_computer_url_signing.bin?my_token",
+        "/test_vsicurl_planetary_computer_url_signing.bin?my_token2",
         200,
         {"Content-Length": "3"},
     )
 
     handler.add(
         "HEAD",
-        "/test_vsicurl_planetary_computer_url_signing2.bin?my_token2",
+        "/test_vsicurl_planetary_computer_url_signing2.bin?my_token3",
         200,
         {"Content-Length": "4"},
     )
@@ -945,17 +896,17 @@ def test_vsicurl_planetary_computer_url_signing():
     with webserver.install_http_handler(handler):
         with gdaltest.config_option(
             "VSICURL_PC_SAS_SIGN_HREF_URL",
-            "http://localhost:%d/pc_sas_sign_href?href=" % gdaltest.webserver_port,
+            "http://localhost:%d/pc_sas_sign_href?href=" % server.port,
         ):
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 3
 
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 4
 
@@ -963,10 +914,7 @@ def test_vsicurl_planetary_computer_url_signing():
 ###############################################################################
 
 
-def test_vsicurl_planetary_computer_url_signing_collection():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_planetary_computer_url_signing_collection(server):
 
     gdal.VSICurlClearCache()
 
@@ -1026,31 +974,31 @@ def test_vsicurl_planetary_computer_url_signing_collection():
     with webserver.install_http_handler(handler):
         with gdaltest.config_option(
             "VSICURL_PC_SAS_TOKEN_URL",
-            "http://localhost:%d/pc_sas_token/" % gdaltest.webserver_port,
+            "http://localhost:%d/pc_sas_token/" % server.port,
         ):
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&pc_collection=my_collection&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 3
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&pc_collection=my_collection&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing2.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 4
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&pc_collection=my_collection&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing3.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 5
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&pc_collection=my_collection2&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing4.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 6
             statres = gdal.VSIStatL(
                 "/vsicurl?pc_url_signing=yes&pc_collection=my_collection&url=http://localhost:%d/test_vsicurl_planetary_computer_url_signing5.bin"
-                % gdaltest.webserver_port
+                % server.port
             )
             assert statres.size == 7
 
@@ -1058,10 +1006,7 @@ def test_vsicurl_planetary_computer_url_signing_collection():
 ###############################################################################
 
 
-def test_vsicurl_GDAL_HTTP_HEADERS():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsicurl_GDAL_HTTP_HEADERS(server):
 
     gdal.VSICurlClearCache()
 
@@ -1079,8 +1024,7 @@ def test_vsicurl_GDAL_HTTP_HEADERS():
     )
 
     filename = (
-        "/vsicurl/http://localhost:%d/test_vsicurl_GDAL_HTTP_HEADERS.bin"
-        % gdaltest.webserver_port
+        "/vsicurl/http://localhost:%d/test_vsicurl_GDAL_HTTP_HEADERS.bin" % server.port
     )
     gdal.SetPathSpecificOption(
         filename,
@@ -1094,15 +1038,135 @@ def test_vsicurl_GDAL_HTTP_HEADERS():
 
 
 ###############################################################################
+# Test CPL_VSIL_CURL_USE_HEAD=NO
 
 
-def test_vsicurl_stop_webserver():
+def test_vsicurl_test_CPL_VSIL_CURL_USE_HEAD_NO(server):
 
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
-
-    # Clearcache needed to close all connections, since the Python server
-    # can only handle one connection at a time
     gdal.VSICurlClearCache()
 
-    webserver.server_stop(gdaltest.webserver_process, gdaltest.webserver_port)
+    handler = webserver.SequentialHandler()
+    handler.add("GET", "/test_CPL_VSIL_CURL_USE_HEAD_NO/", 404)
+
+    def method(request):
+        response = "HTTP/1.1 200\r\n"
+        response += "Server: foo\r\n"
+        response += "Content-type: text/plain\r\n"
+        response += "Content-Length: 1000000\r\n"
+        response += "Connection: close\r\n"
+        response += "\r\n"
+        request.wfile.write(response.encode("ascii"))
+        # This will be interrupted by the client
+        for i in range(1000000):
+            request.wfile.write(b"X")
+
+    handler.add(
+        "GET",
+        "/test_CPL_VSIL_CURL_USE_HEAD_NO/test.bin",
+        custom_method=method,
+        silence_server_exception=True,
+    )
+
+    with webserver.install_http_handler(handler):
+        with gdaltest.config_option("CPL_VSIL_CURL_USE_HEAD", "NO"):
+            f = gdal.VSIFOpenL(
+                "/vsicurl/http://localhost:%d/test_CPL_VSIL_CURL_USE_HEAD_NO/test.bin"
+                % server.port,
+                "rb",
+            )
+    assert f is not None
+    gdal.VSIFSeekL(f, 0, 2)
+    assert gdal.VSIFTellL(f) == 1000000
+
+    gdal.VSIFCloseL(f)
+
+
+###############################################################################
+# Check that GDAL_HTTP_NETRC_FILE is taken into account
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Incorrect platform")
+@pytest.mark.skipif(not gdaltest.built_against_curl(), reason="curl not available")
+def test_vsicurl_NETRC_FILE():
+
+    python_exe = sys.executable
+    cmd = (
+        f'strace -f "{python_exe}" -c "'
+        + "from osgeo import gdal; "
+        + "gdal.SetConfigOption('GDAL_HTTP_NETRC_FILE', '/i_do/not_exist'); "
+        + "gdal.Open('/vsicurl/http://i.do.not.exist.com/foo');"
+        + '"'
+    )
+    try:
+        (_, err) = gdaltest.runexternal_out_and_err(cmd, encoding="UTF-8")
+    except Exception as e:
+        pytest.skip("got exception %s" % str(e))
+
+    assert "/i_do/not_exist" in err
+
+
+###############################################################################
+# Check auth with bearer token
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.require_curl(7, 61, 0)
+def test_vsicurl_bearer(server):
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add("GET", "/", 404)
+    handler.add(
+        "HEAD",
+        "/test_vsicurl_bearer.bin",
+        200,
+        {"Content-Length": "3"},
+        expected_headers={
+            "Authorization": "Bearer myuniqtok",
+        },
+    )
+    handler.add(
+        "GET",
+        "/test_vsicurl_bearer.bin",
+        200,
+        {"Content-Length": "3"},
+        b"foo",
+        expected_headers={
+            "Authorization": "Bearer myuniqtok",
+        },
+    )
+
+    token = "myuniqtok"
+    with webserver.install_http_handler(handler):
+        with gdal.config_options(
+            {"GDAL_HTTP_AUTH": "BEARER", "GDAL_HTTP_BEARER": token}
+        ):
+            f = gdal.VSIFOpenL(
+                "/vsicurl/http://localhost:%d/test_vsicurl_bearer.bin" % server.port,
+                "rb",
+            )
+            assert f
+            data = gdal.VSIFReadL(1, 3, f)
+            gdal.VSIFCloseL(f)
+            assert data == b"foo"
+
+
+###############################################################################
+# Test https://github.com/OSGeo/gdal/issues/8922
+
+
+@gdaltest.enable_exceptions()
+def test_vsicurl_404_repeated_same_resource(server):
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add("HEAD", "/does/not/exist.bin", 404)
+    handler.add("GET", "/does/not/", 404)
+    with webserver.install_http_handler(handler):
+        with pytest.raises(Exception, match="404"):
+            gdal.Open("/vsicurl/http://localhost:%d/does/not/exist.bin" % server.port)
+
+    with pytest.raises(Exception, match="404"):
+        gdal.Open("/vsicurl/http://localhost:%d/does/not/exist.bin" % server.port)

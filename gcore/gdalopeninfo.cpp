@@ -106,7 +106,7 @@ void GDALOpenInfoDeclareFileNotToOpen(const char *pszFilename,
         memcpy(fnto.pabyHeader, pabyHeader, nHeaderBytes);
         fnto.pabyHeader[nHeaderBytes] = 0;
         fnto.nHeaderBytes = nHeaderBytes;
-        (*pMapFNTO)[pszFilename] = fnto;
+        (*pMapFNTO)[pszFilename] = std::move(fnto);
     }
 }
 
@@ -182,7 +182,7 @@ GDALOpenInfo::GDALOpenInfo(const char *pszFilenameIn, int nOpenFlagsIn,
 /*      Ensure that C: is treated as C:\ so we can stat it on           */
 /*      Windows.  Similar to what is done in CPLStat().                 */
 /* -------------------------------------------------------------------- */
-#ifdef WIN32
+#ifdef _WIN32
     if (strlen(pszFilenameIn) == 2 && pszFilenameIn[1] == ':')
     {
         char szAltPath[10];
@@ -217,11 +217,14 @@ retry:  // TODO(schwehr): Stop using goto.
     /* Check if the filename might be a directory of a special virtual file
      * system */
     if (STARTS_WITH(pszFilename, "/vsizip/") ||
-        STARTS_WITH(pszFilename, "/vsitar/"))
+        STARTS_WITH(pszFilename, "/vsitar/") ||
+        STARTS_WITH(pszFilename, "/vsi7z/") ||
+        STARTS_WITH(pszFilename, "/vsirar/"))
     {
         const char *pszExt = CPLGetExtension(pszFilename);
         if (EQUAL(pszExt, "zip") || EQUAL(pszExt, "tar") ||
-            EQUAL(pszExt, "gz") ||
+            EQUAL(pszExt, "gz") || EQUAL(pszExt, "7z") ||
+            EQUAL(pszExt, "rar") ||
             pszFilename[strlen(pszFilename) - 1] == '}'
 #ifdef DEBUG
             // For AFL, so that .cur_input is detected as the archive filename.

@@ -47,6 +47,7 @@ import pytest
 
 pytestmark = [
     pytest.mark.require_driver("NGW"),
+    pytest.mark.random_order(disabled=True),
     pytest.mark.skipif(
         "CI" in os.environ,
         reason="NGW tests are flaky. See https://github.com/OSGeo/gdal/issues/4453",
@@ -124,19 +125,18 @@ def get_new_name():
 def test_ngw_2():
 
     create_url = "NGW:" + gdaltest.ngw_test_server + "/resource/0/" + get_new_name()
-    gdal.PushErrorHandler()
-    description = "GDAL Raster test group"
-    gdaltest.ngw_ds = gdal.GetDriverByName("NGW").Create(
-        create_url,
-        0,
-        0,
-        0,
-        gdal.GDT_Unknown,
-        options=[
-            "DESCRIPTION=" + description,
-        ],
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        description = "GDAL Raster test group"
+        gdaltest.ngw_ds = gdal.GetDriverByName("NGW").Create(
+            create_url,
+            0,
+            0,
+            0,
+            gdal.GDT_Unknown,
+            options=[
+                "DESCRIPTION=" + description,
+            ],
+        )
 
     assert gdaltest.ngw_ds is not None, "Create datasource failed."
     assert (
@@ -272,15 +272,12 @@ def test_ngw_7():
         pytest.skip()
 
     gdal.ErrorReset()
-    gdal.SetConfigOption("CPL_ACCUM_ERROR_MSG", "ON")
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
+    with gdal.config_option("CPL_ACCUM_ERROR_MSG", "ON"), gdaltest.error_handler():
 
-    ovr_band = gdaltest.ngw_ds.GetRasterBand(1).GetOverview(21)
-    assert ovr_band is not None
-    ovr_band.Checksum()
+        ovr_band = gdaltest.ngw_ds.GetRasterBand(1).GetOverview(21)
+        assert ovr_band is not None
+        ovr_band.Checksum()
 
-    gdal.PopErrorHandler()
-    gdal.SetConfigOption("CPL_ACCUM_ERROR_MSG", "OFF")
     msg = gdal.GetLastErrorMsg()
 
     assert gdal.GetLastErrorType() != gdal.CE_Failure, msg

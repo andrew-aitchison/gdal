@@ -282,6 +282,7 @@ CPLErr GeoRasterRasterBand::IWriteBlock(int nBlockXOff, int nBlockYOff,
         return CE_Failure;
     }
 }
+
 //  ---------------------------------------------------------------------------
 //                                                     GetColorInterpretation()
 //  ---------------------------------------------------------------------------
@@ -404,13 +405,13 @@ CPLErr GeoRasterRasterBand::GetStatistics(int bApproxOK, int bForce,
     (void)bForce;
     (void)bApproxOK;
 
-    char szMin[MAX_DOUBLE_STR_REP + 1];
-    char szMax[MAX_DOUBLE_STR_REP + 1];
-    char szMean[MAX_DOUBLE_STR_REP + 1];
-    char szMedian[MAX_DOUBLE_STR_REP + 1];
-    char szMode[MAX_DOUBLE_STR_REP + 1];
-    char szStdDev[MAX_DOUBLE_STR_REP + 1];
-    char szSampling[MAX_DOUBLE_STR_REP + 1];
+    char szMin[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMax[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMean[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMedian[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMode[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szStdDev[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szSampling[MAX_DOUBLE_STR_REP + 1] = {0};
 
     if (!bValidStats)
     {
@@ -972,9 +973,9 @@ int GeoRasterRasterBand::GetMaskFlags()
 
 void GeoRasterRasterBand::ApplyNoDataArray(void *pBuffer) const
 {
-    int i = 0;
+    size_t i = 0;
     int j = 0;
-    long n = nBlockXSize * nBlockYSize;
+    size_t n = static_cast<size_t>(nBlockXSize) * nBlockYSize;
 
     switch (eDataType)
     {

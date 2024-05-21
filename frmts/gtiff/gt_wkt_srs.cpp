@@ -343,9 +343,14 @@ static void FillCompoundCRSWithManualVertCS(GTIF *hGTIF,
     /* -------------------------------------------------------------------- */
     std::string osVDatumName = "unknown";
     const char *pszVDatumType = "2005";  // CS_VD_GeoidModelDerived
+    std::string osVDatumAuthName;
+    int nVDatumCode = 0;
 
     if (verticalDatum > 0 && verticalDatum != KvUserDefined)
     {
+        osVDatumAuthName = "EPSG";
+        nVDatumCode = verticalDatum;
+
         char szCode[12];
         snprintf(szCode, sizeof(szCode), "%d", verticalDatum);
         auto ctx =
@@ -362,12 +367,65 @@ static void FillCompoundCRSWithManualVertCS(GTIF *hGTIF,
             proj_destroy(datum);
         }
     }
+    else if (verticalDatum == KvUserDefined)
+    {
+        // If the vertical datum is unknown, try to find the vertical CRS
+        // from the database, and extra the datum information from it.
+        auto ctx =
+            static_cast<PJ_CONTEXT *>(GTIFGetPROJContext(hGTIF, true, nullptr));
+        const auto type = PJ_TYPE_VERTICAL_CRS;
+        auto list = proj_create_from_name(ctx, nullptr, pszVertCSName, &type, 1,
+                                          true,  // exact match
+                                          -1,    // result set limit size,
+                                          nullptr);
+        if (list)
+        {
+            // If we have several matches, check they all refer to the
+            // same datum
+            bool bGoOn = true;
+            int ncount = proj_list_get_count(list);
+            for (int i = 0; bGoOn && i < ncount; ++i)
+            {
+                auto crs = proj_list_get(ctx, list, i);
+                if (crs)
+                {
+                    auto datum = proj_crs_get_datum(ctx, crs);
+                    if (datum)
+                    {
+                        osVDatumName = proj_get_name(datum);
+                        const char *pszAuthName =
+                            proj_get_id_auth_name(datum, 0);
+                        const char *pszCode = proj_get_id_code(datum, 0);
+                        if (pszCode && atoi(pszCode) && pszAuthName)
+                        {
+                            if (osVDatumAuthName.empty())
+                            {
+                                osVDatumAuthName = pszAuthName;
+                                nVDatumCode = atoi(pszCode);
+                            }
+                            else if (osVDatumAuthName != pszAuthName ||
+                                     nVDatumCode != atoi(pszCode))
+                            {
+                                osVDatumAuthName.clear();
+                                nVDatumCode = 0;
+                                bGoOn = false;
+                            }
+                        }
+                        proj_destroy(datum);
+                    }
+                    proj_destroy(crs);
+                }
+            }
+        }
+        proj_list_destroy(list);
+    }
 
     oSRS.SetNode("COMPD_CS|VERT_CS|VERT_DATUM", osVDatumName.c_str());
     oSRS.GetAttrNode("COMPD_CS|VERT_CS|VERT_DATUM")
         ->AddChild(new OGR_SRSNode(pszVDatumType));
-    if (verticalDatum > 0 && verticalDatum != KvUserDefined)
-        oSRS.SetAuthority("COMPD_CS|VERT_CS|VERT_DATUM", "EPSG", verticalDatum);
+    if (!osVDatumAuthName.empty())
+        oSRS.SetAuthority("COMPD_CS|VERT_CS|VERT_DATUM",
+                          osVDatumAuthName.c_str(), nVDatumCode);
 
     /* -------------------------------------------------------------------- */
     /*      Set the vertical units.                                         */
@@ -1266,7 +1324,7 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
                 oSRSTmp.CopyGeogCSFrom(&oSRS);
                 oSRSTmp.UpdateCoordinateSystemFromGeogCRS();
             }
-            oSRS = oSRSTmp;
+            oSRS = std::move(oSRSTmp);
         }
     }
 
@@ -1545,7 +1603,7 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
         }
         if (EQUAL(osGTiffSRSSource.c_str(), "EPSG"))
         {
-            oSRS = oSRSTmp;
+            oSRS = std::move(oSRSTmp);
         }
         else if (bPCSCodeValid && EQUAL(osGTiffSRSSource.c_str(), ""))
         {
@@ -1601,6 +1659,7 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
     if ((verticalCSType != 0 || verticalDatum != 0 || verticalUnits != 0) &&
         (oSRS.IsGeographic() || oSRS.IsProjected() || oSRS.IsLocal()))
     {
+        std::string osVertCRSName;
         if (GDALGTIFKeyGetASCII(hGTIF, VerticalCitationGeoKey, citation,
                                 sizeof(citation)))
         {
@@ -1611,11 +1670,8 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
                 char *pszPipeChar = strchr(citation, '|');
                 if (pszPipeChar)
                     *pszPipeChar = '\0';
+                osVertCRSName = citation;
             }
-        }
-        else
-        {
-            strcpy(citation, "unknown");
         }
 
         OGRSpatialReference oVertSRS;
@@ -1627,10 +1683,18 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
             {
                 bCanBuildCompoundCRS = false;
             }
+            else
+            {
+                osVertCRSName = oVertSRS.GetName();
+            }
         }
+        if (osVertCRSName.empty())
+            osVertCRSName = "unknown";
 
         if (bCanBuildCompoundCRS)
         {
+            const bool bHorizontalHasCode =
+                oSRS.GetAuthorityCode(nullptr) != nullptr;
             const char *pszHorizontalName = oSRS.GetName();
             const std::string osHorizontalName(
                 pszHorizontalName ? pszHorizontalName : "unnamed");
@@ -1658,8 +1722,9 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
             }
             else
             {
-                oSRS.SetNode("COMPD_CS",
-                             (osHorizontalName + " + " + citation).c_str());
+                oSRS.SetNode(
+                    "COMPD_CS",
+                    (osHorizontalName + " + " + osVertCRSName).c_str());
             }
 
             oSRS.GetRoot()->AddChild(poOldRoot);
@@ -1677,6 +1742,19 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
             {
                 oSRS.GetRoot()->AddChild(oVertSRS.GetRoot()->Clone());
                 bNeedManualVertCS = false;
+
+                // GeoTIFF doesn't store EPSG code of CompoundCRS, so
+                // if we have an EPSG code for both the horizontal and vertical
+                // parts, check if there's a known CompoundCRS associating
+                // both
+                if (bHorizontalHasCode && verticalCSType != KvUserDefined &&
+                    verticalCSType > 0)
+                {
+                    const auto *poSRSMatch = oSRS.FindBestMatch(100);
+                    if (poSRSMatch)
+                        oSRS = *poSRSMatch;
+                    delete poSRSMatch;
+                }
             }
         }
     }
@@ -3264,12 +3342,20 @@ int GTIFSetFromOGISDefnEx(GTIF *psGTIF, OGRSpatialReferenceH hSRS,
     if (poSRS->GetAttrValue("COMPD_CS|VERT_CS") != nullptr)
     {
         bool bGotVertCSCode = false;
-        const char *pszValue = poSRS->GetAuthorityCode("COMPD_CS|VERT_CS");
-        if (pszValue && atoi(pszValue))
+        const char *pszVertCSCode = poSRS->GetAuthorityCode("COMPD_CS|VERT_CS");
+        const char *pszVertCSAuthName =
+            poSRS->GetAuthorityName("COMPD_CS|VERT_CS");
+        if (pszVertCSCode && pszVertCSAuthName && atoi(pszVertCSCode) &&
+            EQUAL(pszVertCSAuthName, "EPSG"))
         {
             bGotVertCSCode = true;
             GTIFKeySet(psGTIF, VerticalCSTypeGeoKey, TYPE_SHORT, 1,
-                       atoi(pszValue));
+                       atoi(pszVertCSCode));
+        }
+        else if (eVersion >= GEOTIFF_VERSION_1_1)
+        {
+            GTIFKeySet(psGTIF, VerticalCSTypeGeoKey, TYPE_SHORT, 1,
+                       KvUserDefined);
         }
 
         if (eVersion == GEOTIFF_VERSION_1_0 || !bGotVertCSCode)
@@ -3277,15 +3363,37 @@ int GTIFSetFromOGISDefnEx(GTIF *psGTIF, OGRSpatialReferenceH hSRS,
             oMapAsciiKeys[VerticalCitationGeoKey] =
                 poSRS->GetAttrValue("COMPD_CS|VERT_CS");
 
-            pszValue = poSRS->GetAuthorityCode("COMPD_CS|VERT_CS|VERT_DATUM");
-            if (pszValue && atoi(pszValue))
+            const char *pszVertDatumCode =
+                poSRS->GetAuthorityCode("COMPD_CS|VERT_CS|VERT_DATUM");
+            const char *pszVertDatumAuthName =
+                poSRS->GetAuthorityName("COMPD_CS|VERT_CS|VERT_DATUM");
+            if (pszVertDatumCode && pszVertDatumAuthName &&
+                atoi(pszVertDatumCode) && EQUAL(pszVertDatumAuthName, "EPSG"))
+            {
                 GTIFKeySet(psGTIF, VerticalDatumGeoKey, TYPE_SHORT, 1,
-                           atoi(pszValue));
+                           atoi(pszVertDatumCode));
+            }
+            else if (eVersion >= GEOTIFF_VERSION_1_1)
+            {
+                GTIFKeySet(psGTIF, VerticalDatumGeoKey, TYPE_SHORT, 1,
+                           KvUserDefined);
+            }
 
-            pszValue = poSRS->GetAuthorityCode("COMPD_CS|VERT_CS|UNIT");
-            if (pszValue && atoi(pszValue))
+            const char *pszVertUnitCode =
+                poSRS->GetAuthorityCode("COMPD_CS|VERT_CS|UNIT");
+            const char *pszVertUnitAuthName =
+                poSRS->GetAuthorityName("COMPD_CS|VERT_CS|UNIT");
+            if (pszVertUnitCode && pszVertUnitAuthName &&
+                atoi(pszVertUnitCode) && EQUAL(pszVertUnitAuthName, "EPSG"))
+            {
                 GTIFKeySet(psGTIF, VerticalUnitsGeoKey, TYPE_SHORT, 1,
-                           atoi(pszValue));
+                           atoi(pszVertUnitCode));
+            }
+            else if (eVersion >= GEOTIFF_VERSION_1_1)
+            {
+                GTIFKeySet(psGTIF, VerticalUnitsGeoKey, TYPE_SHORT, 1,
+                           KvUserDefined);
+            }
         }
     }
     else if (eVersion >= GEOTIFF_VERSION_1_1 && nVerticalCSKeyValue != 0)
@@ -3595,20 +3703,22 @@ CPLErr GTIFMemBufFromSRS(OGRSpatialReferenceH hSRS,
     {
         hGTIF = GTIFNew(hTIFF);
         if (hGTIF)
+        {
             GTIFAttachPROJContext(hGTIF, OSRGetProjTLSContext());
 
-        if (hSRS != nullptr)
-            GTIFSetFromOGISDefnEx(hGTIF, hSRS, GEOTIFF_KEYS_STANDARD,
-                                  GEOTIFF_VERSION_1_0);
+            if (hSRS != nullptr)
+                GTIFSetFromOGISDefnEx(hGTIF, hSRS, GEOTIFF_KEYS_STANDARD,
+                                      GEOTIFF_VERSION_1_0);
 
-        if (bPixelIsPoint)
-        {
-            GTIFKeySet(hGTIF, GTRasterTypeGeoKey, TYPE_SHORT, 1,
-                       RasterPixelIsPoint);
+            if (bPixelIsPoint)
+            {
+                GTIFKeySet(hGTIF, GTRasterTypeGeoKey, TYPE_SHORT, 1,
+                           RasterPixelIsPoint);
+            }
+
+            GTIFWriteKeys(hGTIF);
+            GTIFFree(hGTIF);
         }
-
-        GTIFWriteKeys(hGTIF);
-        GTIFFree(hGTIF);
     }
 
     /* -------------------------------------------------------------------- */

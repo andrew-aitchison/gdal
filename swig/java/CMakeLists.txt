@@ -78,6 +78,9 @@ if (ENABLE_GNM)
   list(APPEND GDALALLJNI_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/org/gdal/gnm/gnm_wrap.cpp)
 endif ()
 add_library(gdalalljni SHARED ${GDALALLJNI_SOURCES})
+
+set_property(TARGET gdalalljni PROPERTY UNITY_BUILD OFF)
+
 gdal_standard_includes(gdalalljni)
 target_include_directories(gdalalljni PRIVATE ${JNI_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 if (ENABLE_GNM)
@@ -95,8 +98,15 @@ target_link_libraries(gdalalljni PRIVATE $<TARGET_NAME:${GDAL_LIB_TARGET_NAME}>)
 # Build javadoc
 file(STRINGS ${PROJECT_SOURCE_DIR}/VERSION GDAL_VERSION)
 
-option(GDAL_JAVA_GENERATE_JAVADOC "Generate Javadoc of Java bindings" ON)
+if(Java_JAVADOC_EXECUTABLE)
+    option(GDAL_JAVA_GENERATE_JAVADOC "Generate Javadoc of Java bindings" ON)
+else()
+    option(GDAL_JAVA_GENERATE_JAVADOC "Generate Javadoc of Java bindings" OFF)
+endif()
 if (GDAL_JAVA_GENERATE_JAVADOC)
+  if (NOT Java_JAVADOC_EXECUTABLE)
+      message(FATAL_ERROR "javadoc executable is a requirement for GDAL_JAVA_GENERATE_JAVADOC")
+  endif()
   add_executable(add_javadoc add_javadoc.c)
   set(JAVADOC_ZIP ${CMAKE_CURRENT_BINARY_DIR}/javadoc.zip)
   add_custom_command(
@@ -156,14 +166,19 @@ set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "org;org_patched
 add_custom_target(java_binding ALL DEPENDS gdalalljni ${MAVEN_ARTIFACTS})
 
 # Install
-set(GDAL_JAVA_INSTALL_DIR
-    "${CMAKE_INSTALL_DATADIR}/java"
-    CACHE PATH "Installation sub-directory for Java bindings")
+
+set(GDAL_JAVA_JNI_INSTALL_DIR
+    "${CMAKE_INSTALL_LIBDIR}/jni"
+    CACHE PATH "Installation sub-directory for the JNI shared library of Java bindings")
 
 install(
   TARGETS gdalalljni
   COMPONENT java
-  DESTINATION ${GDAL_JAVA_INSTALL_DIR})
+  DESTINATION ${GDAL_JAVA_JNI_INSTALL_DIR})
+
+set(GDAL_JAVA_INSTALL_DIR
+    "${CMAKE_INSTALL_DATADIR}/java"
+    CACHE PATH "Installation sub-directory for .jar files of Java bindings")
 
 install(
   FILES ${GDAL_VERSION_JAR} ${GDAL_VERSION_JAVADOC_JAR} ${GDAL_VERSION_SOURCES_JAR} ${GDAL_VERSION_POM}
@@ -171,7 +186,7 @@ install(
   DESTINATION ${GDAL_JAVA_INSTALL_DIR})
 
 # Tests
-if (Java_Runtime_FOUND)
+if (Java_Runtime_FOUND AND BUILD_TESTING)
 
   file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/tmp_test)
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/tmp_test)
@@ -206,11 +221,13 @@ if (Java_Runtime_FOUND)
   add_test(NAME java_OSRTransform COMMAND ${JAVA_RUN} OSRTransform)
   add_test(NAME java_gdalmajorobject COMMAND ${JAVA_RUN} gdalmajorobject)
   add_test(NAME java_GDALTestIO COMMAND ${JAVA_RUN} GDALTestIO)
+  add_test(NAME java_GDALTestMultiDim COMMAND ${JAVA_RUN} GDALTestMultiDim)
   add_test(NAME java_GDALContour COMMAND ${JAVA_RUN} GDALContour -i 1 tmp_test/byte.tif tmp_test/contour.shp)
   add_test(NAME java_testgetpoints COMMAND ${JAVA_RUN} testgetpoints)
   add_test(NAME java_ogrtindex COMMAND ${JAVA_RUN} ogrtindex tmp_test/contour_index.shp tmp_test/contour.shp)
   set_tests_properties(java_ogrtindex PROPERTIES DEPENDS java_GDALContour)
   add_test(NAME java_OSRTest COMMAND ${JAVA_RUN} OSRTest)
+  add_test(NAME java_test_ogrfielddomains COMMAND ${JAVA_RUN} test_ogrfielddomains)
 
   foreach (
     test_name IN
@@ -225,10 +242,12 @@ if (Java_Runtime_FOUND)
           java_OSRTransform
           java_gdalmajorobject
           java_GDALTestIO
+          java_GDALTestMultiDim
           java_GDALContour
           java_testgetpoints
           java_ogrtindex
-          java_OSRTest)
+          java_OSRTest
+          java_test_ogrfielddomains)
     set_property(TEST ${test_name} PROPERTY ENVIRONMENT "${TEST_ENV}")
   endforeach ()
 

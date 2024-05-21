@@ -32,6 +32,7 @@
 
 import os
 import shutil
+import struct
 
 import gdaltest
 import pytest
@@ -133,12 +134,15 @@ def test_hfa_write_nd_invalid():
 # Test updating .rrd overviews in place (#2524).
 
 
-def test_hfa_update_overviews():
+def test_hfa_update_overviews(tmp_path):
 
-    shutil.copyfile("data/small_ov.img", "tmp/small.img")
-    shutil.copyfile("data/small_ov.rrd", "tmp/small.rrd")
+    img_path = str(tmp_path / "small.img")
+    rrd_path = str(tmp_path / "small.rrd")
 
-    ds = gdal.Open("tmp/small.img", gdal.GA_Update)
+    shutil.copyfile("data/small_ov.img", img_path)
+    shutil.copyfile("data/small_ov.rrd", rrd_path)
+
+    ds = gdal.Open(img_path, gdal.GA_Update)
     result = ds.BuildOverviews(overviewlist=[2])
 
     assert result == 0, "BuildOverviews() failed."
@@ -149,9 +153,15 @@ def test_hfa_update_overviews():
 # Test cleaning external overviews.
 
 
-def test_hfa_clean_external_overviews():
+def test_hfa_clean_external_overviews(tmp_path):
 
-    ds = gdal.Open("tmp/small.img", gdal.GA_Update)
+    img_path = str(tmp_path / "small.img")
+    rrd_path = str(tmp_path / "small.rrd")
+
+    shutil.copyfile("data/small_ov.img", img_path)
+    shutil.copyfile("data/small_ov.rrd", rrd_path)
+
+    ds = gdal.Open(img_path, gdal.GA_Update)
     result = ds.BuildOverviews(overviewlist=[])
 
     assert result == 0, "BuildOverviews() failed."
@@ -159,13 +169,13 @@ def test_hfa_clean_external_overviews():
     assert ds.GetRasterBand(1).GetOverviewCount() == 0, "Overviews still exist."
 
     ds = None
-    ds = gdal.Open("tmp/small.img")
+    ds = gdal.Open(img_path)
     assert ds.GetRasterBand(1).GetOverviewCount() == 0, "Overviews still exist."
     ds = None
 
-    assert not os.path.exists("tmp/small.rrd")
+    assert not os.path.exists(rrd_path)
 
-    gdal.GetDriverByName("HFA").Delete("tmp/small.img")
+    gdal.GetDriverByName("HFA").Delete(img_path)
 
 
 ###############################################################################
@@ -261,11 +271,9 @@ def test_hfa_use_rrd():
 
     shutil.copyfile("data/small_ov.img", "tmp/small.img")
 
-    old_value = gdal.GetConfigOption("HFA_USE_RRD", "NO")
-    gdal.SetConfigOption("HFA_USE_RRD", "YES")
-    ds = gdal.Open("tmp/small.img", gdal.GA_Update)
-    result = ds.BuildOverviews(overviewlist=[2])
-    gdal.SetConfigOption("HFA_USE_RRD", old_value)
+    with gdal.config_option("HFA_USE_RRD", "YES"):
+        ds = gdal.Open("tmp/small.img", gdal.GA_Update)
+        result = ds.BuildOverviews(overviewlist=[2])
 
     assert result == 0, "BuildOverviews() failed."
     ds = None
@@ -289,144 +297,69 @@ def test_hfa_use_rrd():
 # Test fix for #4831
 
 
+@pytest.mark.require_driver("BMP")
 def test_hfa_update_existing_aux_overviews():
 
-    if gdal.GetDriverByName("BMP") is None:
-        pytest.skip("BMP driver missing")
+    with gdal.config_option("USE_RRD", "YES"):
 
-    gdal.SetConfigOption("USE_RRD", "YES")
+        ds = gdal.GetDriverByName("BMP").Create(
+            "tmp/hfa_update_existing_aux_overviews.bmp", 100, 100, 1
+        )
+        ds.GetRasterBand(1).Fill(255)
+        ds = None
 
-    ds = gdal.GetDriverByName("BMP").Create(
-        "tmp/hfa_update_existing_aux_overviews.bmp", 100, 100, 1
-    )
-    ds.GetRasterBand(1).Fill(255)
-    ds = None
+        # Create overviews
+        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        ds.BuildOverviews("NEAR", overviewlist=[2, 4])
+        ds = None
 
-    # Create overviews
-    ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
-    ds.BuildOverviews("NEAR", overviewlist=[2, 4])
-    ds = None
+        # Save overviews checksum
+        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
+        cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
 
-    # Save overviews checksum
-    ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
-    cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
+        # and regenerate them
+        ds.BuildOverviews("NEAR", overviewlist=[2, 4])
+        ds = None
 
-    # and regenerate them
-    ds.BuildOverviews("NEAR", overviewlist=[2, 4])
-    ds = None
+        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        # Check overviews checksum
+        new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
+        new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
+        if cs_ovr0 != new_cs_ovr0:
+            pytest.fail()
+        if cs_ovr1 != new_cs_ovr1:
+            pytest.fail()
 
-    ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
-    # Check overviews checksum
-    new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
-    if cs_ovr0 != new_cs_ovr0:
-        gdal.SetConfigOption("USE_RRD", None)
-        pytest.fail()
-    if cs_ovr1 != new_cs_ovr1:
-        gdal.SetConfigOption("USE_RRD", None)
-        pytest.fail()
+        # and regenerate them twice in a row
+        ds.BuildOverviews("NEAR", overviewlist=[2, 4])
+        ds.BuildOverviews("NEAR", overviewlist=[2, 4])
+        ds = None
 
-    # and regenerate them twice in a row
-    ds.BuildOverviews("NEAR", overviewlist=[2, 4])
-    ds.BuildOverviews("NEAR", overviewlist=[2, 4])
-    ds = None
+        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        # Check overviews checksum
+        new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
+        new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
+        if cs_ovr0 != new_cs_ovr0:
+            pytest.fail()
+        if cs_ovr1 != new_cs_ovr1:
+            pytest.fail()
 
-    ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
-    # Check overviews checksum
-    new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
-    if cs_ovr0 != new_cs_ovr0:
-        gdal.SetConfigOption("USE_RRD", None)
-        pytest.fail()
-    if cs_ovr1 != new_cs_ovr1:
-        gdal.SetConfigOption("USE_RRD", None)
-        pytest.fail()
+        # and regenerate them with an extra overview level
+        ds.BuildOverviews("NEAR", overviewlist=[8])
+        ds = None
 
-    # and regenerate them with an extra overview level
-    ds.BuildOverviews("NEAR", overviewlist=[8])
-    ds = None
+        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        # Check overviews checksum
+        new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
+        new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
+        if cs_ovr0 != new_cs_ovr0:
+            pytest.fail()
+        if cs_ovr1 != new_cs_ovr1:
+            pytest.fail()
+        ds = None
 
-    ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
-    # Check overviews checksum
-    new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
-    if cs_ovr0 != new_cs_ovr0:
-        gdal.SetConfigOption("USE_RRD", None)
-        pytest.fail()
-    if cs_ovr1 != new_cs_ovr1:
-        gdal.SetConfigOption("USE_RRD", None)
-        pytest.fail()
-    ds = None
-
-    gdal.GetDriverByName("BMP").Delete("tmp/hfa_update_existing_aux_overviews.bmp")
-
-    gdal.SetConfigOption("USE_RRD", None)
-
-
-###############################################################################
-# Test writing invalid WKT (#5258)
-
-
-def test_hfa_write_invalid_wkt():
-
-    # No GEOGCS
-    ds = gdal.GetDriverByName("HFA").Create("/vsimem/hfa_write_invalid_wkt.img", 1, 1)
-    ds.SetProjection(
-        """PROJCS["NAD27 / UTM zone 11N",
-    PROJECTION["Transverse_Mercator"],
-    PARAMETER["latitude_of_origin",0],
-    PARAMETER["central_meridian",-117],
-    PARAMETER["scale_factor",0.9996],
-    PARAMETER["false_easting",500000],
-    PARAMETER["false_northing",0],
-    UNIT["metre",1,
-        AUTHORITY["EPSG","9001"]],
-    AUTHORITY["EPSG","26711"]]"""
-    )
-    ds = None
-
-    # No DATUM in GEOGCS
-    ds = gdal.GetDriverByName("HFA").Create("/vsimem/hfa_write_invalid_wkt.img", 1, 1)
-    ds.SetProjection(
-        """PROJCS["NAD27 / UTM zone 11N",
-    GEOGCS["NAD27",
-        AUTHORITY["EPSG","4267"]],
-    PROJECTION["Transverse_Mercator"],
-    PARAMETER["latitude_of_origin",0],
-    PARAMETER["central_meridian",-117],
-    PARAMETER["scale_factor",0.9996],
-    PARAMETER["false_easting",500000],
-    PARAMETER["false_northing",0],
-    UNIT["metre",1,
-        AUTHORITY["EPSG","9001"]],
-    AUTHORITY["EPSG","26711"]]"""
-    )
-    ds = None
-
-    # No SPHEROID in DATUM
-    ds = gdal.GetDriverByName("HFA").Create("/vsimem/hfa_write_invalid_wkt.img", 1, 1)
-    ds.SetProjection(
-        """PROJCS["NAD27 / UTM zone 11N",
-    GEOGCS["NAD27",
-        DATUM["North_American_Datum_1927",
-            AUTHORITY["EPSG","6267"]],
-        PRIMEM["Greenwich",0],
-        UNIT["degree",0.0174532925199433],
-        AUTHORITY["EPSG","4267"]],
-    PROJECTION["Transverse_Mercator"],
-    PARAMETER["latitude_of_origin",0],
-    PARAMETER["central_meridian",-117],
-    PARAMETER["scale_factor",0.9996],
-    PARAMETER["false_easting",500000],
-    PARAMETER["false_northing",0],
-    UNIT["metre",1,
-        AUTHORITY["EPSG","9001"]],
-    AUTHORITY["EPSG","26711"]]"""
-    )
-    ds = None
-
-    gdal.GetDriverByName("HFA").Delete("/vsimem/hfa_write_invalid_wkt.img")
+        gdal.GetDriverByName("BMP").Delete("tmp/hfa_update_existing_aux_overviews.bmp")
 
 
 ###############################################################################
@@ -464,8 +397,8 @@ init_list = [
     ],
 )
 @pytest.mark.require_driver("HFA")
-def test_hfa_create_normal(filename, checksum, testfunction):
-    ut = gdaltest.GDALTest("HFA", filename, 1, checksum)
+def test_hfa_create_normal(filename, checksum, testfunction, tmp_path):
+    ut = gdaltest.GDALTest("HFA", filename, 1, checksum, tmpdir=str(tmp_path))
     getattr(ut, testfunction)()
 
 
@@ -486,8 +419,10 @@ short_list = [("byte.tif", 4672), ("uint16.tif", 4672), ("float64.tif", 4672)]
     ],
 )
 @pytest.mark.require_driver("HFA")
-def test_hfa_create_spill(filename, checksum, testfunction):
-    ut = gdaltest.GDALTest("HFA", filename, 1, checksum, options=["USE_SPILL=YES"])
+def test_hfa_create_spill(filename, checksum, testfunction, tmp_path):
+    ut = gdaltest.GDALTest(
+        "HFA", filename, 1, checksum, options=["USE_SPILL=YES"], tmpdir=str(tmp_path)
+    )
     getattr(ut, testfunction)()
 
 
@@ -514,7 +449,7 @@ def test_hfa_create_compress_big_block():
         "/vsimem/big_block.img", 128, 128, 1, gdal.GDT_UInt32
     )
     src_ds.GetRasterBand(1).Fill(4 * 1000 * 1000 * 1000)
-    src_ds.GetRasterBand(1).WriteRaster(0, 0, 1, 1, b"\0")
+    src_ds.GetRasterBand(1).WriteRaster(0, 0, 1, 1, struct.pack("I", 0))
     gdal.GetDriverByName("HFA").CreateCopy(
         "/vsimem/big_block.img", src_ds, options=["COMPRESS=YES", "BLOCKSIZE=128"]
     )

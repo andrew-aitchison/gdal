@@ -15,9 +15,7 @@ All GDAL command line programs support the following common options.
     Report detailed information about GDAL in use.
 
 .. _raster_common_options_formats:
-.. option:: --formats
-
-    List all raster formats supported by this GDAL build (read-only and read-write) and exit. The format support is indicated as follows: 'ro' is read-only driver; 'rw' is read or write (i.e. supports CreateCopy); 'rw+' is read, write and update (i.e. supports Create). A 'v' is appended for formats supporting virtual IO (/vsimem, /vsigzip, /vsizip, etc). A 's' is appended for formats supporting subdatasets. Note: The valid formats for the output of gdalwarp are formats that support the Create() method (marked as rw+), not just the CreateCopy() method.
+.. include:: options/formats_raster.rst
 
 .. option:: --format <format>
 
@@ -26,11 +24,12 @@ All GDAL command line programs support the following common options.
 .. _raster_common_options_optfile:
 .. option:: --optfile <filename>
 
-    Read the named file and substitute the contents into the command line options list. Lines beginning with # will be ignored. Multi-word arguments may be kept together with double quotes.
+    Read the named file and substitute the contents into the command line options list. Lines beginning with # will be ignored. Multi-word arguments may be kept together with double quotes. Multiple --optfiles may be used: --optfile file1 --optfile file2...
+
 
 .. option:: --config <key> <value>
 
-    Sets the named configuration keyword to the given value, as opposed to setting them as environment variables. Some common configuration keywords are GDAL_CACHEMAX (memory used internally for caching in megabytes) and :decl_configoption:`GDAL_DATA` (path of the GDAL "data" directory). Individual drivers may be influenced by other :ref:`configuration options <list_config_options>`.
+    Sets the named configuration keyword to the given value, as opposed to setting them as environment variables. Some common configuration keywords are :config:`GDAL_CACHEMAX` (memory used internally for caching in megabytes) and :config:`GDAL_DATA` (path of the GDAL "data" directory). Individual drivers may be influenced by other :ref:`configuration options <list_config_options>`.
 
 .. option:: --debug <value>
 
@@ -46,7 +45,7 @@ Creating new files
 Access an existing file to read it is generally quite simple.
 Just indicate the name of the file or dataset on the command line.
 However, creating a file is more complicated. It may be necessary to
-indicate the the format to create, various creation options affecting
+indicate the format to create, various creation options affecting
 how it will be created and perhaps a coordinate system to be assigned.
 Many of these options are handled similarly by different GDAL utilities,
 and are introduced here.

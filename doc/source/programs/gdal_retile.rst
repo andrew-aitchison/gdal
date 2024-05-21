@@ -15,17 +15,18 @@ Synopsis
 
 .. code-block::
 
-    gdal_retile.py [-v] [-co NAME=VALUE]* [-of out_format] [-ps pixelWidth pixelHeight]
-                   [-overlap val_in_pixel]
+    gdal_retile.py [--help] [--help-general]
+                   [-v] [-co <NAME>=<VALUE>]... [-of <out_format>] [-ps <pixelWidth> <pixelHeight>]
+                   [-overlap <val_in_pixel>]
                    [-ot  {Byte/Int8/Int16/UInt16/UInt32/Int32/Float32/Float64/
                            CInt16/CInt32/CFloat32/CFloat64}]'
-                   [ -tileIndex tileIndexName [-tileIndexField tileIndexFieldName]]
-                   [ -csv fileName [-csvDelim delimiter]]
-                   [-s_srs srs_def]  [-pyramidOnly]
-                   [-r {near/bilinear/cubic/cubicspline/lanczos}]
-                   -levels numberoflevels
+                   [ -tileIndex <tileIndexName> [-tileIndexField <tileIndexFieldName>]]
+                   [-csv <fileName> [-csvDelim <delimiter>]]
+                   [-s_srs <srs_def>]  [-pyramidOnly]
+                   [-r {near|bilinear|cubic|cubicspline|lanczos}]
+                   -levels <numberoflevels>
                    [-useDirForEachRow] [-resume]
-                   -targetDir TileDirectory input_files
+                   -targetDir <TileDirectory> <input_file> <input_file>...
 
 Description
 -----------
@@ -42,6 +43,8 @@ If your number of input tiles exhausts the command line buffer, use the general
 :ref:`--optfile <raster_common_options_optfile>` option
 
 .. program:: gdal_retile
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -targetDir <directory>
 
@@ -60,7 +63,7 @@ If your number of input tiles exhausts the command line buffer, use the general
     Pixel size to be used for the
     output file.  If not specified, 256 x 256 is the default
 
-.. option:: -overlap< <val_in_pixel>
+.. option:: -overlap <val_in_pixel>
 
     Overlap in pixels between consecutive tiles. If not specified, 0 is the default
 
@@ -113,7 +116,7 @@ If your number of input tiles exhausts the command line buffer, use the general
 
     Normally the tiles of the base image are stored as described in :option:`-targetDir`.
     For large images, some file systems have performance problems if the number of files
-    in a directory is to big, causing gdal_retile not to finish in reasonable time.
+    in a directory is too big, causing gdal_retile not to finish in reasonable time.
     Using this parameter creates a different output structure. The tiles of the base image
     are stored in a sub-directory called 0, the pyramids in sub-directories numbered 1,2,....
     Within each of these directories another level of sub-directories is created, numbered from

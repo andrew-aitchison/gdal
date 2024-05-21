@@ -355,6 +355,7 @@ class PythonPluginLayer final : public OGRLayer
     void SetSpatialFilter(int iGeomField, OGRGeometry *) override;
 
     OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
+
     OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent, int bForce) override
     {
         return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
@@ -773,6 +774,8 @@ OGRFeature *PythonPluginLayer::TranslateToOGRFeature(PyObject *poObj)
     PyObject *myLongType = PyObject_Type(myLong);
     PyObject *myFloat = PyFloat_FromDouble(1.0);
     PyObject *myFloatType = PyObject_Type(myFloat);
+    PyObject *myStr = PyUnicode_FromString("");
+    PyObject *myStrType = PyObject_Type(myStr);
 
     auto poFields = PyDict_GetItemString(poObj, "fields");
     auto poGeometryFields = PyDict_GetItemString(poObj, "geometry_fields");
@@ -812,17 +815,41 @@ OGRFeature *PythonPluginLayer::TranslateToOGRFeature(PyObject *poObj)
             }
             if (value != Py_None)
             {
-                CPLString osValue = GetString(value);
-                if (ErrOccurredEmitCPLError())
-                {
-                    break;
-                }
                 const int idx = m_poFeatureDefn->GetGeomFieldIndex(osKey);
                 if (idx >= 0)
                 {
                     OGRGeometry *poGeom = nullptr;
-                    OGRGeometryFactory::createFromWkt(osValue.c_str(), nullptr,
-                                                      &poGeom);
+                    if (PyObject_IsInstance(value, myStrType))
+                    {
+                        // WKT
+                        CPLString osValue = GetString(value);
+                        if (ErrOccurredEmitCPLError())
+                        {
+                            break;
+                        }
+                        OGRGeometryFactory::createFromWkt(osValue.c_str(),
+                                                          nullptr, &poGeom);
+                    }
+                    else
+                    {
+                        // WKB (from bytes, bytearray, memoryview)
+                        PyObject *poBytes = PyBytes_FromObject(value);
+                        if (ErrOccurredEmitCPLError())
+                        {
+                            break;
+                        }
+                        char *buffer = nullptr;
+                        size_t length = 0;
+                        PyBytes_AsStringAndSize(poBytes, &buffer, &length);
+                        if (ErrOccurredEmitCPLError())
+                        {
+                            break;
+                        }
+
+                        OGRGeometryFactory::createFromWkb(
+                            buffer, nullptr, &poGeom, length, wkbVariantIso);
+                    }
+
                     if (poGeom)
                     {
                         const auto poGeomFieldDefn =
@@ -919,6 +946,8 @@ OGRFeature *PythonPluginLayer::TranslateToOGRFeature(PyObject *poObj)
     Py_DecRef(myLong);
     Py_DecRef(myFloatType);
     Py_DecRef(myFloat);
+    Py_DecRef(myStr);
+    Py_DecRef(myStrType);
 
     return poFeature;
 }
@@ -1856,7 +1885,7 @@ static void LoadPythonDriver(const char *pszFilename)
             osValue.resize(osValue.size() - 1);
         if (EQUAL(osKey, "NAME"))
         {
-            osPluginName = osValue;
+            osPluginName = std::move(osValue);
         }
         else if (EQUAL(osKey, "SUPPORTED_API_VERSION"))
         {

@@ -82,6 +82,7 @@ class GDALGeoLocDatasetAccessors
 
     GDALDataset *GetBackmapDataset();
     void FlushBackmapCaches();
+
     static void ReleaseBackmapDataset(GDALDataset *)
     {
     }
@@ -289,8 +290,8 @@ bool GDALGeoLocDatasetAccessors::LoadGeoloc(bool bIsRegularGrid)
             GDALRasterBand::FromHandle(m_psTransform->hBand_Y));
     }
 
-    return GDALGeoLoc<GDALGeoLocDatasetAccessors>::LoadGeolocFinish(
-        m_psTransform);
+    GDALGeoLoc<GDALGeoLocDatasetAccessors>::LoadGeolocFinish(m_psTransform);
+    return true;
 }
 
 /*! @endcond */

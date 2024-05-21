@@ -15,10 +15,13 @@ Synopsis
 
 .. code-block::
 
-    gdalinfo [--help-general] [-json] [-mm] [-stats | -approx_stats] [-hist] [-nogcp] [-nomd]
-             [-norat] [-noct] [-nofl] [-checksum] [-proj4]
-             [-listmdd] [-mdd domain|`all`]* [-wkt_format WKT1|WKT2|...]
-             [-sd subdataset] [-oo NAME=VALUE]* [-if format]* datasetname
+    gdalinfo [--help] [--help-general]
+             [-json] [-mm] [-stats | -approx_stats] [-hist]
+             [-nogcp] [-nomd] [-norat] [-noct] [-nofl]
+             [-checksum] [-listmdd] [-mdd <domain>|all]
+             [-proj4] [-wkt_format {WKT1|WKT2|<other_format>}]...
+             [-sd <subdataset>] [-oo <NAME>=<VALUE>]... [-if <format>]...
+             <datasetname>
 
 Description
 -----------
@@ -29,6 +32,8 @@ raster dataset.
 The following command line parameters can appear in any order
 
 .. program:: gdalinfo
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -json
 
@@ -98,18 +103,20 @@ The following command line parameters can appear in any order
 
     Only display the first file of the file list.
 
-.. option:: -wkt_format WKT1|WKT2|WKT2_2015|WKT2_2018
+.. option:: -wkt_format WKT1|WKT2|WKT2_2015|WKT2_2018|WKT2_2019
 
     WKT format used to display the SRS.
     Currently the supported values are:
 
     ``WKT1``
 
-    ``WKT2`` (latest WKT version, currently *WKT2_2018*)
+    ``WKT2`` (latest WKT version, currently *WKT2_2019*)
 
     ``WKT2_2015``
 
-    ``WKT2_2018``
+    ``WKT2_2018`` (deprecated)
+
+    ``WKT2_2019``
 
     .. versionadded:: 3.0.0
 
@@ -123,7 +130,7 @@ The following command line parameters can appear in any order
 
     Report a PROJ.4 string corresponding to the file's coordinate system.
 
-.. option:: -oo <NAME=VALUE>
+.. option:: -oo <NAME>=<VALUE>
 
     Dataset open option (format specific).
 
@@ -190,6 +197,8 @@ Example
     Lower Right (  471440.000, 3720600.000) (117d18'28.50"W, 33d37'35.61"N)
     Center      (  456080.000, 3735960.000) (117d28'27.39"W, 33d45'52.46"N)
     Band 1 Block=512x16 Type=Byte, ColorInterp=Gray
+
+For corner coordinates formatted as decimal degree instead of the above degree, minute, second, inspect the ``wgs84Extent`` member of gdalinfo -json:
 
 Example of JSON output with ``gdalinfo -json byte.tif``
 

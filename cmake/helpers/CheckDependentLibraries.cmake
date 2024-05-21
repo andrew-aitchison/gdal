@@ -53,7 +53,7 @@ function (gdal_check_target_is_valid target res_var)
     # geotiff-config.cmake of GeoTIFF 1.7.0 doesn't define a INTERFACE_INCLUDE_DIRECTORIES
     # property, but a GeoTIFF_INCLUDE_DIRS variable.
     set_target_properties(${target} PROPERTIES
-                          INTERFACE_INCLUDE_DIRECTORIES ${GeoTIFF_INCLUDE_DIRS})
+                          INTERFACE_INCLUDE_DIRECTORIES "${GeoTIFF_INCLUDE_DIRS}")
   else()
      message(WARNING "Target ${target} has no INTERFACE_INCLUDE_DIRECTORIES property. Ignoring that target.")
      set(${res_var} FALSE PARENT_SCOPE)
@@ -89,7 +89,7 @@ endfunction()
 # option. User control is done via a cache variable GDAL_USE_{name in upper case}
 # with the default value ON for CAN_DISABLE or OFF for DISABLED_BY_DEFAULT.
 # The RECOMMENDED option is used for the feature summary.
-# The VERSION, CONFIG, COMPONENTS and NAMES parameters are passed to find_package().
+# The VERSION, CONFIG, MODULE, COMPONENTS and NAMES parameters are passed to find_package().
 # Using NAMES with find_package() implies config mode. However, gdal_check_package()
 # attempts another find_package() without NAMES if the config mode attempt was not
 # successful, allowing a fallback to Find modules.
@@ -100,23 +100,28 @@ endfunction()
 # GDAL_CHECK_PACKAGE_${name}_TARGETS cache variables which can be used to
 # overwrite the default config and targets names.
 # The required find_dependency() commands for exported config are appended to
-# the GDAL_IMPORT_DEPENDENCIES string.
+# the GDAL_IMPORT_DEPENDENCIES string (when BUILD_SHARED_LIBS=OFF).
 macro (gdal_check_package name purpose)
-  set(_options CONFIG CAN_DISABLE RECOMMENDED DISABLED_BY_DEFAULT ALWAYS_ON_WHEN_FOUND)
+  set(_options CONFIG MODULE CAN_DISABLE RECOMMENDED DISABLED_BY_DEFAULT ALWAYS_ON_WHEN_FOUND)
   set(_oneValueArgs VERSION NAMES)
   set(_multiValueArgs COMPONENTS TARGETS PATHS)
   cmake_parse_arguments(_GCP "${_options}" "${_oneValueArgs}" "${_multiValueArgs}" ${ARGN})
   string(TOUPPER ${name} key)
   set(_find_dependency "")
   set(_find_dependency_args "")
-  find_package2(${name} QUIET OUT_DEPENDENCY _find_dependency)
-  if (NOT DEFINED ${key}_FOUND)
+  if(FIND_PACKAGE2_${name}_ENABLED)
+    find_package2(${name} QUIET OUT_DEPENDENCY _find_dependency)
+  else()
     set(_find_package_args)
-    if (_GCP_VERSION)
+    # For some reason passing the HDF5 version requirement cause a linking error of the libkea driver on Conda Windows builds...
+    if (_GCP_VERSION AND NOT ("${name}" STREQUAL "TileDB") AND NOT ("${name}" STREQUAL "HDF5"))
       list(APPEND _find_package_args ${_GCP_VERSION})
     endif ()
     if (_GCP_CONFIG)
       list(APPEND _find_package_args CONFIG)
+    endif ()
+    if (_GCP_MODULE)
+      list(APPEND _find_package_args MODULE)
     endif ()
     if (_GCP_COMPONENTS)
       list(APPEND _find_package_args COMPONENTS ${_GCP_COMPONENTS})
@@ -137,7 +142,7 @@ macro (gdal_check_package name purpose)
       gdal_check_package_target(${name} ${GDAL_CHECK_PACKAGE_${name}_TARGETS} REQUIRED)
       if (${name}_FOUND)
         get_filename_component(_find_dependency_args "${${name}_CONFIG}" NAME)
-        string(REPLACE ";" " " _find_dependency_args "${name} NAMES ${GDAL_CHECK_PACKAGE_${name}_NAMES} CONFIGS ${_find_dependency_args} ${_find_package_args}")
+        string(REPLACE ";" " " _find_dependency_args "${name} ${_find_package_args} NAMES ${GDAL_CHECK_PACKAGE_${name}_NAMES} CONFIGS ${_find_dependency_args}")
       endif ()
     endif ()
     if (NOT ${name}_FOUND)
@@ -154,7 +159,37 @@ macro (gdal_check_package name purpose)
     endif ()
   endif ()
   if (${key}_FOUND OR ${name}_FOUND)
-    set(HAVE_${key} ON)
+    if(_GCP_VERSION)
+
+      if( "${name}" STREQUAL "TileDB" AND NOT DEFINED TileDB_VERSION)
+        get_property(_dirs TARGET TileDB::tiledb_shared PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+        foreach(_dir IN LISTS _dirs)
+          set(TILEDB_VERSION_FILENAME "${_dir}/tiledb/tiledb_version.h")
+          if(EXISTS ${TILEDB_VERSION_FILENAME})
+            file(READ ${TILEDB_VERSION_FILENAME} _tiledb_version_contents)
+            string(REGEX REPLACE "^.*TILEDB_VERSION_MAJOR +([0-9]+).*$" "\\1" TILEDB_VERSION_MAJOR "${_tiledb_version_contents}")
+            string(REGEX REPLACE "^.*TILEDB_VERSION_MINOR +([0-9]+).*$" "\\1" TILEDB_VERSION_MINOR "${_tiledb_version_contents}")
+            set(TileDB_VERSION "${TILEDB_VERSION_MAJOR}.${TILEDB_VERSION_MINOR}")
+          endif()
+        endforeach()
+      endif()
+
+      if (DEFINED ${name}_VERSION_STRING AND NOT DEFINED ${name}_VERSION)
+          set(${name}_VERSION "${${name}_VERSION_STRING}")
+      endif()
+
+      if( "${${name}_VERSION}" STREQUAL "")
+        message(WARNING "${name} has unknown version. Assuming it is at least matching the minimum version required of ${_GCP_VERSION}")
+        set(HAVE_${key} ON)
+      elseif( ${name}_VERSION VERSION_LESS ${_GCP_VERSION})
+        message(WARNING "Ignoring ${name} because it is at version ${${name}_VERSION}, whereas the minimum version required is ${_GCP_VERSION}")
+        set(HAVE_${key} OFF)
+      else()
+        set(HAVE_${key} ON)
+      endif()
+    else()
+      set(HAVE_${key} ON)
+    endif()
   else ()
     set(HAVE_${key} OFF)
   endif ()
@@ -246,7 +281,6 @@ endfunction ()
 # Custom find_package definitions
 
 define_find_package2(Crnlib crunch/crnlib.h crunch)
-define_find_package2(RASDAMAN rasdaman.hh raslib)
 
 if (WIN32)
   gdal_check_package(ODBC "Enable DB support through ODBC" CAN_DISABLE)
@@ -260,7 +294,7 @@ gdal_check_package(MSSQL_ODBC "MSSQL ODBC driver to enable bulk copy" CAN_DISABL
 gdal_check_package(MySQL "MySQL" CAN_DISABLE)
 
 # basic libraries
-gdal_check_package(CURL "Enable drivers to use web API" CAN_DISABLE RECOMMENDED)
+gdal_check_package(CURL "Enable drivers to use web API" CAN_DISABLE RECOMMENDED VERSION 7.68)
 
 gdal_check_package(Iconv "Character set recoding (used in GDAL portability library)" CAN_DISABLE)
 if (Iconv_FOUND)
@@ -344,19 +378,38 @@ if (GDAL_USE_CRYPTOPP)
   option(CRYPTOPP_USE_ONLY_CRYPTODLL_ALG "Use Only cryptoDLL alg. only work on dynamic DLL" OFF)
 endif ()
 
-# First check with CMake config files (starting at version 8, due to issues with earlier ones), and then fallback to the FindPROJ module.
-find_package(PROJ 9 CONFIG QUIET)
-if (NOT PROJ_FOUND)
-  find_package(PROJ 8 CONFIG QUIET)
-endif()
-if (PROJ_FOUND)
-  string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(PROJ ${PROJ_VERSION_MAJOR} CONFIG)\n")
+set(GDAL_FIND_PACKAGE_PROJ_MODE "CUSTOM" CACHE STRING "Mode to use for find_package(PROJ): CUSTOM, CONFIG, MODULE or empty string")
+set_property(CACHE GDAL_FIND_PACKAGE_PROJ_MODE PROPERTY STRINGS "CUSTOM" "CONFIG" "MODULE" "")
+if(NOT GDAL_FIND_PACKAGE_PROJ_MODE STREQUAL "CUSTOM")
+    find_package(PROJ ${GDAL_FIND_PACKAGE_PROJ_MODE} REQUIRED)
+    if (NOT BUILD_SHARED_LIBS)
+        string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(PROJ ${GDAL_FIND_PACKAGE_PROJ_MODE})\n")
+    endif()
 else()
-  find_package(PROJ 6.0 REQUIRED)
-  string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(PROJ 6.0)\n")
-endif ()
+    # First check with CMake config files, and then fallback to the FindPROJ module.
+    find_package(PROJ CONFIG)
+    if (PROJ_FOUND AND PROJ_VERSION VERSION_LESS "8")
+        message(WARNING "PROJ ${PROJ_VERSION} < 8 found with Config file. As it is not trusted, retrying with module mode")
+    endif()
+    if (PROJ_FOUND)
+      if (NOT BUILD_SHARED_LIBS)
+        string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(PROJ CONFIG)\n")
+      endif()
+    else()
+      find_package(PROJ REQUIRED)
+      if (NOT BUILD_SHARED_LIBS)
+        string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(PROJ)\n")
+      endif()
+    endif ()
+endif()
+if (DEFINED PROJ_VERSION_STRING AND NOT DEFINED PROJ_VERSION)
+    set(PROJ_VERSION ${PROJ_VERSION_STRING})
+endif()
+if ("${PROJ_VERSION}" VERSION_LESS "6.3")
+    message(FATAL_ERROR "PROJ >= 6.3 required. Version ${PROJ_VERSION} found")
+endif()
 
-gdal_check_package(TIFF "Support for the Tag Image File Format (TIFF)." VERSION 4.0 CAN_DISABLE)
+gdal_check_package(TIFF "Support for the Tag Image File Format (TIFF)." VERSION 4.1 CAN_DISABLE)
 set_package_properties(
   TIFF PROPERTIES
   URL "https://libtiff.gitlab.io/libtiff/"
@@ -383,7 +436,7 @@ gdal_check_package(GeoTIFF "libgeotiff library (external)" CAN_DISABLE RECOMMEND
 )
 gdal_internal_library(GEOTIFF REQUIRED)
 
-gdal_check_package(PNG "PNG compression library (external)" CAN_DISABLE RECOMMENDED)
+gdal_check_package(PNG "PNG compression library (external)" CAN_DISABLE RECOMMENDED VERSION "1.6")
 gdal_internal_library(PNG)
 
 gdal_check_package(JPEG "JPEG compression library (external)" CAN_DISABLE RECOMMENDED)
@@ -393,7 +446,7 @@ if (GDAL_USE_JPEG AND (JPEG_LIBRARY MATCHES ".*turbojpeg\.(so|lib)"))
       "JPEG_LIBRARY should point to a library with libjpeg ABI, not TurboJPEG. See https://libjpeg-turbo.org/About/TurboJPEG for the difference"
     )
 endif ()
-if (TARGET JPEG::JPEG)
+if (GDAL_USE_JPEG AND TARGET JPEG::JPEG)
   set(EXPECTED_JPEG_LIB_VERSION "" CACHE STRING "Expected libjpeg version number")
   mark_as_advanced(GDAL_CHECK_PACKAGE_${name}_NAMES)
   if (EXPECTED_JPEG_LIB_VERSION)
@@ -502,23 +555,11 @@ if (NOT GDAL_USE_PCRE2)
 endif ()
 
 gdal_check_package(SQLite3 "Enable SQLite3 support (used by SQLite/Spatialite, GPKG, Rasterlite, MBTiles, etc.)"
-                   CAN_DISABLE RECOMMENDED)
+                   CAN_DISABLE RECOMMENDED
+                   VERSION 3.31)
 if (SQLite3_FOUND)
   if (NOT DEFINED SQLite3_HAS_COLUMN_METADATA)
     message(FATAL_ERROR "missing SQLite3_HAS_COLUMN_METADATA")
-  endif ()
-  if (NOT DEFINED SQLite3_HAS_RTREE)
-    message(FATAL_ERROR "missing SQLite3_HAS_RTREE")
-  endif ()
-  if (GDAL_USE_SQLITE3 AND NOT SQLite3_HAS_RTREE)
-    if (NOT ACCEPT_MISSING_SQLITE3_RTREE)
-      message(
-        FATAL_ERROR
-          "${SQLite3_LIBRARIES} lacks the RTree extension! Spatialite and GPKG will not behave properly. Define the ACCEPT_MISSING_SQLITE3_RTREE:BOOL=ON CMake variable if you want to build despite this limitation."
-        )
-    else ()
-      message(WARNING "${SQLite3_LIBRARIES} lacks the RTree extension! Spatialite and GPKG will not behave properly.")
-    endif ()
   endif ()
   if (NOT DEFINED SQLite3_HAS_MUTEX_ALLOC)
     message(FATAL_ERROR "missing SQLite3_HAS_MUTEX_ALLOC")
@@ -535,39 +576,38 @@ if (SQLite3_FOUND)
   endif ()
 endif ()
 
-gdal_check_package(SPATIALITE "Enable spatialite support for sqlite3" CAN_DISABLE)
-gdal_check_package(RASTERLITE2 "Enable RasterLite2 support for sqlite3" CAN_DISABLE)
-
-set(HAVE_RASTERLITE2 ${RASTERLITE2_FOUND})
-if (RASTERLITE2_FOUND AND NOT RASTERLITE2_VERSION_STRING STREQUAL "unknown")
-  if (NOT RASTERLITE2_VERSION_STRING VERSION_GREATER_EQUAL 1.1.0)
-    message(STATUS "Rasterlite2 requires version 1.1.0 and later, detected: ${RASTERLITE2_VERSION_STRING}")
-    message(STATUS "Turn off rasterlite2 support")
-    set(HAVE_RASTERLITE2
-        OFF
-        CACHE INTERNAL "HAVE_RASTERLITE2")
+# Checks that SQLite3 has RTree support
+# Called by ogr/ogrsf_frmts/sqlite/CMakeLists.txt and ogr/ogrsf_frmts/gpkg/CMakeLists.txt
+function (check_sqlite3_rtree driver_name)
+  if (NOT DEFINED SQLite3_HAS_RTREE)
+    message(FATAL_ERROR "missing SQLite3_HAS_RTREE")
   endif ()
-endif ()
-if (GDAL_USE_RASTERLITE2)
-  if (NOT HAVE_RASTERLITE2)
-    message(FATAL_ERROR "Configured to use GDAL_USE_RASTERLITE2, but not found")
+  if (GDAL_USE_SQLITE3 AND NOT SQLite3_HAS_RTREE)
+    if (NOT ACCEPT_MISSING_SQLITE3_RTREE)
+      message(
+        FATAL_ERROR
+          "${SQLite3_LIBRARIES} lacks the RTree extension! ${driver_name} will not behave properly. Define the ACCEPT_MISSING_SQLITE3_RTREE:BOOL=ON CMake variable if you want to build despite this limitation."
+        )
+    else ()
+      message(WARNING "${SQLite3_LIBRARIES} lacks the RTree extension! ${driver_name} will not behave properly.")
+    endif ()
   endif ()
-endif ()
-cmake_dependent_option(GDAL_USE_RASTERLITE2 "Set ON to use Rasterlite2" ON HAVE_RASTERLITE2 OFF)
+endfunction()
 
-find_package(LibKML COMPONENTS DOM ENGINE)
-if (GDAL_USE_LIBKML)
-  if (NOT LibKML_FOUND)
-    message(FATAL_ERROR "Configured to use GDAL_USE_LIBKML, but not found")
-  endif ()
-endif ()
-cmake_dependent_option(GDAL_USE_LIBKML "Set ON to use LibKML" ON LibKML_FOUND OFF)
-if (GDAL_USE_LIBKML)
-  string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(LibKML COMPONENTS DOM ENGINE)\n")
-endif ()
+gdal_check_package(SPATIALITE "Enable spatialite support for sqlite3" VERSION 4.1.2 CAN_DISABLE)
+gdal_check_package(RASTERLITE2 "Enable RasterLite2 support for sqlite3" VERSION 1.1.0 CAN_DISABLE)
 
-# CXX is only needed for KEA driver
-gdal_check_package(HDF5 "Enable HDF5" COMPONENTS "C" "CXX" CAN_DISABLE)
+gdal_check_package(LibKML "Use LIBKML library" COMPONENTS DOM ENGINE CAN_DISABLE)
+
+define_find_package2(KEA libkea/KEACommon.h kea;libkea)
+gdal_check_package(KEA "Enable KEA driver" CAN_DISABLE)
+
+if(HAVE_KEA)
+    # CXX is only needed for KEA driver
+    gdal_check_package(HDF5 "Enable HDF5" COMPONENTS "C" "CXX" CAN_DISABLE VERSION 1.10)
+else()
+    gdal_check_package(HDF5 "Enable HDF5" COMPONENTS "C" CAN_DISABLE VERSION 1.10)
+endif()
 
 gdal_check_package(WebP "WebP compression" CAN_DISABLE)
 gdal_check_package(FreeXL "Enable XLS driver" CAN_DISABLE)
@@ -668,21 +708,19 @@ define_find_package2(CFITSIO fitsio.h cfitsio PKGCONFIG_NAME cfitsio)
 gdal_check_package(CFITSIO "C FITS I/O library" CAN_DISABLE)
 
 gdal_check_package(GEOS "Geometry Engine - Open Source (GDAL core dependency)" RECOMMENDED CAN_DISABLE
+  VERSION 3.8
   NAMES GEOS
   TARGETS GEOS::geos_c GEOS::GEOS
 )
 gdal_check_package(HDF4 "Enable HDF4 driver" CAN_DISABLE)
 
-define_find_package2(KEA libkea/KEACommon.h kea;libkea)
-gdal_check_package(KEA "Enable KEA driver" CAN_DISABLE)
-
 gdal_check_package(ECW "Enable ECW driver" CAN_DISABLE)
 gdal_check_package(NetCDF "Enable netCDF driver" CAN_DISABLE
   NAMES netCDF
-  TARGETS netCDF::netcdf NETCDF::netCDF)
+  TARGETS netCDF::netcdf NETCDF::netCDF
+  VERSION "4.7")
 gdal_check_package(OGDI "Enable ogr_OGDI driver" CAN_DISABLE)
-# OpenCL warping gives different results than the ones expected by autotest, so disable it by default even if found.
-gdal_check_package(OpenCL "Enable OpenCL (may be used for warping)" DISABLED_BY_DEFAULT)
+gdal_check_package(OpenCL "Enable OpenCL (may be used for warping)" CAN_DISABLE)
 
 set(PostgreSQL_ADDITIONAL_VERSIONS "14" CACHE STRING "Additional PostgreSQL versions to check")
 gdal_check_package(PostgreSQL "" CAN_DISABLE)
@@ -696,6 +734,12 @@ gdal_check_package(LibLZMA "LZMA compression" CAN_DISABLE)
 gdal_check_package(LZ4 "LZ4 compression" CAN_DISABLE)
 gdal_check_package(Blosc "Blosc compression" CAN_DISABLE)
 
+define_find_package2(ARCHIVE archive.h archive)
+gdal_check_package(ARCHIVE "Multi-format archive and compression library library (used for /vsi7z/" CAN_DISABLE)
+
+define_find_package2(LIBAEC libaec.h aec)
+gdal_check_package(LIBAEC "Adaptive Entropy Coding implementing Golomb-Rice algorithm (used by GRIB)" CAN_DISABLE)
+
 define_find_package2(JXL jxl/decode.h jxl PKGCONFIG_NAME libjxl)
 gdal_check_package(JXL "JPEG-XL compression" CAN_DISABLE)
 
@@ -706,32 +750,30 @@ gdal_check_package(JXL_THREADS "JPEG-XL threading" CAN_DISABLE)
 gdal_check_package(Crnlib "enable gdal_DDS driver" CAN_DISABLE)
 gdal_check_package(basisu "Enable BASISU driver" CONFIG CAN_DISABLE)
 gdal_check_package(IDB "enable ogr_IDB driver" CAN_DISABLE)
-# TODO: implement FindRASDAMAN libs: -lrasodmg -lclientcomm -lcompression -lnetwork -lraslib
-gdal_check_package(RASDAMAN "enable rasdaman driver" CAN_DISABLE)
 gdal_check_package(rdb "enable RIEGL RDB library" CONFIG CAN_DISABLE)
-gdal_check_package(TileDB "enable TileDB driver" CONFIG CAN_DISABLE)
+gdal_check_package(TileDB "enable TileDB driver" CONFIG CAN_DISABLE VERSION "2.15")
+
 gdal_check_package(OpenEXR "OpenEXR >=2.2" CAN_DISABLE)
 gdal_check_package(MONGOCXX "Enable MongoDBV3 driver" CAN_DISABLE)
 
 define_find_package2(HEIF libheif/heif.h heif PKGCONFIG_NAME libheif)
 gdal_check_package(HEIF "HEIF >= 1.1" CAN_DISABLE)
 
-# OpenJPEG's cmake-CONFIG is broken, so call module explicitly
-find_package(OpenJPEG MODULE)
-if (GDAL_USE_OPENJPEG)
-  if (NOT OPENJPEG_FOUND)
-    message(FATAL_ERROR "Configured to use GDAL_USE_OPENJPEG, but not found")
-  endif ()
-endif ()
-cmake_dependent_option(GDAL_USE_OPENJPEG "Set ON to use openjpeg" ON OPENJPEG_FOUND OFF)
-if (GDAL_USE_OPENJPEG)
-  string(APPEND GDAL_IMPORT_DEPENDENCIES "find_dependency(OpenJPEG MODULE)\n")
-endif ()
+# OpenJPEG's cmake-CONFIG is broken with older OpenJPEG releases, so call module explicitly
+set(GDAL_FIND_PACKAGE_OpenJPEG_MODE "MODULE" CACHE STRING "Mode to use for find_package(OpenJPEG): CONFIG, MODULE or empty string")
+set_property(CACHE GDAL_FIND_PACKAGE_OpenJPEG_MODE PROPERTY STRINGS "CONFIG" "MODULE" "")
+# "openjp2" target name is for the one coming from the OpenJPEG CMake configuration
+# "OPENJPEG::OpenJPEG" is the one used by cmake/modules/packages/FindOpenJPEG.cmake
+gdal_check_package(OpenJPEG "Enable JPEG2000 support with OpenJPEG library"
+                   ${GDAL_FIND_PACKAGE_OpenJPEG_MODE}
+                   CAN_DISABLE
+                   TARGETS "openjp2;OPENJPEG::OpenJPEG"
+                   VERSION "2.3.1")
 
 gdal_check_package(HDFS "Enable Hadoop File System through native library" CAN_DISABLE)
 
 # PDF library: one of them enables the read side of the PDF driver
-gdal_check_package(Poppler "Enable PDF driver with Poppler (read side)" CAN_DISABLE)
+gdal_check_package(Poppler "Enable PDF driver with Poppler (read side)" CAN_DISABLE VERSION 0.86)
 
 define_find_package2(PDFIUM public/fpdfview.h pdfium FIND_PATH_SUFFIX pdfium)
 gdal_check_package(PDFIUM "Enable PDF driver with Pdfium (read side)" CAN_DISABLE)
@@ -758,16 +800,11 @@ if (Arrow_FOUND)
     if (Parquet_FOUND AND NOT ArrowDataset_FOUND)
         message(WARNING "Parquet library found, but not ArrowDataset: partitioned datasets will not be supported")
     endif()
+    option(ARROW_USE_STATIC_LIBRARIES "Use statically built Arrow libraries" OFF)
+    mark_as_advanced(ARROW_USE_STATIC_LIBRARIES)
 endif()
 
 # bindings
-gdal_check_package(SWIG "Enable language bindings" ALWAYS_ON_WHEN_FOUND)
-set_package_properties(
-  SWIG PROPERTIES
-  DESCRIPTION
-    "software development tool that connects programs written in C and C++ with a variety of high-level programming languages."
-  URL "http://swig.org/"
-  TYPE RECOMMENDED)
 
 # finding python in top of project because of common for autotest and bindings
 

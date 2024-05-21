@@ -1,5 +1,5 @@
 # CMake4GDAL project is distributed under MIT license. See accompanying file LICENSE.txt.
-cmake_minimum_required(VERSION 3.9...3.23)
+cmake_minimum_required(VERSION 3.16...3.28)
 
 project(gdal LANGUAGES C CXX)
 include(CTest)
@@ -38,7 +38,7 @@ define_property(
 #
 # check compiler and set preferences.
 if (NOT CMAKE_CXX_STANDARD)
-    set(CMAKE_CXX_STANDARD 11)
+    set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
@@ -159,42 +159,46 @@ endif ()
 #   4. If nothing specified, use default behavior.
 #
 # for example
-#   $ cmake -DPython_LOOKUP_VERSION=3.6.0 ..
+#   $ cmake -DPython_LOOKUP_VERSION=3.8.0 ..
 #   $ cmake -DPython_FIND_VIRTUALENV=ONLY ..
-#   $ cmake -DPython_ROOT=C:\Python36 ..
+#   $ cmake -DPython_ROOT=C:\Python38 ..
 # ~~~
 #
 include(FeatureSummary)
-option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
-if (BUILD_PYTHON_BINDINGS)
-  if (Python_LOOKUP_VERSION)
+
+find_package(SWIG)
+set_package_properties(
+  SWIG PROPERTIES
+  DESCRIPTION
+    "Software development tool that connects programs written in C and C++ with a variety of high-level programming languages."
+  URL "http://swig.org/"
+  TYPE RECOMMENDED)
+
+# Workaround Intel MKL library outputting a message in stdout, which cause
+# incorrect detection of numpy.get_include() and numpy.__version__
+# See https://github.com/numpy/numpy/issues/23775
+# Fix also proposed to upstream CMake FindPython per
+# https://gitlab.kitware.com/cmake/cmake/-/merge_requests/9359/
+if(DEFINED ENV{MKL_ENABLE_INSTRUCTIONS})
+  set(BACKUP_ENV_VAR_MKL_ENABLE_INSTRUCTIONS ENV{MKL_ENABLE_INSTRUCTIONS})
+endif()
+set(ENV{MKL_ENABLE_INSTRUCTIONS} "SSE4_2")
+
+if (Python_LOOKUP_VERSION)
     set(Python_FIND_STRATEGY VERSION)
     find_package(Python ${Python_LOOKUP_VERSION} EXACT COMPONENTS Interpreter Development NumPy)
-  else ()
+else ()
     set(Python_FIND_STRATEGY LOCATION)
-    find_package(Python 3.6 COMPONENTS Interpreter Development NumPy)
-  endif ()
+    find_package(Python 3.8 COMPONENTS Interpreter Development NumPy)
 endif ()
 set_package_properties(Python PROPERTIES PURPOSE "SWIG_PYTHON: Python binding")
 
-if (NOT Python_FOUND AND ${CMAKE_VERSION} VERSION_LESS "3.12.0")
-  # On Ubuntu 18.04 with Python 3.6, the backported FindPython package we have in cmake/modules/3.16 doesn't manage to
-  # find automatically Python (we can make it work by manually setting -DPython_LOOKUP_VERSION=3.6.9
-  # -DPython_LIBRARY=/usr/lib/x86_64-linux-gnu/libpython3.6m.so
-  # -DPython_NumPy_INCLUDE_DIR=/usr/lib/python3/dist-packages/numpy/core/include/numpy ) but this is a bit painful. So
-  # use the deprecated method (since CMake 3.12), which works out of the box in that situation.
-  find_package(PythonInterp)
-  find_package(PythonLibs)
-  if (PYTHONINTERP_FOUND AND "${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}" VERSION_LESS "3.6")
-    set(PYTHONINTERP_FOUND FALSE)
-    set(PYTHONLIBS_FOUND FALSE)
-  endif()
-  if (PYTHONINTERP_FOUND)
-    set(Python_Interpreter_FOUND TRUE)
-    set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
-    set(Python_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
-    set(Python_VERSION_MINOR ${PYTHON_VERSION_MINOR})
-
+if (Python_Interpreter_FOUND)
+  file(
+    GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/python_executable.txt"
+    CONTENT "${Python_EXECUTABLE}")
+  if(NOT Python_NumPy_FOUND)
     # Detect numpy
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/get_numpy.py
          "try:\n  import numpy\n  print(numpy.get_include())\nexcept:\n  pass\n")
@@ -206,18 +210,30 @@ if (NOT Python_FOUND AND ${CMAKE_VERSION} VERSION_LESS "3.12.0")
       set(Python_NumPy_FOUND TRUE)
       set(Python_NumPy_INCLUDE_DIRS ${Python_NumPy_INCLUDE_DIRS})
     endif ()
-  endif ()
-  if (PYTHONLIBS_FOUND)
-    set(Python_Development_FOUND TRUE)
-    set(Python_LIBRARIES ${PYTHON_LIBRARIES})
-    set(Python_INCLUDE_DIRS ${PYTHON_INCLUDE_DIRS})
-  endif ()
-endif ()
-if (Python_Interpreter_FOUND)
-  file(
-    GENERATE
-    OUTPUT "python_executable.txt"
-    CONTENT "${Python_EXECUTABLE}")
+  endif()
+endif()
+
+# Restore previous value of MKL_ENABLE_INSTRUCTIONS
+if(DEFINED BACKUP_ENV_VAR_MKL_ENABLE_INSTRUCTIONS)
+  set(ENV{MKL_ENABLE_INSTRUCTIONS} ${BACKUP_ENV_VAR_MKL_ENABLE_INSTRUCTIONS})
+else()
+  unset(ENV{MKL_ENABLE_INSTRUCTIONS})
+endif()
+
+
+if (SWIG_FOUND AND (Python_Interpreter_FOUND OR Python_FOUND))
+  option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
+else()
+  option(BUILD_PYTHON_BINDINGS "Build Python bindings" OFF)
+endif()
+
+if (BUILD_PYTHON_BINDINGS)
+    if (NOT (Python_Interpreter_FOUND OR Python_FOUND))
+      message(FATAL_ERROR "Python is a requirement to build the Python bindings")
+    endif()
+    if (NOT SWIG_FOUND)
+        message(FATAL_ERROR "SWIG is a requirement to build the Python bindings")
+    endif()
 endif()
 
 #
@@ -226,13 +242,18 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/gdal.cmake)
 if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/autotest")
   # unit tests
   add_subdirectory(autotest/cpp)
-  add_subdirectory(autotest)
+  if(BUILD_PYTHON_BINDINGS)
+      add_subdirectory(autotest)
+  endif()
 endif ()
-# Google OSS-Fuzz project utilities
-add_subdirectory(fuzzers)
-if (BUILD_TESTING)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fuzzers")
+    # Google OSS-Fuzz project utilities
+    add_subdirectory(fuzzers)
+    if (BUILD_TESTING)
+        add_subdirectory(fuzzers/tests)
+    endif()
+endif()
+if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/perftests")
   add_subdirectory(perftests)
-  # Google OSS-Fuzz tests
-  add_subdirectory(fuzzers/tests)
 endif ()
 # vim: ts=4 sw=4 sts=4 et

@@ -363,6 +363,10 @@ public:
     return OSRIsProjected(self);
   }
 
+  int IsDerivedProjected() {
+    return OSRIsDerivedProjected(self);
+  }
+
   int IsCompound() {
     return OSRIsCompound(self);
   }
@@ -381,6 +385,10 @@ public:
 
   bool IsDynamic() {
     return OSRIsDynamic(self);
+  }
+
+  bool HasPointMotionOperation() {
+    return OSRHasPointMotionOperation(self);
   }
 
   double GetCoordinateEpoch() {
@@ -923,9 +931,21 @@ public:
     return OSRSetWellKnownGeogCS( self, name );
   }
 
-  OGRErr SetFromUserInput( const char *name ) {
-    return OSRSetFromUserInput( self, name );
+#ifdef SWIGCSHARP
+  OGRErr SetFromUserInput( const char *name) {
+    return OSRSetFromUserInputEx( self, name, NULL );
   }
+  OGRErr SetFromUserInput( const char *name, char** options ) {
+    return OSRSetFromUserInputEx( self, name, options );
+  }
+#else
+#ifndef SWIGJAVA
+  %feature( "kwargs" ) SetFromUserInput;
+#endif
+  OGRErr SetFromUserInput( const char *name, char** options = NULL ) {
+    return OSRSetFromUserInputEx( self, name, options );
+  }
+#endif
 
   OGRErr CopyGeogCSFrom( OSRSpatialReferenceShadow *rhs ) {
     return OSRCopyGeogCSFrom( self, rhs );
@@ -1056,6 +1076,13 @@ public:
     return OSRImportFromOzi( self, papszLines );
   }
 
+%apply Pointer NONNULL {const char* const *keyValues};
+%apply (char **options) { char ** keyValues };
+  OGRErr ImportFromCF1( char** keyValues, const char* units = NULL) {
+      return OSRImportFromCF1(self, keyValues, units);
+  }
+%clear (char **);
+
   OGRErr ExportToWkt( char **argout, char **options = NULL ) {
     return OSRExportToWktEx( self, argout, options );
   }
@@ -1088,6 +1115,17 @@ public:
 %clear (long*);
 %clear (double *params[15]);
 
+%apply (char **argout) { (char **) };
+  OGRErr ExportToERM( char **proj, char** datum, char **units ) {
+    char szProj[32] = {0}, szDatum[32] = {0}, szUnits[32] = {0};
+    OGRErr ret = OSRExportToERM( self, szProj, szDatum, szUnits );
+    *proj = CPLStrdup(szProj);
+    *datum = CPLStrdup(szDatum);
+    *units = CPLStrdup(szUnits);
+    return ret;
+  }
+%clear (char **);
+
   OGRErr ExportToXML( char **argout, const char *dialect = "" ) {
     return OSRExportToXML( self, argout, dialect );
   }
@@ -1095,6 +1133,26 @@ public:
   OGRErr ExportToMICoordSys( char **argout ) {
     return OSRExportToMICoordSys( self, argout );
   }
+
+#if defined(SWIGPYTHON) || defined(SWIGJAVA)
+%apply (char **dictAndCSLDestroy) { char ** };
+#else
+// We'd also need a dictAndCSLDestroy for other languages!
+%apply (char **) { char ** };
+#endif
+%apply (char **options) { char **options };
+  char** ExportToCF1( char **options = NULL ) {
+    char** ret = NULL;
+    OSRExportToCF1(self, NULL, &ret, NULL, options);
+    return ret;
+  }
+%clear char **;
+
+ retStringAndCPLFree* ExportToCF1Units( char **options = NULL ) {
+    char* units = NULL;
+    OSRExportToCF1(self, NULL, NULL, &units, options);
+    return units;
+ }
 
 %newobject CloneGeogCS;
   OSRSpatialReferenceShadow *CloneGeogCS() {
@@ -1182,12 +1240,15 @@ public:
   bool SetBallparkAllowed(bool allowBallpark) {
     return OCTCoordinateTransformationOptionsSetBallparkAllowed(self, allowBallpark);
   }
+
+  bool SetOnlyBest(bool onlyBest) {
+    return OCTCoordinateTransformationOptionsSetOnlyBest(self, onlyBest);
+  }
 } /*extend */
 };
 
 // NEEDED
 // Custom python __init__ which takes a tuple.
-// TransformPoints which takes list of 3-tuples
 
 %rename (CoordinateTransformation) OSRCoordinateTransformationShadow;
 class OSRCoordinateTransformationShadow {
@@ -1222,7 +1283,11 @@ public:
 %apply (double argout[ANY]) {(double inout[3])};
 %apply (double argin[ANY]) {(double inout[3])};
 #endif
+#if SWIGPYTHON
+  void _TransformPoint3Double( double inout[3] ) {
+#else
   void TransformPoint( double inout[3] ) {
+#endif
     if (self == NULL)
         return;
     OCTTransform( self, 1, &inout[0], &inout[1], &inout[2] );
@@ -1235,7 +1300,11 @@ public:
 %apply (double argout[ANY]) {(double inout[4])};
 %apply (double argin[ANY]) {(double inout[4])};
 #endif
+#if SWIGPYTHON
+  void _TransformPoint4Double( double inout[4] ) {
+#else
   void TransformPoint( double inout[4] ) {
+#endif
     if (self == NULL)
         return;
     OCTTransform4D( self, 1, &inout[0], &inout[1], &inout[2], &inout[3], NULL );

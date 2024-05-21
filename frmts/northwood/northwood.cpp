@@ -184,22 +184,23 @@ int nwt_ParseHeader(NWT_GRID *pGrd, const unsigned char *nwtHeader)
         }
         CPL_LSBPTR16(&usTmp);
         pGrd->stClassDict = reinterpret_cast<NWT_CLASSIFIED_DICT *>(
-            calloc(sizeof(NWT_CLASSIFIED_DICT), 1));
+            calloc(1, sizeof(NWT_CLASSIFIED_DICT)));
 
         pGrd->stClassDict->nNumClassifiedItems = usTmp;
 
         pGrd->stClassDict->stClassifiedItem =
             reinterpret_cast<NWT_CLASSIFIED_ITEM **>(
-                calloc(sizeof(NWT_CLASSIFIED_ITEM *),
-                       pGrd->stClassDict->nNumClassifiedItems + 1));
+                calloc(pGrd->stClassDict->nNumClassifiedItems + 1,
+                       sizeof(NWT_CLASSIFIED_ITEM *)));
 
         // load the dictionary
-        for (usTmp = 0; usTmp < pGrd->stClassDict->nNumClassifiedItems; usTmp++)
+        for (unsigned int iItem = 0;
+             iItem < pGrd->stClassDict->nNumClassifiedItems; iItem++)
         {
             NWT_CLASSIFIED_ITEM *psItem =
-                pGrd->stClassDict->stClassifiedItem[usTmp] =
+                pGrd->stClassDict->stClassifiedItem[iItem] =
                     reinterpret_cast<NWT_CLASSIFIED_ITEM *>(
-                        calloc(sizeof(NWT_CLASSIFIED_ITEM), 1));
+                        calloc(1, sizeof(NWT_CLASSIFIED_ITEM)));
 
             unsigned char cTmp[256];
             if (!VSIFReadL(&cTmp, 9, 1, pGrd->fp))
@@ -423,7 +424,7 @@ NWT_GRID *nwtOpenGrid(char *filename)
         nwtHeader[3] != 'C')
         return nullptr;
 
-    NWT_GRID *pGrd = reinterpret_cast<NWT_GRID *>(calloc(sizeof(NWT_GRID), 1));
+    NWT_GRID *pGrd = reinterpret_cast<NWT_GRID *>(calloc(1, sizeof(NWT_GRID)));
 
     if (nwtHeader[4] == '1')
         pGrd->cFormat = 0x00;  // grd - surface type
@@ -452,10 +453,10 @@ void nwtCloseGrid(NWT_GRID *pGrd)
     if ((pGrd->cFormat & 0x80) &&
         pGrd->stClassDict)  // if is GRC - free the Dictionary
     {
-        for (unsigned short usTmp = 0;
-             usTmp < pGrd->stClassDict->nNumClassifiedItems; usTmp++)
+        for (unsigned int i = 0; i < pGrd->stClassDict->nNumClassifiedItems;
+             i++)
         {
-            free(pGrd->stClassDict->stClassifiedItem[usTmp]);
+            free(pGrd->stClassDict->stClassifiedItem[i]);
         }
         free(pGrd->stClassDict->stClassifiedItem);
         free(pGrd->stClassDict);

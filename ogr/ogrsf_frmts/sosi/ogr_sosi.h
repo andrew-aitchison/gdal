@@ -40,8 +40,8 @@
 /* interpolation of arcs(BUEP) creates # points for a full circle */
 #define ARC_INTERPOLATION_FULL_CIRCLE 36.0
 
-typedef std::map<CPLString, CPLString> S2S;
-typedef std::map<CPLString, unsigned int> S2I;
+typedef std::map<std::string, std::string> S2S;
+typedef std::map<std::string, unsigned int> S2I;
 
 void RegisterOGRSOSI();
 
@@ -77,8 +77,8 @@ class OGRSOSILayer final : public OGRLayer
     OGRFeature *GetNextFeature() override;
     OGRFeatureDefn *GetLayerDefn() override;
 #ifdef WRITE_SUPPORT
-    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK = TRUE);
-    OGRErr ICreateFeature(OGRFeature *poFeature);
+    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK = TRUE) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
 #endif
     int TestCapability(const char *) override;
 };
@@ -131,16 +131,18 @@ class OGRSOSIDataSource final : public OGRDataSource
     {
         return pszName;
     }
+
     int GetLayerCount() override
     {
         return nLayers;
     }
+
     OGRLayer *GetLayer(int) override;
 #ifdef WRITE_SUPPORT
     OGRLayer *ICreateLayer(const char *pszName,
-                           OGRSpatialReference *poSpatialRef = NULL,
+                           const OGRSpatialReference *poSpatialRef = NULL,
                            OGRwkbGeometryType eGType = wkbUnknown,
-                           char **papszOptions = NULL);
+                           char **papszOptions = NULL) override;
 #endif
     int TestCapability(const char *) override;
 };
@@ -162,10 +164,12 @@ class OGRSOSISimpleDataType
     ~OGRSOSISimpleDataType();
 
     void setType(const char *pszName, OGRFieldType nType);
+
     const char *GetName() const
     {
         return osName.c_str();
     }
+
     OGRFieldType GetType() const
     {
         return nType;
@@ -174,8 +178,8 @@ class OGRSOSISimpleDataType
 
 class OGRSOSIDataType
 {
-    OGRSOSISimpleDataType *poElements;
-    int nElementCount;
+    OGRSOSISimpleDataType *poElements = nullptr;
+    int nElementCount = 0;
 
     OGRSOSIDataType &operator=(const OGRSOSIDataType &) = delete;
 
@@ -200,10 +204,12 @@ class OGRSOSIDataType
     ~OGRSOSIDataType();
 
     void setElement(int nIndex, const char *name, OGRFieldType type);
+
     OGRSOSISimpleDataType *getElements()
     {
         return poElements;
     }
+
     int getElementCount()
     {
         return nElementCount;

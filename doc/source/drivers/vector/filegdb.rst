@@ -32,7 +32,7 @@ Curve in geometries are supported on reading with GDAL >= 2.2.
 Bulk feature loading
 --------------------
 
-The :decl_configoption:`FGDB_BULK_LOAD` configuration option can be set to YES to speed-up
+The :config:`FGDB_BULK_LOAD` configuration option can be set to YES to speed-up
 feature insertion (or sometimes solve problems when inserting a lot of
 features (see http://trac.osgeo.org/gdal/ticket/4420). The effect of
 this configuration option is to cause a write lock to be taken and a
@@ -114,6 +114,7 @@ specified by the user. Starting with GDAL 2.1, the FileGDB driver
 implements a special FID remapping technique to enable the user to
 create features at the FID of their choice.
 
+
 Dataset Creation Options
 ------------------------
 
@@ -122,29 +123,58 @@ None.
 Layer Creation Options
 ----------------------
 
--  **FEATURE_DATASET**: When this option is set, the new layer will be
-   created inside the named FeatureDataset folder. If the folder does
-   not already exist, it will be created.
--  **LAYER_ALIAS**\ =string: (GDAL >=2.3) Set layer name alias.
--  **GEOMETRY_NAME**: Set name of geometry column in new layer. Defaults
-   to "SHAPE".
--  **GEOMETRY_NULLABLE**: (GDAL >=2.0) Whether the values of the
-   geometry column can be NULL. Can be set to NO so that geometry is
-   required. Default to "YES"
--  **FID**: Name of the OID column to create. Defaults to "OBJECTID".
-   Note: option was called OID_NAME in releases before GDAL 2
--  **XYTOLERANCE, ZTOLERANCE, MTOLERANCE**: These parameters control the snapping
-   tolerance used for advanced ArcGIS features like network and topology
-   rules. They won't effect any OGR operations, but they will by used by
-   ArcGIS. The units of the parameters are the units of the coordinate
-   reference system.
+|about-layer-creation-options|
+The following layer creation options are supported:
 
-   ArcMap 10.0 and OGR defaults for XYTOLERANCE are 0.001m (or
-   equivalent) for projected coordinate systems, and 0.000000008983153°
-   for geographic coordinate systems.
-   ArcMap 10.0 and OGR defaults for ZTOLERANCE and MTOLERANCE are 0.0001.
+-  .. lco:: FEATURE_DATASET
 
-   ..  note:: MTOLERANCE added in GDAL 3.5.1
+      When this option is set, the new layer will be
+      created inside the named FeatureDataset folder. If the folder does
+      not already exist, it will be created.
+
+-  .. lco:: LAYER_ALIAS
+      :since: 2.3
+
+      Set layer name alias.
+
+-  .. lco:: GEOMETRY_NAME
+      :default: SHAPE
+
+      Set name of geometry column in new layer.
+
+-  .. lco:: GEOMETRY_NULLABLE
+      :default: YES
+      :since: 2.0
+
+      Whether the values of the geometry column can be NULL.
+      Can be set to NO so that geometry is required.
+
+-  .. lco:: FID
+      :default: OBJECTID
+
+      Name of the OID column to create.
+      Note: option was called OID_NAME in releases before GDAL 2
+
+-  .. lco:: XYTOLERANCE
+      :default: 0.01
+
+      Controls (with :lco:`ZTOLERANCE` and :lco:`MTOLERANCE`) the snapping
+      tolerance used for advanced ArcGIS features like network and topology
+      rules. They won't effect any OGR operations, but they will by used by
+      ArcGIS. The units of the parameters are the units of the coordinate
+      reference system.
+
+      ArcMap 10.0 and OGR defaults for XYTOLERANCE are 0.001m (or
+      equivalent) for projected coordinate systems, and 0.000000008983153°
+      for geographic coordinate systems.
+      ArcMap 10.0 and OGR defaults for ZTOLERANCE and MTOLERANCE are 0.0001.
+
+   .. lco:: ZTOLERANCE
+      :default: 0.0001
+
+   .. lco:: MTOLERANCE
+      :default: 0.0001
+      :since: 3.5.1
 
 -  **XORIGIN, YORIGIN, ZORIGIN, MORIGIN, XYSCALE, ZSCALE, MSCALE**: These parameters
    control the `coordinate precision
@@ -176,56 +206,80 @@ Layer Creation Options
 
    ..  note:: MORIGIN and MSCALE added in GDAL 3.5.1
 
--  **XML_DEFINITION** : When this option is set, its
-   value will be used as the XML definition to create the new table. The
-   root node of such a XML definition must be a <esri:DataElement>
-   element conformant to FileGDBAPI.xsd
--  **CREATE_MULTIPATCH**\ =YES : When this option is set,
-   geometries of layers of type MultiPolygon will be written as
-   MultiPatch
--  **CONFIGURATION_KEYWORD**\ =DEFAULTS/TEXT_UTF16/MAX_FILE_SIZE_4GB/MAX_FILE_SIZE_256TB/GEOMETRY_OUTOFLINE/BLOB_OUTOFLINE/GEOMETRY_AND_BLOB_OUTOFLINE
-   : Customize how data is stored. By default text in
-   UTF-8 and data up to 1TB
--  **CREATE_SHAPE_AREA_AND_LENGTH_FIELDS**\ =YES/NO. (GDAL >= 3.6.0)
-   Defaults to NO (through CreateLayer() API). When this option is set,
-   a Shape_Area and Shape_Length special fields will be created for polygonal
-   layers (Shape_Length only for linear layers). These fields will automatically
-   be populated with the feature's area or length whenever a new feature is
-   added to the dataset or an existing feature is amended.
-   When using ogr2ogr with a source layer that has Shape_Area/Shape_Length
-   special fields, and this option is not explicitly specified, it will be
-   automatically set, so that the resulting FileGeodatabase has those fields
-   properly tagged.
+-  .. lco:: XML_DEFINITION
+
+      When this option is set, its
+      value will be used as the XML definition to create the new table. The
+      root node of such a XML definition must be a <esri:DataElement>
+      element conformant to FileGDBAPI.xsd
+
+-  .. lco:: CREATE_MULTIPATCH
+      :choices: YES, NO
+
+      When this option is set,
+      geometries of layers of type MultiPolygon will be written as
+      MultiPatch
+
+-  .. lco:: CONFIGURATION_KEYWORD
+      :choices: DEFAULTS, TEXT_UTF16, MAX_FILE_SIZE_4GB, MAX_FILE_SIZE_256TB, GEOMETRY_OUTOFLINE, BLOB_OUTOFLINE, GEOMETRY_AND_BLOB_OUTOFLINE
+
+      Customize how data is stored. By default text in UTF-8 and data up to 1TB
+
+-  .. lco:: CREATE_SHAPE_AREA_AND_LENGTH_FIELDS
+      :choices: YES, NO
+      :default: NO
+      :since: 3.6.0
+
+      When this option is set,
+      a Shape_Area and Shape_Length special fields will be created for polygonal
+      layers (Shape_Length only for linear layers). These fields will automatically
+      be populated with the feature's area or length whenever a new feature is
+      added to the dataset or an existing feature is amended.
+      When using ogr2ogr with a source layer that has Shape_Area/Shape_Length
+      special fields, and this option is not explicitly specified, it will be
+      automatically set, so that the resulting FileGeodatabase has those fields
+      properly tagged.
 
 Configuration options
 ---------------------
 
-The following :ref:`configuration options <configoptions>` are
-available:
+|about-config-options|
+The following configuration options are available:
 
-- :decl_configoption:`FGDB_BULK_LOAD` can be set to YES to speed-up
-  feature insertion (or sometimes solve problems when inserting a lot of
-  features (see http://trac.osgeo.org/gdal/ticket/4420). The effect of
-  this configuration option is to cause a write lock to be taken and a
-  temporary disabling of the indexes. Those are restored when the
-  datasource is closed or when a read operation is done. Bulk load is
-  enabled by default for newly created layers (unless otherwise specified).
+- .. config:: FGDB_BULK_LOAD
+     :choices: YES, NO
 
-Examples
---------
+     Can be set to YES to speed-up
+     feature insertion (or sometimes solve problems when inserting a lot of
+     features (see http://trac.osgeo.org/gdal/ticket/4420). The effect of
+     this configuration option is to cause a write lock to be taken and a
+     temporary disabling of the indexes. Those are restored when the
+     datasource is closed or when a read operation is done. Bulk load is
+     enabled by default for newly created layers (unless otherwise specified).
 
--  Read layer from FileGDB and load into PostGIS:
--  Get detailed info for FileGDB:
+Geometry coordinate precision
+-----------------------------
 
-Building Notes
---------------
+.. versionadded:: GDAL 3.9
 
-Read the `GDAL Windows Building example for
-Plugins <http://trac.osgeo.org/gdal/wiki/BuildingOnWindows>`__. You will
-find a similar section in nmake.opt for FileGDB. After you are done, go
-to the *$gdal_source_root\ogr\ogrsf_frmts\filegdb* folder and execute:
+The driver supports reading and writing the geometry coordinate
+precision, using the XYResolution, ZResolution and MResolution members of
+the :cpp:class:`OGRGeomCoordinatePrecision` settings of the
+:cpp:class:`OGRGeomFieldDefn`. ``XYScale`` is computed as 1.0 / ``XYResolution``
+(and similarly for the Z and M components). The tolerance setting is computed
+as being one tenth of the resolution
 
-``nmake /f makefile.vc plugin         nmake /f makefile.vc plugin-install``
+On reading, the coordinate precision grid parameters are returned as format
+specific options of :cpp:class:`OGRGeomCoordinatePrecision` with the
+``FileGeodatabase`` format key, with the following option key names:
+``XYScale``, ``XYTolerance``, ``XYOrigin``,
+``ZScale``, ``ZTolerance``, ``ZOrigin``,
+``MScale``, ``MTolerance``, ``MOrigin``. On writing, they are also honored
+(they will have precedence over XYResolution, ZResolution and MResolution).
+
+On layer creation, the XORIGIN, YORIGIN, ZORIGIN, MORIGIN, XYSCALE, ZSCALE,
+ZORIGIN, XYTOLERANCE, ZTOLERANCE, MTOLERANCE layer creation options will be
+used in priority over the settings of :cpp:class:`OGRGeomCoordinatePrecision`.
 
 Known Issues
 ------------
@@ -253,7 +307,7 @@ Known Issues
 Other limitations
 -----------------
 
-- The FileGeodatabase format (and thus the driver) does not support 64-bit integers.
+- The driver does not support 64-bit integers.
 
 Links
 -----

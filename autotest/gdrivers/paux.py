@@ -28,10 +28,12 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-
 import gdaltest
+import pytest
 
 from osgeo import gdal
+
+pytestmark = pytest.mark.require_driver("PAUX")
 
 ###############################################################################
 # Read test of simple byte reference data.
@@ -40,7 +42,7 @@ from osgeo import gdal
 def test_paux_1():
 
     tst = gdaltest.GDALTest("PAux", "paux/small16.raw", 2, 12816)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -51,7 +53,7 @@ def test_paux_2():
 
     tst = gdaltest.GDALTest("PAux", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(check_gt=1)
+    tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -62,7 +64,7 @@ def test_paux_3():
 
     tst = gdaltest.GDALTest("PAux", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -71,4 +73,5 @@ def test_paux_3():
 
 def test_paux_cleanup():
     gdaltest.clean_tmp()
-    gdal.Unlink("/vsimem/byte.tif.tst.aux.xml")
+    if gdal.VSIStatL("/vsimem/byte.tif.tst.aux.xml") is not None:
+        gdal.Unlink("/vsimem/byte.tif.tst.aux.xml")

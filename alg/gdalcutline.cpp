@@ -47,8 +47,6 @@
 #include "ogr_geometry.h"
 #include "ogr_geos.h"
 
-CPL_CVSID("$Id$")
-
 /************************************************************************/
 /*                         BlendMaskGenerator()                         */
 /************************************************************************/
@@ -76,8 +74,9 @@ static CPLErr BlendMaskGenerator(int nXOff, int nYOff, int nXSize, int nYSize,
     /*      Convert the polygon into a collection of lines so that we       */
     /*      measure distance from the edge even on the inside.              */
     /* -------------------------------------------------------------------- */
-    OGRGeometry *poLines = OGRGeometryFactory::forceToMultiLineString(
-        reinterpret_cast<OGRGeometry *>(hPolygon)->clone());
+    const auto poPolygon = OGRGeometry::FromHandle(hPolygon);
+    auto poLines = std::unique_ptr<OGRGeometry>(
+        OGRGeometryFactory::forceToMultiLineString(poPolygon->clone()));
 
     /* -------------------------------------------------------------------- */
     /*      Prepare a clipping polygon a bit bigger than the area of        */
@@ -94,38 +93,28 @@ static CPLErr BlendMaskGenerator(int nXOff, int nYOff, int nXSize, int nYSize,
         nYOff + nYSize + (dfBlendDist + 1), nXOff - (dfBlendDist + 1),
         nYOff - (dfBlendDist + 1));
 
-    OGRPolygon *poClipRect = nullptr;
-    OGRGeometryFactory::createFromWkt(
-        osClipRectWKT.c_str(), nullptr,
-        reinterpret_cast<OGRGeometry **>(&poClipRect));
-
-    if (poClipRect)
+    OGRPolygon oClipRect;
     {
-        // If it does not intersect the polym, zero the mask and return.
-        if (!reinterpret_cast<OGRGeometry *>(hPolygon)->Intersects(poClipRect))
-        {
-            memset(pafValidityMask, 0, sizeof(float) * nXSize * nYSize);
-
-            delete poLines;
-            delete poClipRect;
-
-            return CE_None;
-        }
-
-        // If it does not intersect the line at all, just return.
-        else if (!static_cast<OGRGeometry *>(poLines)->Intersects(poClipRect))
-        {
-            delete poLines;
-            delete poClipRect;
-
-            return CE_None;
-        }
-
-        OGRGeometry *poClippedLines = poLines->Intersection(poClipRect);
-        delete poLines;
-        poLines = poClippedLines;
-        delete poClipRect;
+        const char *pszClipRectWKT = osClipRectWKT.c_str();
+        oClipRect.importFromWkt(&pszClipRectWKT);
     }
+
+    // If it does not intersect the polym, zero the mask and return.
+    if (!poPolygon->Intersects(&oClipRect))
+    {
+        memset(pafValidityMask, 0, sizeof(float) * nXSize * nYSize);
+
+        return CE_None;
+    }
+
+    // If it does not intersect the line at all, just return.
+    else if (!poLines->Intersects(&oClipRect))
+    {
+
+        return CE_None;
+    }
+
+    poLines.reset(poLines->Intersection(&oClipRect));
 
     /* -------------------------------------------------------------------- */
     /*      Convert our polygon into GEOS format, and compute an            */
@@ -135,8 +124,6 @@ static CPLErr BlendMaskGenerator(int nXOff, int nYOff, int nXSize, int nYSize,
     GEOSContextHandle_t hGEOSCtxt = OGRGeometry::createGEOSContext();
     GEOSGeom poGEOSPoly = poLines->exportToGEOS(hGEOSCtxt);
     OGR_G_GetEnvelope(hPolygon, &sEnvelope);
-
-    delete poLines;
 
     // This check was already done in the calling
     // function and should never be true.
@@ -250,12 +237,27 @@ static int CutlineTransformer(void *pTransformArg, int bDstToSrc,
 /*      provided cutline, and optional blend distance.                  */
 /************************************************************************/
 
-CPLErr GDALWarpCutlineMasker(void *pMaskFuncArg, int /* nBandCount */,
-                             GDALDataType /* eType */, int nXOff, int nYOff,
-                             int nXSize, int nYSize, GByte ** /*ppImageData */,
+CPLErr GDALWarpCutlineMasker(void *pMaskFuncArg, int nBandCount,
+                             GDALDataType eType, int nXOff, int nYOff,
+                             int nXSize, int nYSize, GByte **ppImageData,
                              int bMaskIsFloat, void *pValidityMask)
 
 {
+    return GDALWarpCutlineMaskerEx(pMaskFuncArg, nBandCount, eType, nXOff,
+                                   nYOff, nXSize, nYSize, ppImageData,
+                                   bMaskIsFloat, pValidityMask, nullptr);
+}
+
+CPLErr GDALWarpCutlineMaskerEx(void *pMaskFuncArg, int /* nBandCount */,
+                               GDALDataType /* eType */, int nXOff, int nYOff,
+                               int nXSize, int nYSize,
+                               GByte ** /*ppImageData */, int bMaskIsFloat,
+                               void *pValidityMask, int *pnValidityFlag)
+
+{
+    if (pnValidityFlag)
+        *pnValidityFlag = GCMVF_PARTIAL_INTERSECTION;
+
     if (nXSize < 1 || nYSize < 1)
         return CE_None;
 
@@ -307,6 +309,9 @@ CPLErr GDALWarpCutlineMasker(void *pMaskFuncArg, int /* nBandCount */,
         sEnvelope.MaxY + psWO->dfCutlineBlendDist < nYOff ||
         sEnvelope.MinY - psWO->dfCutlineBlendDist > nYOff + nYSize)
     {
+        if (pnValidityFlag)
+            *pnValidityFlag = GCMVF_NO_INTERSECTION;
+
         // We are far from the blend line - everything is masked to zero.
         // It would be nice to realize no work is required for this whole
         // chunk!
@@ -342,6 +347,9 @@ CPLErr GDALWarpCutlineMasker(void *pMaskFuncArg, int /* nBandCount */,
         if (sEnvelope.Contains(sChunkEnvelope) &&
             OGRGeometry::FromHandle(hPolygon)->Contains(&oChunkFootprint))
         {
+            if (pnValidityFlag)
+                *pnValidityFlag = GCMVF_CHUNK_FULLY_WITHIN_CUTLINE;
+
             CPLDebug("WARP", "Source chunk fully contained within cutline.");
             return CE_None;
         }

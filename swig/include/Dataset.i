@@ -280,8 +280,16 @@ public:
 
   ~GDALDatasetShadow() {
     if ( GDALDereferenceDataset( self ) <= 0 ) {
-      GDALClose(self);
+      if( GDALClose(self) != CE_None )
+      {
+          if( CPLGetLastErrorType() == CE_None )
+              CPLError(CE_Failure, CPLE_AppDefined, "Error occurred in GDALClose()");
+      }
     }
+  }
+
+  CPLErr Close() {
+     return GDALClose(self);
   }
 
   GDALDriverShadow* GetDriver() {
@@ -304,6 +312,16 @@ public:
   char const *GetProjectionRef() {
     return GDALGetProjectionRef( self );
   }
+
+#ifdef SWIGPYTHON
+  int GetRefCount() {
+    return OGR_DS_GetRefCount(self);
+  }
+
+  int GetSummaryRefCount() {
+    return OGR_DS_GetSummaryRefCount(self);
+  }
+#endif
 
   %newobject GetSpatialRef;
   OSRSpatialReferenceShadow *GetSpatialRef() {
@@ -440,8 +458,8 @@ public:
 
 #endif
 
-  void FlushCache() {
-    GDALFlushCache( self );
+  CPLErr FlushCache() {
+    return GDALFlushCache( self );
   }
 
 #ifndef SWIGJAVA
@@ -559,11 +577,11 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
 %feature("kwargs") BeginAsyncReader;
 %newobject BeginAsyncReader;
 %apply (int nList, int *pList ) { (int band_list, int *pband_list ) };
-%apply (int nLenKeepObject, char *pBufKeepObject, void* pyObject) { (int buf_len, char *buf_string, void* pyObject) };
+%apply (size_t nLenKeepObject, char *pBufKeepObject, void* pyObject) { (size_t buf_len, char *buf_string, void* pyObject) };
 %apply (int *optional_int) { (int*) };
   GDALAsyncReaderShadow* BeginAsyncReader(
        int xOff, int yOff, int xSize, int ySize,
-       int buf_len, char *buf_string, void* pyObject,
+       size_t buf_len, char *buf_string, void* pyObject,
        int buf_xsize, int buf_ysize, GDALDataType bufType = (GDALDataType)0,
        int band_list = 0, int *pband_list = 0, int nPixelSpace = 0,
        int nLineSpace = 0, int nBandSpace = 0, char **options = 0)  {
@@ -601,7 +619,7 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
     }
 
     int nBCount = (band_list) != 0 ? band_list : GDALGetRasterCount(self);
-    int nMinSize = nxsize * nysize * nBCount * (GDALGetDataTypeSize(ntype) / 8);
+    uint64_t nMinSize = (uint64_t)nxsize * nysize * nBCount * GDALGetDataTypeSizeBytes(ntype);
     if (buf_string == NULL || buf_len < nMinSize)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Buffer is too small");
@@ -644,7 +662,7 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
   }
 
 %clear(int band_list, int *pband_list);
-%clear (int buf_len, char *buf_string, void* pyObject);
+%clear (size_t buf_len, char *buf_string, void* pyObject);
 %clear(int*);
 
   void EndAsyncReader(GDALAsyncReaderShadow* ario){
@@ -779,6 +797,20 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
     return layer;
   }
 
+  /* Note that datasources own their layers */
+#ifndef SWIGJAVA
+  %feature( "kwargs" ) CreateLayer;
+#endif
+  OGRLayerShadow *CreateLayerFromGeomFieldDefn(const char* name,
+              OGRGeomFieldDefnShadow* geom_field,
+              char** options=0) {
+    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetCreateLayerFromGeomFieldDefn( self,
+                                  name,
+                                  geom_field,
+                                  options);
+    return layer;
+  }
+
 #ifndef SWIGJAVA
   %feature( "kwargs" ) CopyLayer;
 #endif
@@ -797,32 +829,12 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
     return GDALDatasetDeleteLayer(self, index);
   }
 
-  int GetLayerCount() {
-    return GDALDatasetGetLayerCount(self);
-  }
-
   bool IsLayerPrivate( int index ) {
     return GDALDatasetIsLayerPrivate(self, index);
   }
 
-#ifdef SWIGJAVA
-  OGRLayerShadow *GetLayerByIndex( int index ) {
-#else
-  OGRLayerShadow *GetLayerByIndex( int index=0) {
-#endif
-    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayer(self, index);
-    return layer;
-  }
 
-  OGRLayerShadow *GetLayerByName( const char* layer_name) {
-    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayerByName(self, layer_name);
-    return layer;
-  }
 
-  void ResetReading()
-  {
-    GDALDatasetResetReading( self );
-  }
 
 #ifdef SWIGPYTHON
 %newobject GetNextFeature;
@@ -881,6 +893,46 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
 
 #endif /* defined(SWIGPYTHON) || defined(SWIGJAVA) */
 
+
+#ifdef SWIGJAVA
+  OGRLayerShadow *GetLayerByIndex( int index ) {
+#elif SWIGPYTHON
+  OGRLayerShadow *GetLayerByIndex( int index=0) {
+#else
+  OGRLayerShadow *GetLayer( int index ) {
+#endif
+    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayer(self, index);
+    return layer;
+  }
+
+  OGRLayerShadow *GetLayerByName(const char* layer_name) {
+    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayerByName(self, layer_name);
+    return layer;
+  }
+
+  void ResetReading()
+  {
+    GDALDatasetResetReading(self);
+  }
+
+  int GetLayerCount() {
+    return GDALDatasetGetLayerCount(self);
+  }
+
+#ifdef SWIGCSHARP
+
+  %newobject GetNextFeature;
+  OGRFeatureShadow *GetNextFeature( OGRLayerShadow** ppoBelongingLayer = NULL,
+                                    double* pdfProgressPct = NULL,
+                                    GDALProgressFunc callback = NULL,
+                                    void* callback_data=NULL )
+  {
+    return GDALDatasetGetNextFeature( self, ppoBelongingLayer, pdfProgressPct,
+                                      callback, callback_data );
+  }
+
+
+#endif
 
 OGRErr AbortSQL() {
     return GDALDatasetAbortSQL(self);

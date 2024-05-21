@@ -1,5 +1,3 @@
-.. include:: ../substitutions.rst
-
 .. _dev_documentation:
 
 ================================================================================
@@ -10,21 +8,73 @@ Documentation overview
 ###########################
 
 GDAL's documentation includes C and C++ :ref:`API documentation <api>` built
-automatically from source comments using doxygen and reStructuredText (rst)
+automatically from source comments using Doxygen and reStructuredText (rst)
 files containing manually-edited content.
 
 |Sphinx| is used to combine the above components into a complete set of documentation in HTML, PDF, and other formats.
 
+|Sphinx| and extensions used by GDAL can be installed by running ``python3 -m pip install -r requirements.txt`` from
+the ``doc`` subdirectory.
+
 Building documentation
 ######################
 
-HTML documentation can be built by running ``make html`` in the ``doc`` subdirectory of the GDAL source repository.
- The generated files will be output to ``doc/build`` where they can be viewed using a web browser.
+Documentation can be generated with Makefile targets, from the ``doc`` subdirectory
+of the GDAL source repository (only on Unix systems).
+
+The following targets are available:
+
+* ``html``: build HTML documentation into the ``doc/build/html`` directory, where
+  they can be viewed using a web browser.
+
+* ``man``: build MAN pages into the ``doc/build/man`` directory.
+
+* ``latexpdf``: build PDF documentation into the ``doc/build/pdf`` directory
+
+* ``doxygen``: regenerate API Doxygen XML and HTML output, that is used by the
+  ``html`` target. Doxygen content is not automatically rebuilt when source files
+  are modified, hence this target must be explicitly run to refresh it.
+
+* ``doxygen_check_warnings``: same as ``doxygen``, but errors out when Doxygen
+  emits a warning (the ``doxygen`` target is tolerant to Doxygen warnings).
+  This can be useful to reproduce one of the continuous integration checks that
+  verifies that there are no Doxygen warnings.
+  Requires Doxygen >= 1.9.3 to be warning free.
+
+* ``clean``: clean the ``doc/build`` directory.
+
+It is also possible to run those targets as CMake targets. In that case, the
+output directory will be the ``doc/build`` subdirectory of the CMake
+build directory. To only clean the documentation, the ``clean_doc`` target can
+be invoked.
+Note: those CMake targets are only available if the CMake BUILD_DOCS=ON variable
+is set (it is set by default if build preconditions are met, that is if Doxygen,
+Sphinx and make are available)
 
 To visualize documentation changes while editing, it may be useful to install the |sphinx-autobuild| python package.
 Once installed, running ``sphinx-autobuild -b html source build`` from the ``doc`` subdirectory will build documentation
 and serve it on a local web server at ``http://127.0.0.1:8000``. The pages served will be automatically refreshed as changes
-are made to underlying ``rst`` documentatio files.
+are made to underlying ``rst`` documentation files.
+
+Python API documentation
+------------------------
+
+Sphinx uses the `autodoc <https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html>`_ extension
+to generate documentation for the Python API from Python function docstrings.
+To be correctly parsed by ``autodoc``, docstrings should follow the `numpydoc Style guide <https://numpydoc.readthedocs.io/en/latest/format.html>`_.
+Docstrings may be found in two locations. If the function was defined in Python
+(i.e., using a ``%pythoncode`` SWIG directive), then the docstring must be
+placed within the function definition. If the function is defined in C++ only,
+then the docstring should be placed in a separate file
+containing only docstrings (located in :source_file:`swig/include/python/docs`).
+Sphinx loads the Python bindings when generating documentation, so for it to see any changes
+the following steps must be completed:
+
+- rebuild the Python bindings from the build directory (``cmake --build . --target python_binding``)
+- make the updated Python bindings visible to Python, either by installing them, or by running ``scripts/setdevenv.sh``
+  from the build directory
+- update the timestamp of the ``rst`` files associated with the page where the documentation appears (e.g., ``touch doc/source/api/python/osgeo.ogr.rst``)
+
 
 .. _rst_style:
 
@@ -84,7 +134,7 @@ This is accomplished with the following code::
    #. Second item
    #. Third item
 
-Note that numbers are automatically generated, making it easy to add/remove items.   
+Note that numbers are automatically generated, making it easy to add/remove items.
 
 List-tables
 -----------
@@ -94,20 +144,20 @@ Bulleted lists can sometimes be cumbersome and hard to follow.  When dealing wit
 .. list-table::
    :widths: 20 80
    :header-rows: 1
-   
+
    * - Shapes
      - Description
    * - Square
      - Four sides of equal length, 90 degree angles
    * - Rectangle
      - Four sides, 90 degree angles
-    
+
 This is done with the following code::
 
    .. list-table::
       :widths: 20 80
       :header-rows: 1
-      
+
       * - Shapes
         - Description
       * - Square
@@ -121,7 +171,7 @@ Page labels
 **Ensure every page has a label that matches the name of the file.** For example if the page is named ``foo_bar.rst`` then the page should have the label::
 
    ..  _foo_bar:
-  
+
 Other pages can then link to that page by using the following code::
 
    :ref:`foo_bar`
@@ -137,7 +187,7 @@ Bad
    More information about linking can be found :ref:`here <linking>`.
 Good
    For more information, please see the section on :ref:`linking`.
-    
+
 To insert a link to an external website::
 
    `Text of the link <http://example.com>`__
@@ -147,8 +197,8 @@ The resulting link would look like this: `Text of the link <http://example.com>`
 .. warning:: It is very easy to have two links with the same text resulting in the following error::
 
    **(WARNING/2) Duplicate explicit target name:foo**
-   
-   To avoid these warnings use of a double `__` generates an anonymous link. 
+
+   To avoid these warnings use of a double `__` generates an anonymous link.
 
 
 Sections
@@ -177,7 +227,7 @@ Use sections to break up long pages and to help Sphinx generate tables of conten
 Notes and warnings
 ------------------
 
-When it is beneficial to have a section of text stand out from the main text, Sphinx has two such boxes, the note and the warning.  They function identically, and only differ in their coloring.  You should use notes and warnings sparingly, however, as adding emphasis to everything makes the emphasis less effective. 
+When it is beneficial to have a section of text stand out from the main text, Sphinx has two such boxes, the note and the warning.  They function identically, and only differ in their coloring.  You should use notes and warnings sparingly, however, as adding emphasis to everything makes the emphasis less effective.
 
 Here is an example of a note:
 
@@ -186,7 +236,7 @@ Here is an example of a note:
 This note is generated with the following code::
 
    .. note:: This is a note.
-   
+
 Similarly, here is an example of a warning:
 
 .. warning:: Beware of dragons.
@@ -194,7 +244,7 @@ Similarly, here is an example of a warning:
 This warning is generated by the following code::
 
    .. warning:: Beware of dragons.
-   
+
 Images
 ------
 
@@ -202,9 +252,9 @@ Add images to your documentation when possible.  Images, such as screenshots, ar
 
   .. figure:: image.png
      :align: center
-   
+
      *Caption*
-   
+
 In this example, the image file exists in the same directory as the source page.  If this is not the case, you can insert path information in the above command. The root :file:`/` is the directory of the :file:`conf.py` file.::
 
   .. figure:: /../images/gdalicon.png
@@ -223,17 +273,17 @@ The result of this code will generate a standard link to an :download:`external 
 To include the contents of a file, use ``literalinclude`` directive::
 
    Example of :command:`gdalinfo` use:
-   
+
    .. literalinclude:: example.txt
 
 Example of :command:`gdalinfo` use:
-   
+
 .. literalinclude:: example.txt
 
 The ``literalinclude`` directive has options for syntax highlighting, line numbers and extracting just a snippet::
 
    Example of :command:`gdalinfo` use:
-   
+
    .. literalinclude:: example.txt
       :language: txt
       :linenos:
@@ -268,6 +318,12 @@ If you want to reference a non-specific path or file name::
 
 This will output: :file:`{your/own/path/to}/myfile.txt`
 
+To reference a file in the GDAL source tree, use::
+
+    :source_file:`gcore/gdaldriver.cpp`
+
+This will output a link to the file on GitHub: :source_file:`gcore/gdaldriver.cpp`
+
 Reference code
 --------------
 
@@ -280,12 +336,53 @@ To reference a method or function::
   :cpp:func:`MyClass::MyMethod`
   :cpp:func:`MyFunction`
 
-Reference configuration options
--------------------------------
+.. _config_option_syntax:
 
-To reference a configuration option, such as **GDAL_CACHEMAX**, use::
+Define and reference configuration options
+------------------------------------------
 
-  :decl_configoption:`OPTION_NAME`
+To define a configuration option, use::
+
+   .. config:: OPTION_NAME
+      :choices: COMMA, SEPARATED, LIST
+      :default: DEFAULT_VALUE
+      :since: GDAL.MIN.VERSION
+
+      Narrative about the option.
+
+Similar syntax can be used to define opening options (``.. oo::``),
+creation options (``.. co::``), dataset creation options (``.. dsco::``), or layer creation options
+(``.. lco::``).
+
+To reference a configuration option, such as **GDAL_CACHEMAX**,
+use the syntax in the table below.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option type
+     - Syntax
+   * - Configuration option
+     - ::
+
+       :config:`option_name`
+   * - Creation option
+     - ::
+
+       :co:`option_name`
+   * - Open option
+     - ::
+
+       :oo:`option_name`
+   * - Dataset creation option
+     - ::
+
+       :dsco:`option_name`
+   * - Layer creation option
+     - ::
+
+       :lco:`option_name`
+
 
 Reference commands
 ------------------
@@ -293,15 +390,15 @@ Reference commands
 Reference commands (such as :program:`gdalinfo`) with the following syntax::
 
   :program:`gdalinfo`
-  
+
 Use ``option`` directive for command line options::
-  
+
   .. option:: -json
 
      Display the output in json format.
 
 Use ``describe`` to document create parameters::
-  
+
   .. describe:: WORLDFILE=YES
-     
+
      Force the generation of an associated ESRI world file (with the extension .wld).

@@ -31,6 +31,9 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
+#ifndef NITF_DATASET_H_INCLUDED
+#define NITF_DATASET_H_INCLUDED
+
 #include "gdal_pam.h"
 #include "nitflib.h"
 #include "ogr_spatialref.h"
@@ -126,6 +129,7 @@ class NITFDataset final : public GDALPamDataset
     CPLString m_osRPCTXTFilename;
 
     int bExposeUnderlyingJPEGDatasetOverviews;
+
     int ExposeUnderlyingJPEGDatasetOverviews() const
     {
         return bExposeUnderlyingJPEGDatasetOverviews;
@@ -167,12 +171,11 @@ class NITFDataset final : public GDALPamDataset
     virtual char **GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
-    virtual void FlushCache(bool bAtClosing) override;
+    virtual CPLErr FlushCache(bool bAtClosing) override;
     virtual CPLErr IBuildOverviews(const char *, int, const int *, int,
                                    const int *, GDALProgressFunc, void *,
                                    CSLConstList papszOptions) override;
 
-    static int Identify(GDALOpenInfo *);
     static NITFDataset *OpenInternal(GDALOpenInfo *,
                                      GDALDataset *poWritableJ2KDataset,
                                      bool bOpenForCreate, int nIMIndex);
@@ -370,3 +373,5 @@ class NITFWrapperRasterBand final : public NITFProxyPamRasterBand
     /* Specific method */
     void SetColorTableFromNITFBandInfo();
 };
+
+#endif /* NITF_DATASET_H_INCLUDED */

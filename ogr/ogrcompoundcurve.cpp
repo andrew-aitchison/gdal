@@ -146,7 +146,8 @@ OGRErr OGRCompoundCurve::addCurveDirectlyFromWkb(OGRGeometry *poSelf,
                                                  OGRCurve *poCurve)
 {
     OGRCompoundCurve *poCC = poSelf->toCompoundCurve();
-    return poCC->addCurveDirectlyInternal(poCurve, 1e-14, FALSE);
+    return poCC->addCurveDirectlyInternal(poCurve, DEFAULT_TOLERANCE_EPSILON,
+                                          FALSE);
 }
 
 /************************************************************************/
@@ -177,14 +178,17 @@ OGRErr OGRCompoundCurve::importFromWkb(const unsigned char *pabyData,
 /************************************************************************/
 /*                            exportToWkb()                             */
 /************************************************************************/
-OGRErr OGRCompoundCurve::exportToWkb(OGRwkbByteOrder eByteOrder,
-                                     unsigned char *pabyData,
-                                     OGRwkbVariant eWkbVariant) const
+
+OGRErr OGRCompoundCurve::exportToWkb(unsigned char *pabyData,
+                                     const OGRwkbExportOptions *psOptions) const
 {
+    OGRwkbExportOptions sOptions(psOptions ? *psOptions
+                                           : OGRwkbExportOptions());
+
     // Does not make sense for new geometries, so patch it.
-    if (eWkbVariant == wkbVariantOldOgc)
-        eWkbVariant = wkbVariantIso;
-    return oCC.exportToWkb(this, eByteOrder, pabyData, eWkbVariant);
+    if (sOptions.eWkbVariant == wkbVariantOldOgc)
+        sOptions.eWkbVariant = wkbVariantIso;
+    return oCC.exportToWkb(this, pabyData, &sOptions);
 }
 
 /************************************************************************/
@@ -395,7 +399,7 @@ void OGRCompoundCurve::setMeasured(OGRBoolean bIsMeasured)
 /*                       assignSpatialReference()                       */
 /************************************************************************/
 
-void OGRCompoundCurve::assignSpatialReference(OGRSpatialReference *poSR)
+void OGRCompoundCurve::assignSpatialReference(const OGRSpatialReference *poSR)
 {
     oCC.assignSpatialReference(this, poSR);
 }
@@ -500,7 +504,7 @@ OGRCurve *OGRCompoundCurve::stealCurve(int iCurve)
  * @param poCurve geometry to add to the container.
  * @param dfToleranceEps relative tolerance when checking that the first point
  * of a segment matches then end point of the previous one. Default value:
- * 1e-14.
+ * OGRCompoundCurve::DEFAULT_TOLERANCE_EPSILON.
  *
  * @return OGRERR_NONE if successful, or OGRERR_FAILURE in case of error
  * (for example if curves are not contiguous)
@@ -524,7 +528,8 @@ OGRErr OGRCompoundCurve::addCurve(const OGRCurve *poCurve,
  * \brief Add a curve directly to the container.
  *
  * Ownership of the passed geometry is taken by the container rather than
- * cloning as addCurve() does.
+ * cloning as addCurve() does, but only if the method is successful.
+ * If the method fails, ownership still belongs to the caller.
  *
  * There is no ISO SQL/MM analog to this method.
  *
@@ -533,7 +538,7 @@ OGRErr OGRCompoundCurve::addCurve(const OGRCurve *poCurve,
  * @param poCurve geometry to add to the container.
  * @param dfToleranceEps relative tolerance when checking that the first point
  * of a segment matches then end point of the previous one. Default value:
- * 1e-14.
+ * OGRCompoundCurve::DEFAULT_TOLERANCE_EPSILON.
  *
  * @return OGRERR_NONE if successful, or OGRERR_FAILURE in case of error
  * (for example if curves are not contiguous)
@@ -609,6 +614,35 @@ OGRErr OGRCompoundCurve::addCurveDirectlyInternal(OGRCurve *poCurve,
     }
 
     return oCC.addCurveDirectly(this, poCurve, bNeedRealloc);
+}
+
+/************************************************************************/
+/*                          addCurve()                                  */
+/************************************************************************/
+
+/**
+ * \brief Add a curve directly to the container.
+ *
+ * There is no ISO SQL/MM analog to this method.
+ *
+ * This method is the same as the C function OGR_G_AddGeometryDirectly().
+ *
+ * @param poCurve geometry to add to the container.
+ * @param dfToleranceEps relative tolerance when checking that the first point
+ * of a segment matches then end point of the previous one. Default value:
+ * OGRCompoundCurve::DEFAULT_TOLERANCE_EPSILON.
+ *
+ * @return OGRERR_NONE if successful, or OGRERR_FAILURE in case of error
+ * (for example if curves are not contiguous)
+ */
+OGRErr OGRCompoundCurve::addCurve(std::unique_ptr<OGRCurve> poCurve,
+                                  double dfToleranceEps)
+{
+    OGRCurve *poCurvePtr = poCurve.release();
+    OGRErr eErr = addCurveDirectlyInternal(poCurvePtr, dfToleranceEps, TRUE);
+    if (eErr != OGRERR_NONE)
+        delete poCurvePtr;
+    return eErr;
 }
 
 /************************************************************************/
@@ -705,6 +739,7 @@ class OGRCompoundCurvePointIterator final : public OGRPointIterator
         : poCC(poCCIn)
     {
     }
+
     ~OGRCompoundCurvePointIterator() override
     {
         delete poCurveIter;
@@ -852,6 +887,7 @@ OGRCurveCasterToLinearRing OGRCompoundCurve::GetCasterToLinearRing() const
 {
     return OGRCompoundCurve::CasterToLinearRing;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -886,6 +922,32 @@ double OGRCompoundCurve::get_Area() const
 
     OGRLineString *poLS = CurveToLine();
     double dfArea = poLS->get_Area();
+    delete poLS;
+
+    return dfArea;
+}
+
+/************************************************************************/
+/*                        get_GeodesicArea()                            */
+/************************************************************************/
+
+double OGRCompoundCurve::get_GeodesicArea(
+    const OGRSpatialReference *poSRSOverride) const
+{
+    if (IsEmpty())
+        return 0;
+
+    if (!get_IsClosed())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Non-closed geometry");
+        return -1;
+    }
+
+    if (!poSRSOverride)
+        poSRSOverride = getSpatialReference();
+
+    OGRLineString *poLS = CurveToLine();
+    const double dfArea = poLS->get_GeodesicArea(poSRSOverride);
     delete poLS;
 
     return dfArea;

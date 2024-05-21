@@ -41,6 +41,13 @@ from test_py_scripts import samples_path
 from osgeo import gdal, ogr, osr
 
 
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
 def jp2lura_available():
 
     if (
@@ -83,14 +90,10 @@ def startup_and_cleanup():
 
 def test_jp2lura_missing_license_num():
 
-    old_num_1 = gdal.GetConfigOption("LURA_LICENSE_NUM_1")
-    old_num_2 = gdal.GetConfigOption("LURA_LICENSE_NUM_2")
-    gdal.SetConfigOption("LURA_LICENSE_NUM_1", "")
-    gdal.SetConfigOption("LURA_LICENSE_NUM_2", "")
-    with gdaltest.error_handler():
+    with gdal.config_options(
+        {"LURA_LICENSE_NUM_1": "", "LURA_LICENSE_NUM_2": ""}
+    ), gdaltest.error_handler():
         ds = gdal.Open("data/jpeg2000/byte.jp2")
-    gdal.SetConfigOption("LURA_LICENSE_NUM_1", old_num_1)
-    gdal.SetConfigOption("LURA_LICENSE_NUM_2", old_num_2)
 
     assert ds is None
 
@@ -101,14 +104,10 @@ def test_jp2lura_missing_license_num():
 
 def test_jp2lura_invalid_license_num():
 
-    old_num_1 = gdal.GetConfigOption("LURA_LICENSE_NUM_1")
-    old_num_2 = gdal.GetConfigOption("LURA_LICENSE_NUM_2")
-    gdal.SetConfigOption("LURA_LICENSE_NUM_1", "1")
-    gdal.SetConfigOption("LURA_LICENSE_NUM_2", "1")
-    with gdaltest.error_handler():
+    with gdal.config_options(
+        {"LURA_LICENSE_NUM_1": "1", "LURA_LICENSE_NUM_2": "2"}
+    ), gdaltest.error_handler():
         ds = gdal.Open("data/jpeg2000/byte.jp2")
-    gdal.SetConfigOption("LURA_LICENSE_NUM_1", old_num_1)
-    gdal.SetConfigOption("LURA_LICENSE_NUM_2", old_num_2)
 
     assert ds is None
 
@@ -183,7 +182,7 @@ def test_jp2lura_2():
     gt = (440720.0, 60.0, 0.0, 3751320.0, 0.0, -60.0)
 
     tst = gdaltest.GDALTest("JP2Lura", "jpeg2000/byte.jp2", 1, 50054)
-    return tst.testOpen(check_prj=srs, check_gt=gt)
+    tst.testOpen(check_prj=srs, check_gt=gt)
 
 
 ###############################################################################
@@ -286,7 +285,7 @@ def test_jp2lura_5():
         None,
         options=["REVERSIBLE=YES", "CODEC=J2K"],
     )
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -313,9 +312,8 @@ def test_jp2lura_7():
     tst = gdaltest.GDALTest(
         "JP2Lura", "/vsigzip/data/jpeg2000/byte.jp2.gz", 1, 50054, filename_absolute=1
     )
-    ret = tst.testOpen()
+    tst.testOpen()
     gdal.Unlink("data/jpeg2000/byte.jp2.gz.properties")
-    return ret
 
 
 ###############################################################################
@@ -535,13 +533,11 @@ def test_jp2lura_16():
 
     assert gt == gt_expected, "did not get expected geotransform"
 
-    gdal.SetConfigOption("GTIFF_POINT_GEO_IGNORE", "TRUE")
+    with gdal.config_option("GTIFF_POINT_GEO_IGNORE", "TRUE"):
 
-    ds = gdal.Open("data/jpeg2000/byte_point.jp2")
-    gt = ds.GetGeoTransform()
-    ds = None
-
-    gdal.SetConfigOption("GTIFF_POINT_GEO_IGNORE", None)
+        ds = gdal.Open("data/jpeg2000/byte_point.jp2")
+        gt = ds.GetGeoTransform()
+        ds = None
 
     gt_expected = (440720.0, 60.0, 0.0, 3751320.0, 0.0, -60.0)
 
@@ -626,13 +622,12 @@ def test_jp2lura_20():
             shutil.copy("../ogr/tmp/cache/SCHEMAS_OPENGIS_NET.zip", "tmp/cache")
         except OSError:
             url = "http://schemas.opengis.net/SCHEMAS_OPENGIS_NET.zip"
-            if not gdaltest.download_file(
+            gdaltest.download_or_skip(
                 url,
                 "SCHEMAS_OPENGIS_NET.zip",
                 force_download=True,
                 max_download_duration=20,
-            ):
-                pytest.skip("Cannot get SCHEMAS_OPENGIS_NET.zip")
+            )
 
     try:
         os.mkdir("tmp/cache/SCHEMAS_OPENGIS_NET")
@@ -659,13 +654,12 @@ def test_jp2lura_20():
             max_download_duration=10,
         ):
             xlink_xsd_url = "http://even.rouault.free.fr/xlink.xsd"
-            if not gdaltest.download_file(
+            gdaltest.download_or_skip(
                 xlink_xsd_url,
                 "SCHEMAS_OPENGIS_NET/xlink.xsd",
                 force_download=True,
                 max_download_duration=10,
-            ):
-                pytest.skip("Cannot get xlink.xsd")
+            )
 
     try:
         os.stat("tmp/cache/SCHEMAS_OPENGIS_NET/xml.xsd")
@@ -678,13 +672,12 @@ def test_jp2lura_20():
             max_download_duration=10,
         ):
             xlink_xsd_url = "http://even.rouault.free.fr/xml.xsd"
-            if not gdaltest.download_file(
+            gdaltest.download_or_skip(
                 xlink_xsd_url,
                 "SCHEMAS_OPENGIS_NET/xml.xsd",
                 force_download=True,
                 max_download_duration=10,
-            ):
-                pytest.skip("Cannot get xml.xsd")
+            )
 
     xmlvalidate.transform_abs_links_to_ref_links("tmp/cache/SCHEMAS_OPENGIS_NET")
 
@@ -1059,11 +1052,10 @@ def test_jp2lura_28():
 
     for (options, expected_cbkw, expected_cbkh, warning_expected) in tests:
         gdal.ErrorReset()
-        gdal.PushErrorHandler()
-        out_ds = gdaltest.jp2lura_drv.CreateCopy(
-            "/vsimem/jp2lura_28.jp2", src_ds, options=options
-        )
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            out_ds = gdaltest.jp2lura_drv.CreateCopy(
+                "/vsimem/jp2lura_28.jp2", src_ds, options=options
+            )
         if warning_expected and gdal.GetLastErrorMsg() == "":
             print(options)
             pytest.fail("warning expected")
@@ -1092,9 +1084,8 @@ def test_jp2lura_30():
     src_ds.GetRasterBand(1).SetRasterColorTable(ct)
 
     gdal.ErrorReset()
-    gdal.PushErrorHandler()
-    out_ds = gdaltest.jp2lura_drv.CreateCopy("/vsimem/jp2lura_30.jp2", src_ds)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdaltest.jp2lura_drv.CreateCopy("/vsimem/jp2lura_30.jp2", src_ds)
     assert out_ds is None
 
 
@@ -1148,13 +1139,12 @@ def DISABLED_jp2lura_33():
   </VRTRasterBand>
 </VRTDataset>"""
     )
-    gdal.PushErrorHandler()
-    out_ds = gdaltest.jp2lura_drv.CreateCopy(
-        "/vsimem/jp2lura_33.jp2",
-        src_ds,
-        options=["BLOCKXSIZE=100000", "BLOCKYSIZE=100000"],
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdaltest.jp2lura_drv.CreateCopy(
+            "/vsimem/jp2lura_33.jp2",
+            src_ds,
+            options=["BLOCKXSIZE=100000", "BLOCKYSIZE=100000"],
+        )
     assert out_ds is None
     out_ds = None
     gdal.Unlink("/vsimem/jp2lura_33.jp2")
@@ -1166,9 +1156,8 @@ def DISABLED_jp2lura_33():
 
 def test_jp2lura_34():
 
-    gdal.PushErrorHandler()
-    ds = gdal.Open("data/jpeg2000/dimensions_above_31bit.jp2")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/jpeg2000/dimensions_above_31bit.jp2")
     assert ds is None
 
 
@@ -1178,9 +1167,8 @@ def test_jp2lura_34():
 
 def test_jp2lura_35():
 
-    gdal.PushErrorHandler()
-    ds = gdal.Open("data/jpeg2000/truncated.jp2")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/jpeg2000/truncated.jp2")
     assert ds is None
 
 
@@ -1191,9 +1179,8 @@ def test_jp2lura_35():
 def test_jp2lura_36():
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 2, 2, 16385)
-    gdal.PushErrorHandler()
-    out_ds = gdaltest.jp2lura_drv.CreateCopy("/vsimem/jp2lura_36.jp2", src_ds)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdaltest.jp2lura_drv.CreateCopy("/vsimem/jp2lura_36.jp2", src_ds)
     assert out_ds is None and gdal.VSIStatL("/vsimem/jp2lura_36.jp2") is None
 
 
@@ -1419,7 +1406,6 @@ def test_jp2lura_40():
     # No metadata
     src_ds = gdal.GetDriverByName("MEM").Create("", 20, 20)
     src_ds.SetGeoTransform([0, 60, 0, 0, 0, -60])
-    gdal.SetConfigOption("GMLJP2OVERRIDE", "/vsimem/override.gml")
 
     gdal.FileFromMemBuffer(
         "/vsimem/override.gml",
@@ -1473,10 +1459,11 @@ def test_jp2lura_40():
     </gmljp2:featureMember>
 </gmljp2:GMLJP2CoverageCollection>""",
     )
-    out_ds = gdaltest.jp2lura_drv.CreateCopy(
-        "/vsimem/jp2lura_40.jp2", src_ds, options=["GeoJP2=NO"]
-    )
-    gdal.SetConfigOption("GMLJP2OVERRIDE", None)
+
+    with gdal.config_option("GMLJP2OVERRIDE", "/vsimem/override.gml"):
+        out_ds = gdaltest.jp2lura_drv.CreateCopy(
+            "/vsimem/jp2lura_40.jp2", src_ds, options=["GeoJP2=NO"]
+        )
     gdal.Unlink("/vsimem/override.gml")
     del out_ds
     ds = gdal.Open("/vsimem/jp2lura_40.jp2")
@@ -1514,13 +1501,12 @@ def test_jp2lura_41():
 
     # Warning if ignored option
     gdal.ErrorReset()
-    gdal.PushErrorHandler()
-    out_ds = gdaltest.jp2lura_drv.CreateCopy(
-        "/vsimem/jp2lura_41.jp2",
-        src_ds,
-        options=["USE_SRC_CODESTREAM=YES", "QUALITY=1"],
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdaltest.jp2lura_drv.CreateCopy(
+            "/vsimem/jp2lura_41.jp2",
+            src_ds,
+            options=["USE_SRC_CODESTREAM=YES", "QUALITY=1"],
+        )
     del out_ds
     # if gdal.GetLastErrorMsg() == '':
     #    gdaltest.post_reason('fail')
@@ -1531,11 +1517,10 @@ def test_jp2lura_41():
     # Warning if source is not JPEG2000
     src_ds = gdal.Open("data/byte.tif")
     gdal.ErrorReset()
-    gdal.PushErrorHandler()
-    out_ds = gdaltest.jp2lura_drv.CreateCopy(
-        "/vsimem/jp2lura_41.jp2", src_ds, options=["USE_SRC_CODESTREAM=YES"]
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        out_ds = gdaltest.jp2lura_drv.CreateCopy(
+            "/vsimem/jp2lura_41.jp2", src_ds, options=["USE_SRC_CODESTREAM=YES"]
+        )
     del out_ds
     assert gdal.GetLastErrorMsg() != ""
     gdal.Unlink("/vsimem/jp2lura_41.jp2")
@@ -1555,12 +1540,12 @@ def test_jp2lura_43():
 # Test GMLJP2v2
 
 
+@pytest.mark.require_driver("GML")
+@pytest.mark.skipif(
+    gdal.GetDriverByName("KML") is None and gdal.GetDriverByName("LIBKML") is None,
+    reason="KML or LIBKML driver missing",
+)
 def test_jp2lura_45():
-
-    if gdal.GetDriverByName("GML") is None:
-        pytest.skip()
-    if gdal.GetDriverByName("KML") is None and gdal.GetDriverByName("LIBKML") is None:
-        pytest.skip()
 
     # Test GMLJP2V2_DEF=YES
     src_ds = gdal.Open("data/byte.tif")
@@ -1672,11 +1657,10 @@ def test_jp2lura_48():
 
 def test_jp2lura_online_1():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/jpeg2000/7sisters200.j2k",
         "7sisters200.j2k",
-    ):
-        pytest.skip()
+    )
 
     # Checksum = 32669 on my PC
     tst = gdaltest.GDALTest(
@@ -1695,10 +1679,9 @@ def test_jp2lura_online_1():
 
 def test_jp2lura_online_2():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/jpeg2000/gcp.jp2", "gcp.jp2"
-    ):
-        pytest.skip()
+    )
 
     # Checksum = 15621 on my PC
     tst = gdaltest.GDALTest(
@@ -1722,14 +1705,13 @@ def test_jp2lura_online_2():
 
 def test_jp2lura_online_3():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://www.openjpeg.org/samples/Bretagne1.j2k", "Bretagne1.j2k"
-    ):
-        pytest.skip()
-    if not gdaltest.download_file(
+    )
+
+    gdaltest.download_or_skip(
         "http://www.openjpeg.org/samples/Bretagne1.bmp", "Bretagne1.bmp"
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "JP2Lura", "tmp/cache/Bretagne1.j2k", 1, None, filename_absolute=1
@@ -1755,14 +1737,13 @@ def test_jp2lura_online_3():
 
 def test_jp2lura_online_4():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://www.openjpeg.org/samples/Bretagne2.j2k", "Bretagne2.j2k"
-    ):
-        pytest.skip()
-    if not gdaltest.download_file(
+    )
+
+    gdaltest.download_or_skip(
         "http://www.openjpeg.org/samples/Bretagne2.bmp", "Bretagne2.bmp"
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "JP2Lura", "tmp/cache/Bretagne2.j2k", 1, None, filename_absolute=1
@@ -1789,11 +1770,10 @@ def test_jp2lura_online_4():
 
 def test_jp2lura_online_5():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://www.gwg.nga.mil/ntb/baseline/software/testfile/Jpeg2000/jp2_09/file9.jp2",
         "file9.jp2",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.Open("tmp/cache/file9.jp2")
     cs1 = ds.GetRasterBand(1).Checksum()
@@ -1810,11 +1790,10 @@ def test_jp2lura_online_5():
 
 def test_jp2lura_online_6():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://www.gwg.nga.mil/ntb/baseline/software/testfile/Jpeg2000/jp2_03/file3.jp2",
         "file3.jp2",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.Open("tmp/cache/file3.jp2")
     # cs1 = ds.GetRasterBand(1).Checksum()
@@ -1905,26 +1884,25 @@ def test_jp2lura_49():
         expected_srs,
         expected_gt,
     ) in tests:
-        gdal.SetConfigOption("GDAL_GEOREF_SOURCES", config_option_value)
-        gdal.FileFromMemBuffer(
-            "/vsimem/byte_nogeoref.jp2",
-            open("data/jpeg2000/byte_nogeoref.jp2", "rb").read(),
-        )
-        if copy_pam:
+        with gdal.config_option("GDAL_GEOREF_SOURCES", config_option_value):
             gdal.FileFromMemBuffer(
-                "/vsimem/byte_nogeoref.jp2.aux.xml",
-                open("data/jpeg2000/byte_nogeoref.jp2.aux.xml", "rb").read(),
+                "/vsimem/byte_nogeoref.jp2",
+                open("data/jpeg2000/byte_nogeoref.jp2", "rb").read(),
             )
-        if copy_worldfile:
-            gdal.FileFromMemBuffer(
-                "/vsimem/byte_nogeoref.j2w",
-                open("data/jpeg2000/byte_nogeoref.j2w", "rb").read(),
-            )
-        ds = gdal.Open("/vsimem/byte_nogeoref.jp2")
-        gt = ds.GetGeoTransform()
-        srs_wkt = ds.GetProjectionRef()
-        ds = None
-        gdal.SetConfigOption("GDAL_GEOREF_SOURCES", None)
+            if copy_pam:
+                gdal.FileFromMemBuffer(
+                    "/vsimem/byte_nogeoref.jp2.aux.xml",
+                    open("data/jpeg2000/byte_nogeoref.jp2.aux.xml", "rb").read(),
+                )
+            if copy_worldfile:
+                gdal.FileFromMemBuffer(
+                    "/vsimem/byte_nogeoref.j2w",
+                    open("data/jpeg2000/byte_nogeoref.j2w", "rb").read(),
+                )
+            ds = gdal.Open("/vsimem/byte_nogeoref.jp2")
+            gt = ds.GetGeoTransform()
+            srs_wkt = ds.GetProjectionRef()
+            ds = None
         gdal.Unlink("/vsimem/byte_nogeoref.jp2")
         gdal.Unlink("/vsimem/byte_nogeoref.jp2.aux.xml")
         gdal.Unlink("/vsimem/byte_nogeoref.j2w")
@@ -2139,7 +2117,7 @@ def test_jp2lura_49():
     ), "Did not get expected filelist"
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.OpenEx(
             "data/jpeg2000/inconsitant_geojp2_gmljp2.jp2",
             open_options=["GEOREF_SOURCES=unhandled"],
@@ -2156,7 +2134,7 @@ def test_jp2lura_50():
     tst = gdaltest.GDALTest(
         "JP2Lura", "jpeg2000/float32_ieee754_split_reversible.jp2", 1, 4672
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -2167,7 +2145,7 @@ def test_jp2lura_51():
 
     # Don't allow it by default
     src_ds = gdal.Open("data/float32.tif")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdaltest.jp2lura_drv.CreateCopy("/vsimem/jp2lura_51.jp2", src_ds)
     assert ds is None
 
@@ -2184,7 +2162,7 @@ def test_jp2lura_51():
     assert maxdiff <= 0.01
 
     # QUALITY
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdaltest.jp2lura_drv.CreateCopy(
             "/vsimem/jp2lura_51.jp2",
             src_ds,
@@ -2197,7 +2175,7 @@ def test_jp2lura_51():
 
         assert validate("/vsimem/jp2lura_51.jp2", inspire_tg=False) != "fail"
     ds = None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdaltest.jp2lura_drv.Delete("/vsimem/jp2lura_51.jp2")
     gdal.Unlink("/vsimem/jp2lura_51.jp2")
 

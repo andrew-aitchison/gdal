@@ -137,6 +137,19 @@ OGRErr OGRMutexedLayer::IUpsertFeature(OGRFeature *poFeature)
     return OGRLayerDecorator::IUpsertFeature(poFeature);
 }
 
+OGRErr OGRMutexedLayer::IUpdateFeature(OGRFeature *poFeature,
+                                       int nUpdatedFieldsCount,
+                                       const int *panUpdatedFieldsIdx,
+                                       int nUpdatedGeomFieldsCount,
+                                       const int *panUpdatedGeomFieldsIdx,
+                                       bool bUpdateStyleString)
+{
+    CPLMutexHolderOptionalLockD(m_hMutex);
+    return OGRLayerDecorator::IUpdateFeature(
+        poFeature, nUpdatedFieldsCount, panUpdatedFieldsIdx,
+        nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx, bUpdateStyleString);
+}
+
 OGRErr OGRMutexedLayer::DeleteFeature(GIntBig nFID)
 {
     CPLMutexHolderOptionalLockD(m_hMutex);
@@ -192,7 +205,7 @@ int OGRMutexedLayer::TestCapability(const char *pszCapability)
     return OGRLayerDecorator::TestCapability(pszCapability);
 }
 
-OGRErr OGRMutexedLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRMutexedLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 {
     CPLMutexHolderOptionalLockD(m_hMutex);
     return OGRLayerDecorator::CreateField(poField, bApproxOK);
@@ -279,7 +292,7 @@ const char *OGRMutexedLayer::GetGeometryColumn()
     return OGRLayerDecorator::GetGeometryColumn();
 }
 
-OGRErr OGRMutexedLayer::SetIgnoredFields(const char **papszFields)
+OGRErr OGRMutexedLayer::SetIgnoredFields(CSLConstList papszFields)
 {
     CPLMutexHolderOptionalLockD(m_hMutex);
     return OGRLayerDecorator::SetIgnoredFields(papszFields);
@@ -317,16 +330,5 @@ OGRErr OGRMutexedLayer::Rename(const char *pszNewName)
     CPLMutexHolderOptionalLockD(m_hMutex);
     return OGRLayerDecorator::Rename(pszNewName);
 }
-
-#if defined(WIN32) && defined(_MSC_VER)
-// Horrible hack: for some reason MSVC doesn't export the class
-// if it is not referenced from the DLL itself
-void OGRRegisterMutexedLayer();
-void OGRRegisterMutexedLayer()
-{
-    CPLAssert(false);  // Never call this function: it will segfault
-    delete new OGRMutexedLayer(NULL, FALSE, NULL);
-}
-#endif
 
 #endif /* #ifndef DOXYGEN_SKIP */

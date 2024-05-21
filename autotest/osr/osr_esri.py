@@ -32,10 +32,9 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import gdaltest
 import pytest
 
-from osgeo import ogr, osr
+from osgeo import osr
 
 ###############################################################################
 # This test verifies that morphToESRI() translates idiosyncratic datum names
@@ -353,10 +352,9 @@ def test_osr_esri_12():
         "standard_parallel_1"
     )
 
-    if srs.GetAttrValue("DATUM") != "North_American_Datum_1983":
-        gdaltest.post_reason(
-            "Got wrong DATUM name (%s) after ESRI morph." % srs.GetAttrValue("DATUM")
-        )
+    assert (
+        srs.GetAttrValue("DATUM") == "North_American_Datum_1983"
+    ), "Got wrong DATUM name (%s) after ESRI morph." % srs.GetAttrValue("DATUM")
 
     assert (
         srs.GetAttrValue("UNIT") == "metre"
@@ -387,10 +385,9 @@ def test_osr_esri_13():
         "standard_parallel_1"
     )
 
-    if srs.GetAttrValue("DATUM") != "North_American_Datum_1983":
-        gdaltest.post_reason(
-            "Got wrong DATUM name (%s) after ESRI morph." % srs.GetAttrValue("DATUM")
-        )
+    assert (
+        srs.GetAttrValue("DATUM") == "North_American_Datum_1983"
+    ), "Got wrong DATUM name (%s) after ESRI morph." % srs.GetAttrValue("DATUM")
 
     assert (
         srs.GetAttrValue("UNIT") == "metre"
@@ -890,37 +887,25 @@ def test_osr_esri_28():
     # 1SP transformed to 2SP form !
     srs.MorphToESRI()
     got_wkt = srs.ExportToPrettyWkt()
-    # Do not do exact test because of subtle difference of precision among compilers
-    assert got_wkt.startswith(
-        """PROJCS["Gunung_Segara_Jakarta_NEIEZ",
-    GEOGCS["GCS_Gunung_Segara_Jakarta",
-        DATUM["D_Gunung_Segara",
-            SPHEROID["Bessel_1841",6377397.155,299.1528128]],
-        PRIMEM["Jakarta",106.807719444444],
-        UNIT["Degree",0.0174532925199433]],
-    PROJECTION["Mercator"],
+    # Do not do exact test because of subtle difference of precision among compilers and PROJ versions
+    assert (
+        """PROJECTION["Mercator"],
     PARAMETER["False_Easting",3900000.0],
     PARAMETER["False_Northing",900000.0],
     PARAMETER["Central_Meridian",110.0],
     PARAMETER["Standard_Parallel_1",4.45405154"""
+        in got_wkt
     )
 
     srs = osr.SpatialReference()
     srs.SetFromUserInput(got_wkt)
     srs.MorphFromESRI()
     got_wkt = srs.ExportToPrettyWkt()
-    # Do not do exact test because of subtle difference of precision among compilers
-    assert got_wkt.startswith(
-        """PROJCS["Segara (Jakarta) / NEIEZ",
-    GEOGCS["Segara (Jakarta)",
-        DATUM["Gunung_Segara_Jakarta",
-            SPHEROID["Bessel 1841",6377397.155,299.1528128,
-                AUTHORITY["EPSG","7004"]],
-            AUTHORITY["EPSG","6613"]],
-        PRIMEM["Jakarta",106.807719444444],
-        UNIT["Degree",0.0174532925199433]],
-    PROJECTION["Mercator_2SP"],
+    # Do not do exact test because of subtle difference of precision among compilers and PROJ versions
+    assert (
+        """PROJECTION["Mercator_2SP"],
     PARAMETER["standard_parallel_1",4.45405154"""
+        in got_wkt
     )
 
 
@@ -1093,11 +1078,8 @@ def test_osr_esri_32():
     prj = ["PROJECTIONLOCA?L_CSw?(  EQUIDISTANT_CONIC", "Paramet", "55555555555555"]
 
     srs_prj = osr.SpatialReference()
-    with gdaltest.error_handler("CPLQuietErrorHandler"):
-        result = srs_prj.ImportFromESRI(prj)
-        assert (
-            result == ogr.OGRERR_CORRUPT_DATA
-        ), "Corrupt EQUIDISTANT_CONIC not marked corrupt"
+    with pytest.raises(Exception):
+        srs_prj.ImportFromESRI(prj)
 
 
 ###############################################################################
@@ -1107,11 +1089,103 @@ def test_osr_esri_32():
 def test_osr_esri_33():
 
     sr = osr.SpatialReference()
-    with gdaltest.error_handler():
+    with osr.ExceptionMgr(useExceptions=False):
         sr.ImportFromWkt("PROJCS[]")
-        sr.MorphFromESRI()
-        sr.MorphToESRI()
+    sr.MorphFromESRI()
+    sr.MorphToESRI()
 
 
 ###############################################################################
 #
+
+
+def test_osr_esri_lambert_azimutal_no_radius_of_sphere_of_reference():
+
+    prj = [
+        "Projection    LAMBERT_AZIMUTHAL",
+        "Datum         WGS84",
+        "Spheroid      WGS84",
+        "Units         METERS",
+        "Zunits        NO",
+        "Xshift        0.0",
+        "Yshift        0.0",
+        "Parameters",
+        "  20  0  0.0 /* longitude of center of projection",
+        "   5  0  0.0 /* latitude of center of projection",
+        "1.0 /* false easting (meters)",
+        "2.0 /* false northing (meters)",
+    ]
+
+    srs_prj = osr.SpatialReference()
+    srs_prj.ImportFromESRI(prj)
+
+    wkt = """PROJCS["unnamed",
+    GEOGCS["WGS 84",
+        DATUM["WGS_1984",
+            SPHEROID["WGS 84",6378137,298.257223563,
+                AUTHORITY["EPSG","7030"]],
+            AUTHORITY["EPSG","6326"]],
+        PRIMEM["Greenwich",0,
+            AUTHORITY["EPSG","8901"]],
+        UNIT["degree",0.0174532925199433,
+            AUTHORITY["EPSG","9122"]],
+        AUTHORITY["EPSG","4326"]],
+    PROJECTION["Lambert_Azimuthal_Equal_Area"],
+    PARAMETER["latitude_of_center",5],
+    PARAMETER["longitude_of_center",20],
+    PARAMETER["false_easting",1],
+    PARAMETER["false_northing",2],
+    UNIT["METERS",1],
+    AXIS["Easting",EAST],
+    AXIS["Northing",NORTH]]"""
+
+    srs_wkt = osr.SpatialReference(wkt=wkt)
+    assert srs_prj.IsSame(srs_wkt)
+
+
+###############################################################################
+#
+
+
+@pytest.mark.parametrize("has_semi_major_and_minor_axis", [True, False])
+def test_osr_esri_lambert_azimutal_radius_of_sphere_of_reference(
+    has_semi_major_and_minor_axis,
+):
+
+    prj = [
+        "Projection    LAMBERT_AZIMUTHAL",
+        "Units         METERS",
+        "Zunits        NO",
+        "Xshift        0.0",
+        "Yshift        0.0",
+        "Parameters    6378137.0  6378137.0"
+        if has_semi_major_and_minor_axis
+        else "Parameters",
+        "6378137.0 /* radius of the sphere of reference",
+        "  20  0  0.0 /* longitude of center of projection",
+        "   5  0  0.0 /* latitude of center of projection",
+        "1.0 /* false easting (meters)",
+        "2.0 /* false northing (meters)",
+    ]
+
+    srs_prj = osr.SpatialReference()
+    srs_prj.ImportFromESRI(prj)
+
+    wkt = """PROJCS["unnamed",
+    GEOGCS["unknown",
+        DATUM["unknown",
+            SPHEROID["unknown",6378137,0]],
+        PRIMEM["Greenwich",0],
+        UNIT["degree",0.0174532925199433,
+            AUTHORITY["EPSG","9122"]]],
+    PROJECTION["Lambert_Azimuthal_Equal_Area"],
+    PARAMETER["latitude_of_center",5],
+    PARAMETER["longitude_of_center",20],
+    PARAMETER["false_easting",1],
+    PARAMETER["false_northing",2],
+    UNIT["METERS",1],
+    AXIS["Easting",EAST],
+    AXIS["Northing",NORTH]]"""
+
+    srs_wkt = osr.SpatialReference(wkt=wkt)
+    assert srs_prj.IsSame(srs_wkt)

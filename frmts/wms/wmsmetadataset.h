@@ -72,11 +72,13 @@ class GDALWMSMetaDataset final : public GDALPamDataset
                        const char *pszAbstract, const char *pszSRS,
                        const char *pszMinX, const char *pszMinY,
                        const char *pszMaxX, const char *pszMaxY,
-                       CPLString osFormat, CPLString osTransparent);
+                       const std::string &osFormat,
+                       const std::string &osTransparent);
 
     void
-    ExploreLayer(CPLXMLNode *psXML, CPLString osFormat, CPLString osTransparent,
-                 CPLString osPreferredSRS, const char *pszSRS = nullptr,
+    ExploreLayer(CPLXMLNode *psXML, const CPLString &osFormat,
+                 const CPLString &osTransparent,
+                 const CPLString &osPreferredSRS, const char *pszSRS = nullptr,
                  const char *pszMinX = nullptr, const char *pszMinY = nullptr,
                  const char *pszMaxX = nullptr, const char *pszMaxY = nullptr);
 
@@ -90,7 +92,8 @@ class GDALWMSMetaDataset final : public GDALPamDataset
 
     // WMS-C only
     void AddWMSCSubDataset(WMSCTileSetDesc &oWMSCTileSetDesc,
-                           const char *pszTitle, CPLString osTransparent);
+                           const char *pszTitle,
+                           const CPLString &osTransparent);
 
     // WMS-C only
     void ParseWMSCTileSets(CPLXMLNode *psXML);
@@ -102,10 +105,11 @@ class GDALWMSMetaDataset final : public GDALPamDataset
     virtual char **GetMetadataDomainList() override;
     virtual char **GetMetadata(const char *pszDomain = "") override;
 
-    static GDALDataset *AnalyzeGetCapabilities(CPLXMLNode *psXML,
-                                               CPLString osFormat = "",
-                                               CPLString osTransparent = "",
-                                               CPLString osPreferredSRS = "");
+    static GDALDataset *
+    AnalyzeGetCapabilities(CPLXMLNode *psXML,
+                           const std::string &osFormat = std::string(),
+                           const std::string &osTransparent = std::string(),
+                           const std::string &osPreferredSRS = std::string());
     static GDALDataset *AnalyzeTileMapService(CPLXMLNode *psXML);
 
     static GDALDataset *DownloadGetCapabilities(GDALOpenInfo *poOpenInfo);

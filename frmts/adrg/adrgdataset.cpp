@@ -328,14 +328,15 @@ static unsigned int WriteSubFieldStr(VSILFILE *fd, const char *pszStr,
 {
     char *str = (char *)CPLMalloc(size + 1);
     memset(str, ' ', size);
-    if (strlen(pszStr) > size)
+    str[size] = 0;
+    const size_t nStrLen = strlen(pszStr);
+    if (nStrLen > size)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "strlen(pszStr) > size");
         CPLFree(str);
         return size;
     }
-    strcpy(str, pszStr);
-    str[strlen(pszStr)] = ' ';
+    memcpy(str, pszStr, nStrLen);
     VSIFWriteL(str, 1, size, fd);
     CPLFree(str);
     return size;
@@ -1488,7 +1489,7 @@ char **ADRGDataset::GetIMGListFromGEN(const char *pszFileName,
             /* Build full IMG file name from BAD value */
             CPLString osGENDir(CPLGetDirname(pszFileName));
 
-            CPLString osFileName =
+            const CPLString osFileName =
                 CPLFormFilename(osGENDir.c_str(), osBAD.c_str(), nullptr);
             VSIStatBufL sStatBuf;
             if (VSIStatL(osFileName, &sStatBuf) == 0)
@@ -1778,7 +1779,7 @@ GDALDataset *ADRGDataset::Create(const char *pszFilename, int nXSize,
     poDS->fdIMG = fdIMG;
     poDS->fdTHF = fdTHF;
 
-    poDS->osBaseFileName = osBaseFileName;
+    poDS->osBaseFileName = std::move(osBaseFileName);
     poDS->bCreation = TRUE;
     poDS->nNextAvailableBlock = 1;
     poDS->NFC = (nXSize + 127) / 128;

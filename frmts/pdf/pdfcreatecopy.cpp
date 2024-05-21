@@ -44,6 +44,11 @@
 #include <utility>
 #include <vector>
 
+// #define HACK_TO_GENERATE_OCMD can be set to produce a (single layer)
+// non-structured vector PDF with a OCMD (Optional Content Group Membership
+// Dictionary) similar to test case of https://github.com/OSGeo/gdal/issues/8372
+// like with "ogr2ogr poly.pdf poly.shp -dsco STREAM_COMPRESS=NONE -limit 1"
+
 /************************************************************************/
 /*                        GDALPDFBaseWriter()                           */
 /************************************************************************/
@@ -587,8 +592,7 @@ void GDALPDFBaseWriter::StartObjWithStream(const GDALPDFObjectNum &nObjectId,
     m_fpBack = m_fp;
     if (bDeflate)
     {
-        m_fpGZip = reinterpret_cast<VSILFILE *>(VSICreateGZipWritable(
-            reinterpret_cast<VSIVirtualHandle *>(m_fp), TRUE, FALSE));
+        m_fpGZip = VSICreateGZipWritable(m_fp, TRUE, FALSE);
         m_fp = m_fpGZip;
     }
 }
@@ -698,7 +702,7 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteSRS_ISO32000(GDALDataset *poSrcDS,
     double dfLRPixel = nWidth;
     double dfLRLine = nHeight;
 
-    GDAL_GCP asNeatLineGCPs[4];
+    std::vector<gdal::GCP> asNeatLineGCPs(4);
     if (pszNEATLINE == nullptr)
         pszNEATLINE = poSrcDS->GetMetadataItem("NEATLINE");
     if (bHasGT && pszNEATLINE != nullptr && pszNEATLINE[0] != '\0')
@@ -717,32 +721,33 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteSRS_ISO32000(GDALDataset *poSrcDS,
                 {
                     const double X = poLS->getX(i);
                     const double Y = poLS->getY(i);
-                    asNeatLineGCPs[i].dfGCPX = X;
-                    asNeatLineGCPs[i].dfGCPY = Y;
+                    asNeatLineGCPs[i].X() = X;
+                    asNeatLineGCPs[i].Y() = Y;
                     const double x = adfGeoTransformInv[0] +
                                      X * adfGeoTransformInv[1] +
                                      Y * adfGeoTransformInv[2];
                     const double y = adfGeoTransformInv[3] +
                                      X * adfGeoTransformInv[4] +
                                      Y * adfGeoTransformInv[5];
-                    asNeatLineGCPs[i].dfGCPPixel = x;
-                    asNeatLineGCPs[i].dfGCPLine = y;
+                    asNeatLineGCPs[i].Pixel() = x;
+                    asNeatLineGCPs[i].Line() = y;
                 }
 
                 int iUL = 0;
                 int iUR = 0;
                 int iLR = 0;
                 int iLL = 0;
-                GDALPDFFind4Corners(asNeatLineGCPs, iUL, iUR, iLR, iLL);
+                GDALPDFFind4Corners(gdal::GCP::c_ptr(asNeatLineGCPs), iUL, iUR,
+                                    iLR, iLL);
 
-                if (fabs(asNeatLineGCPs[iUL].dfGCPPixel -
-                         asNeatLineGCPs[iLL].dfGCPPixel) > .5 ||
-                    fabs(asNeatLineGCPs[iUR].dfGCPPixel -
-                         asNeatLineGCPs[iLR].dfGCPPixel) > .5 ||
-                    fabs(asNeatLineGCPs[iUL].dfGCPLine -
-                         asNeatLineGCPs[iUR].dfGCPLine) > .5 ||
-                    fabs(asNeatLineGCPs[iLL].dfGCPLine -
-                         asNeatLineGCPs[iLR].dfGCPLine) > .5)
+                if (fabs(asNeatLineGCPs[iUL].Pixel() -
+                         asNeatLineGCPs[iLL].Pixel()) > .5 ||
+                    fabs(asNeatLineGCPs[iUR].Pixel() -
+                         asNeatLineGCPs[iLR].Pixel()) > .5 ||
+                    fabs(asNeatLineGCPs[iUL].Line() -
+                         asNeatLineGCPs[iUR].Line()) > .5 ||
+                    fabs(asNeatLineGCPs[iLL].Line() -
+                         asNeatLineGCPs[iLR].Line()) > .5)
                 {
                     CPLError(CE_Warning, CPLE_NotSupported,
                              "Neatline coordinates should form a rectangle in "
@@ -750,13 +755,13 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteSRS_ISO32000(GDALDataset *poSrcDS,
                     for (int i = 0; i < 4; i++)
                     {
                         CPLDebug("PDF", "pixel[%d] = %.1f, line[%d] = %.1f", i,
-                                 asNeatLineGCPs[i].dfGCPPixel, i,
-                                 asNeatLineGCPs[i].dfGCPLine);
+                                 asNeatLineGCPs[i].Pixel(), i,
+                                 asNeatLineGCPs[i].Line());
                     }
                 }
                 else
                 {
-                    pasGCPList = asNeatLineGCPs;
+                    pasGCPList = gdal::GCP::c_ptr(asNeatLineGCPs);
                 }
             }
         }
@@ -1813,8 +1818,10 @@ bool GDALPDFWriter::StartPage(GDALDataset *poClippingDS, double dfDPI,
         oDictPage.Add("LGIDict", nLGIDictId, 0);
     }
 
+#ifndef HACK_TO_GENERATE_OCMD
     if (bHasOGRData)
         oDictPage.Add("StructParents", 0);
+#endif
 
     VSIFPrintfL(m_fp, "%s\n", oDictPage.Serialize().c_str());
     EndObj();
@@ -2171,9 +2178,6 @@ bool GDALPDFWriter::WriteOGRDataSource(const char *pszOGRDataSource,
                                        const char *pszOGRLinkField,
                                        int bWriteOGRAttributes)
 {
-    if (OGRGetDriverCount() == 0)
-        OGRRegisterAll();
-
     OGRDataSourceH hDS = OGROpen(pszOGRDataSource, 0, nullptr);
     if (hDS == nullptr)
         return false;
@@ -2208,13 +2212,19 @@ bool GDALPDFWriter::WriteOGRDataSource(const char *pszOGRDataSource,
 /*                           StartOGRLayer()                            */
 /************************************************************************/
 
-GDALPDFLayerDesc GDALPDFWriter::StartOGRLayer(CPLString osLayerName,
+GDALPDFLayerDesc GDALPDFWriter::StartOGRLayer(const std::string &osLayerName,
                                               int bWriteOGRAttributes)
 {
     GDALPDFLayerDesc osVectorDesc;
     osVectorDesc.osLayerName = osLayerName;
+#ifdef HACK_TO_GENERATE_OCMD
+    osVectorDesc.bWriteOGRAttributes = false;
+    auto nParentOCGId = WriteOCG("parent");
+    osVectorDesc.nOCGId = WriteOCG(osLayerName.c_str(), nParentOCGId);
+#else
     osVectorDesc.bWriteOGRAttributes = bWriteOGRAttributes;
-    osVectorDesc.nOCGId = WriteOCG(osLayerName);
+    osVectorDesc.nOCGId = WriteOCG(osLayerName.c_str());
+#endif
     if (bWriteOGRAttributes)
         osVectorDesc.nFeatureLayerId = AllocNewObject();
 
@@ -2266,8 +2276,8 @@ void GDALPDFWriter::EndOGRLayer(GDALPDFLayerDesc &osVectorDesc)
 int GDALPDFWriter::WriteOGRLayer(OGRDataSourceH hDS, int iLayer,
                                  const char *pszOGRDisplayField,
                                  const char *pszOGRLinkField,
-                                 CPLString osLayerName, int bWriteOGRAttributes,
-                                 int &iObj)
+                                 const std::string &osLayerName,
+                                 int bWriteOGRAttributes, int &iObj)
 {
     GDALDataset *poClippingDS = oPageContext.poClippingDS;
     double adfGeoTransform[6];
@@ -2758,7 +2768,7 @@ void GDALPDFBaseWriter::GetObjectStyle(
                         }
                         else
                         {
-                            GDALPDFImageDesc &oDesc =
+                            const GDALPDFImageDesc &oDesc =
                                 oMapSymbolFilenameToDesc[os.osSymbolId];
                             os.nImageSymbolId = oDesc.nImageId;
                             os.nImageWidth = (int)oDesc.dfXSize;
@@ -3691,7 +3701,7 @@ int GDALPDFWriter::EndPage(const char *pszExtraImages,
     int iObj = 0;
     for (size_t iLayer = 0; iLayer < oPageContext.asVectorDesc.size(); iLayer++)
     {
-        GDALPDFLayerDesc &oLayerDesc = oPageContext.asVectorDesc[iLayer];
+        const GDALPDFLayerDesc &oLayerDesc = oPageContext.asVectorDesc[iLayer];
 
         VSIFPrintfL(m_fp, "/OC /Lyr%d BDC\n", oLayerDesc.nOCGId.toInt());
 
@@ -3724,9 +3734,8 @@ int GDALPDFWriter::EndPage(const char *pszExtraImages,
     /*  Write drawing instructions for labels of vector features      */
     /* -------------------------------------------------------------- */
     iObj = 0;
-    for (size_t iLayer = 0; iLayer < oPageContext.asVectorDesc.size(); iLayer++)
+    for (const GDALPDFLayerDesc &oLayerDesc : oPageContext.asVectorDesc)
     {
-        GDALPDFLayerDesc &oLayerDesc = oPageContext.asVectorDesc[iLayer];
         if (oLayerDesc.nOCGTextId.toBool())
         {
             VSIFPrintfL(m_fp, "/OC /Lyr%d BDC\n", oLayerDesc.nOCGId.toInt());
@@ -3819,7 +3828,8 @@ int GDALPDFWriter::EndPage(const char *pszExtraImages,
         for (size_t iLayer = 0; iLayer < oPageContext.asVectorDesc.size();
              iLayer++)
         {
-            GDALPDFLayerDesc &oLayerDesc = oPageContext.asVectorDesc[iLayer];
+            const GDALPDFLayerDesc &oLayerDesc =
+                oPageContext.asVectorDesc[iLayer];
             for (size_t iVector = 0; iVector < oLayerDesc.aIds.size();
                  iVector++)
             {
@@ -3859,10 +3869,8 @@ int GDALPDFWriter::EndPage(const char *pszExtraImages,
         GDALPDFDictionaryRW *poDictXObject = new GDALPDFDictionaryRW();
         oDict.Add("XObject", poDictXObject);
         size_t iImage;
-        for (size_t iRaster = 0; iRaster < oPageContext.asRasterDesc.size();
-             iRaster++)
+        for (const GDALPDFRasterDesc &oDesc : oPageContext.asRasterDesc)
         {
-            const GDALPDFRasterDesc &oDesc = oPageContext.asRasterDesc[iRaster];
             for (iImage = 0; iImage < oDesc.asImageDesc.size(); iImage++)
             {
                 poDictXObject->Add(
@@ -3878,10 +3886,8 @@ int GDALPDFWriter::EndPage(const char *pszExtraImages,
                            asExtraImageDesc[iImage].nImageId.toInt()),
                 asExtraImageDesc[iImage].nImageId, 0);
         }
-        for (size_t iLayer = 0; iLayer < oPageContext.asVectorDesc.size();
-             iLayer++)
+        for (const GDALPDFLayerDesc &oLayerDesc : oPageContext.asVectorDesc)
         {
-            GDALPDFLayerDesc &oLayerDesc = oPageContext.asVectorDesc[iLayer];
             for (size_t iVector = 0; iVector < oLayerDesc.aIds.size();
                  iVector++)
             {
@@ -3963,10 +3969,21 @@ int GDALPDFWriter::EndPage(const char *pszExtraImages,
         if (!m_asOCGs.empty())
         {
             GDALPDFDictionaryRW *poDictProperties = new GDALPDFDictionaryRW();
+#ifdef HACK_TO_GENERATE_OCMD
+            GDALPDFDictionaryRW *poOCMD = new GDALPDFDictionaryRW();
+            poOCMD->Add("Type", GDALPDFObjectRW::CreateName("OCMD"));
+            GDALPDFArrayRW *poArray = new GDALPDFArrayRW();
+            poArray->Add(m_asOCGs[0].nId, 0);
+            poArray->Add(m_asOCGs[1].nId, 0);
+            poOCMD->Add("OCGs", poArray);
+            poDictProperties->Add(CPLSPrintf("Lyr%d", m_asOCGs[1].nId.toInt()),
+                                  poOCMD);
+#else
             for (size_t i = 0; i < m_asOCGs.size(); i++)
                 poDictProperties->Add(
                     CPLSPrintf("Lyr%d", m_asOCGs[i].nId.toInt()),
                     m_asOCGs[i].nId, 0);
+#endif
             oDict.Add("Properties", poDictProperties);
         }
 
@@ -4297,6 +4314,7 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteBlock(
         char szTmp[64];
         char **papszOptions = nullptr;
 
+        bool bEcwEncodeKeyRequiredButNotFound = false;
         if (eCompressMethod == COMPRESS_JPEG)
         {
             poJPEGDriver = (GDALDriver *)GDALGetDriverByName("JPEG");
@@ -4321,6 +4339,19 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteBlock(
                             GDAL_DMD_CREATIONDATATYPES) == nullptr)
                     {
                         poJPEGDriver = nullptr;
+                    }
+                    else if (poJPEGDriver)
+                    {
+                        if (strstr(poJPEGDriver->GetMetadataItem(
+                                       GDAL_DMD_CREATIONOPTIONLIST),
+                                   "ECW_ENCODE_KEY"))
+                        {
+                            if (!CPLGetConfigOption("ECW_ENCODE_KEY", nullptr))
+                            {
+                                bEcwEncodeKeyRequiredButNotFound = true;
+                                poJPEGDriver = nullptr;
+                            }
+                        }
                     }
                 }
                 if (poJPEGDriver)
@@ -4348,8 +4379,18 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteBlock(
 
         if (poJPEGDriver == nullptr)
         {
-            CPLError(CE_Failure, CPLE_NotSupported, "No %s driver found",
-                     (eCompressMethod == COMPRESS_JPEG) ? "JPEG" : "JPEG2000");
+            if (bEcwEncodeKeyRequiredButNotFound)
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "No JPEG2000 driver usable (JP2ECW detected but "
+                         "ECW_ENCODE_KEY configuration option not set");
+            }
+            else
+            {
+                CPLError(CE_Failure, CPLE_NotSupported, "No %s driver found",
+                         (eCompressMethod == COMPRESS_JPEG) ? "JPEG"
+                                                            : "JPEG2000");
+            }
             eErr = CE_Failure;
             goto end;
         }
@@ -4374,7 +4415,8 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteBlock(
     }
     else
     {
-        GByte *pabyLine = (GByte *)CPLMalloc(nReqXSize * nBands);
+        GByte *pabyLine =
+            (GByte *)CPLMalloc(static_cast<size_t>(nReqXSize) * nBands);
         for (int iLine = 0; iLine < nReqYSize; iLine++)
         {
             /* Get pixel interleaved data */
@@ -4420,7 +4462,8 @@ GDALPDFObjectNum GDALPDFBaseWriter::WriteBlock(
                 }
             }
 
-            if (VSIFWriteL(pabyLine, nReqXSize * nBands, 1, m_fp) != 1)
+            if (VSIFWriteL(pabyLine, static_cast<size_t>(nReqXSize) * nBands, 1,
+                           m_fp) != 1)
             {
                 eErr = CE_Failure;
                 break;

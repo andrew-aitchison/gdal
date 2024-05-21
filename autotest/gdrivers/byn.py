@@ -32,6 +32,10 @@
 
 
 import gdaltest
+import pytest
+
+pytestmark = pytest.mark.require_driver("BYN")
+
 
 ###############################################################################
 # Read test of byte file.
@@ -50,7 +54,7 @@ def test_byn_1():
 def test_byn_2():
 
     tst = gdaltest.GDALTest("BYN", "byn/cgg2013ai08_reduced.byn", 1, 64764)
-    return tst.testCreateCopy(new_filename="tmp/byn_test_2.byn")
+    tst.testCreateCopy(new_filename="tmp/byn_test_2.byn")
 
 
 ###############################################################################

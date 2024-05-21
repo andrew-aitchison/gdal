@@ -47,6 +47,38 @@ from osgeo_utils import gdal2xyz
 from osgeo_utils.auxiliary.raster_creation import create_flat_raster
 from osgeo_utils.samples import gdallocationinfo
 
+pytestmark = pytest.mark.skipif(
+    test_py_scripts.get_py_script("gdal2xyz") is None,
+    reason="gdal2xyz not available",
+)
+
+
+@pytest.fixture()
+def script_path():
+    return test_py_scripts.get_py_script("gdal2xyz")
+
+
+###############################################################################
+#
+
+
+def test_gdal2xyz_help(script_path):
+
+    assert "ERROR" not in test_py_scripts.run_py_script(
+        script_path, "gdal2xyz", "--help"
+    )
+
+
+###############################################################################
+#
+
+
+def test_gdal2xyz_version(script_path):
+
+    assert "ERROR" not in test_py_scripts.run_py_script(
+        script_path, "gdal2xyz", "--version"
+    )
+
 
 def test_gdal2xyz_py_1():
     """test get_ovr_idx, create_flat_raster"""
@@ -86,6 +118,7 @@ def test_gdal2xyz_py_1():
             dst_nodata=dst_nodata,
             skip_nodata=skip_nodata,
             pre_allocate_np_arrays=pre_allocate_np_arrays,
+            progress_callback=None,
         )
         _pixels, _lines, data2 = gdallocationinfo.gdallocationinfo(
             ds,
@@ -102,39 +135,52 @@ def test_gdal2xyz_py_1():
 # Test -b at beginning
 
 
-def test_gdal2xyz_py_2():
+def test_gdal2xyz_py_2(script_path, tmp_path):
 
-    script = "gdal2xyz"
-    folder = test_py_scripts.get_py_script(script)
-    if folder is None:
-        pytest.skip()
+    out_xyz = str(tmp_path / "out.xyz")
 
     arguments = "-b 1"
-    arguments += " " + test_py_scripts.get_data_path("gcore") + "byte.tif"
-    arguments += " tmp/out.xyz"
+    arguments += " " + test_py_scripts.get_data_path("gcore") + "byte.tif "
+    arguments += out_xyz
 
-    test_py_scripts.run_py_script(folder, script, arguments)
+    test_py_scripts.run_py_script(script_path, "gdal2xyz", arguments)
 
-    assert os.path.exists("tmp/out.xyz")
-    os.unlink("tmp/out.xyz")
+    assert os.path.exists(out_xyz)
 
 
 ###############################################################################
 # Test -b at end
 
 
-def test_gdal2xyz_py_3():
+def test_gdal2xyz_py_3(script_path, tmp_path):
 
-    script = "gdal2xyz"
-    folder = test_py_scripts.get_py_script(script)
-    if folder is None:
-        pytest.skip()
+    out_xyz = str(tmp_path / "out.xyz")
 
-    arguments = test_py_scripts.get_data_path("gcore") + "byte.tif"
-    arguments += " tmp/out.xyz"
+    arguments = test_py_scripts.get_data_path("gcore") + "byte.tif "
+    arguments += out_xyz
     arguments += " -b 1"
 
-    test_py_scripts.run_py_script(folder, script, arguments)
+    test_py_scripts.run_py_script(script_path, "gdal2xyz", arguments)
 
-    assert os.path.exists("tmp/out.xyz")
-    os.unlink("tmp/out.xyz")
+    assert os.path.exists(out_xyz)
+
+
+###############################################################################
+# Test -srcnodata and -dstnodata
+
+
+def test_gdal2xyz_py_srcnodata_dstnodata(script_path, tmp_path):
+
+    out_xyz = str(tmp_path / "out.xyz")
+
+    arguments = "-allbands -srcnodata 0 0 0 -dstnodata 1 2 3"
+    arguments += " " + test_py_scripts.get_data_path("gcore") + "rgbsmall.tif "
+    arguments += out_xyz
+
+    test_py_scripts.run_py_script(script_path, "gdal2xyz", arguments)
+
+    assert os.path.exists(out_xyz)
+    with open(out_xyz, "rb") as f:
+        l = f.readline()
+
+    assert l.startswith(b"-44.838604 -22.9343 1 2 3")

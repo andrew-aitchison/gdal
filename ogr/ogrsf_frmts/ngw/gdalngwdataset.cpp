@@ -39,7 +39,8 @@ class NGWWrapperRasterBand : public GDALProxyRasterBand
     GDALRasterBand *poBaseBand;
 
   protected:
-    virtual GDALRasterBand *RefUnderlyingRasterBand() const override
+    virtual GDALRasterBand *
+    RefUnderlyingRasterBand(bool /*bForceOpen*/) const override
     {
         return poBaseBand;
     }
@@ -51,6 +52,7 @@ class NGWWrapperRasterBand : public GDALProxyRasterBand
         eDataType = poBaseBand->GetRasterDataType();
         poBaseBand->GetBlockSize(&nBlockXSize, &nBlockYSize);
     }
+
     virtual ~NGWWrapperRasterBand()
     {
     }
@@ -380,7 +382,7 @@ bool OGRNGWDataset::Init(int nOpenFlagsIn)
 
                 CPLFree(pszRasterUrl);
 
-                poRasterDS = reinterpret_cast<GDALDataset *>(GDALOpenEx(
+                poRasterDS = GDALDataset::FromHandle(GDALOpenEx(
                     pszConnStr,
                     GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_INTERNAL,
                     nullptr, nullptr, nullptr));
@@ -597,9 +599,8 @@ void OGRNGWDataset::AddRaster(const CPLJSONObject &oRasterJsonObj,
  * ICreateLayer
  */
 OGRLayer *OGRNGWDataset::ICreateLayer(const char *pszNameIn,
-                                      OGRSpatialReference *poSpatialRef,
-                                      OGRwkbGeometryType eGType,
-                                      char **papszOptions)
+                                      const OGRGeomFieldDefn *poGeomFieldDefn,
+                                      CSLConstList papszOptions)
 {
     if (!IsUpdateMode())
     {
@@ -607,6 +608,10 @@ OGRLayer *OGRNGWDataset::ICreateLayer(const char *pszNameIn,
                  "Operation not available in read-only mode");
         return nullptr;
     }
+
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSpatialRef =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     // Check permissions as we create new layer in memory and will create in
     // during SyncToDisk.
@@ -633,8 +638,9 @@ OGRLayer *OGRNGWDataset::ICreateLayer(const char *pszNameIn,
         return nullptr;
     }
 
-    poSpatialRef->AutoIdentifyEPSG();
-    const char *pszEPSG = poSpatialRef->GetAuthorityCode(nullptr);
+    OGRSpatialReference *poSRSClone = poSpatialRef->Clone();
+    poSRSClone->AutoIdentifyEPSG();
+    const char *pszEPSG = poSRSClone->GetAuthorityCode(nullptr);
     int nEPSG = -1;
     if (pszEPSG != nullptr)
     {
@@ -645,6 +651,7 @@ OGRLayer *OGRNGWDataset::ICreateLayer(const char *pszNameIn,
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Unsupported spatial reference EPSG code: %d", nEPSG);
+        poSRSClone->Release();
         return nullptr;
     }
 
@@ -666,6 +673,7 @@ OGRLayer *OGRNGWDataset::ICreateLayer(const char *pszNameIn,
                          "Use the layer creation option OVERWRITE=YES to "
                          "replace it.",
                          pszNameIn);
+                poSRSClone->Release();
                 return nullptr;
             }
         }
@@ -674,7 +682,6 @@ OGRLayer *OGRNGWDataset::ICreateLayer(const char *pszNameIn,
     // Create layer.
     std::string osKey = CSLFetchNameValueDef(papszOptions, "KEY", "");
     std::string osDesc = CSLFetchNameValueDef(papszOptions, "DESCRIPTION", "");
-    OGRSpatialReference *poSRSClone = poSpatialRef->Clone();
     poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     OGRNGWLayer *poLayer =
         new OGRNGWLayer(this, pszNameIn, poSRSClone, eGType, osKey, osDesc);
@@ -837,10 +844,12 @@ CPLErr OGRNGWDataset::SetMetadataItem(const char *pszName, const char *pszValue,
 /*
  * FlushCache()
  */
-void OGRNGWDataset::FlushCache(bool bAtClosing)
+CPLErr OGRNGWDataset::FlushCache(bool bAtClosing)
 {
-    GDALDataset::FlushCache(bAtClosing);
-    FlushMetadata(GetMetadata("NGW"));
+    CPLErr eErr = GDALDataset::FlushCache(bAtClosing);
+    if (!FlushMetadata(GetMetadata("NGW")))
+        eErr = CE_Failure;
+    return eErr;
 }
 
 /*
@@ -1123,7 +1132,7 @@ OGRLayer *OGRNGWDataset::ExecuteSQL(const char *pszStatement,
 
             std::set<std::string> aosFields;
             bool bSkip = false;
-            for (int i = 0; i < oSelect.result_columns; ++i)
+            for (int i = 0; i < oSelect.result_columns(); ++i)
             {
                 swq_col_func col_func = oSelect.column_defs[i].col_func;
                 if (col_func != SWQCF_NONE)
@@ -1289,7 +1298,7 @@ CPLErr OGRNGWDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
 
                 // Fill buffer transparent color.
                 memset(pData, 0,
-                       nBufXSize * nBufYSize * nBandCount *
+                       static_cast<size_t>(nBufXSize) * nBufYSize * nBandCount *
                            GDALGetDataTypeSizeBytes(eBufType));
                 return CE_None;
             }

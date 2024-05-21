@@ -84,7 +84,8 @@ OGRElasticLayer::OGRElasticLayer(const char *pszLayerName,
                                  const char *pszIndexName,
                                  const char *pszMappingName,
                                  OGRElasticDataSource *poDS,
-                                 char **papszOptions, const char *pszESSearch)
+                                 CSLConstList papszOptions,
+                                 const char *pszESSearch)
     :
 
       m_poDS(poDS), m_osIndexName(pszIndexName ? pszIndexName : ""),
@@ -204,9 +205,15 @@ OGRElasticLayer::OGRElasticLayer(const char *pszLayerName,
     {
         OGRFieldDefn oFieldDefn("_index", OFTString);
         poFeatureDefn->AddFieldDefn(&oFieldDefn);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
         m_aaosFieldPaths.insert(m_aaosFieldPaths.begin(),
                                 std::vector<CPLString>());
-
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         for (auto &kv : m_aosMapToFieldIndex)
         {
             kv.second++;
@@ -1414,7 +1421,8 @@ static void decode_geohash_bbox(const char *geohash, double lat[2],
     hashlen = static_cast<int>(strlen(geohash));
     for (i = 0; i < hashlen; i++)
     {
-        c = static_cast<char>(tolower(geohash[i]));
+        c = static_cast<char>(
+            CPLTolower(static_cast<unsigned char>(geohash[i])));
         cd = static_cast<char>(strchr(BASE32, c) - BASE32);
         for (j = 0; j < 5; j++)
         {
@@ -2898,7 +2906,7 @@ bool OGRElasticLayer::PushIndex()
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRElasticLayer::CreateField(OGRFieldDefn *poFieldDefn,
+OGRErr OGRElasticLayer::CreateField(const OGRFieldDefn *poFieldDefn,
                                     int /*bApproxOK*/)
 {
     if (m_poDS->GetAccess() != GA_Update)
@@ -2951,7 +2959,7 @@ OGRErr OGRElasticLayer::CreateField(OGRFieldDefn *poFieldDefn,
 /*                           CreateGeomField()                          */
 /************************************************************************/
 
-OGRErr OGRElasticLayer::CreateGeomField(OGRGeomFieldDefn *poFieldIn,
+OGRErr OGRElasticLayer::CreateGeomField(const OGRGeomFieldDefn *poFieldIn,
                                         int /*bApproxOK*/)
 
 {
@@ -2975,10 +2983,13 @@ OGRErr OGRElasticLayer::CreateGeomField(OGRGeomFieldDefn *poFieldIn,
     }
 
     OGRGeomFieldDefn oFieldDefn(poFieldIn);
-    if (oFieldDefn.GetSpatialRef())
+    auto poSRSOri = poFieldIn->GetSpatialRef();
+    if (poSRSOri)
     {
-        oFieldDefn.GetSpatialRef()->SetAxisMappingStrategy(
-            OAMS_TRADITIONAL_GIS_ORDER);
+        auto poSRS = poSRSOri->Clone();
+        poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        oFieldDefn.SetSpatialRef(poSRS);
+        poSRS->Release();
     }
     if (EQUAL(oFieldDefn.GetNameRef(), ""))
         oFieldDefn.SetName("geometry");
@@ -3260,7 +3271,8 @@ json_object *OGRElasticLayer::TranslateSQLToFilter(swq_expr_node *poNode)
 {
     if (poNode->eNodeType == SNT_OPERATION)
     {
-        int nFieldIdx;
+        int nFieldIdx = 0;
+        CPL_IGNORE_RET_VAL(nFieldIdx);  // to make cppcheck happy
         if (poNode->nOperation == SWQ_AND && poNode->nSubExprCount == 2)
         {
             // For AND, we can deal with a failure in one of the branch
@@ -3995,4 +4007,13 @@ OGRErr OGRElasticLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
     json_object_put(poResponse);
 
     return eErr;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRElasticLayer::GetDataset()
+{
+    return m_poDS;
 }

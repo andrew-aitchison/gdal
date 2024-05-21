@@ -54,16 +54,6 @@
 #pragma warning(disable : 4267)
 #endif
 
-#if !(POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 73)
-#include <goo/gtypes.h>
-#else
-typedef unsigned char Guchar;
-#endif
-
-#if !(POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 76)
-#include <goo/GooList.h>
-#endif
-
 /* begin of poppler xpdf includes */
 #include <Object.h>
 #include <Stream.h>
@@ -108,7 +98,32 @@ typedef unsigned char Guchar;
 #undef GetObject
 #endif
 
+// Related fix submitted per https://github.com/podofo/podofo/pull/98
+#ifdef HAVE_PODOFO_0_10_OR_LATER
+#define USE_HACK_BECAUSE_PdfInputStream_constructor_is_not_exported_in_podofo_0_11
+#endif
+
+#ifdef USE_HACK_BECAUSE_PdfInputStream_constructor_is_not_exported_in_podofo_0_11
+// If we <sstream> is included after our below #define private public errors out
+// with an error like:
+// /usr/include/c++/13.2.1/sstream:457:7: error: 'struct std::__cxx11::basic_stringbuf<_CharT, _Traits, _Alloc>::__xfer_bufptrs' redeclared with different access
+//  457 |       struct __xfer_bufptrs
+// so include it before, as otherwise it would get indirectly included by
+// PdfDate.h, which includes <chrono>, which includes <sstream>
+#include <sstream>
+// Ugly! PfdObjectStream::GetParent() is private but we need it...
+#define private public
+#endif
 #include "podofo.h"
+#ifdef private
+#undef private
+#endif
+
+#if PODOFO_VERSION_MAJOR > 0 ||                                                \
+    (PODOFO_VERSION_MAJOR == 0 && PODOFO_VERSION_MINOR >= 10)
+#define PdfVecObjects PdfIndirectObjectList
+#endif
+
 #endif  // HAVE_PODOFO
 
 #ifdef HAVE_PDFIUM
@@ -120,10 +135,16 @@ typedef unsigned char Guchar;
 #endif
 
 // Linux ignores timeout, Windows returns if not INFINITE
-#ifdef WIN32
+#ifdef _WIN32
 #define PDFIUM_MUTEX_TIMEOUT INFINITE
 #else
 #define PDFIUM_MUTEX_TIMEOUT 0.0f
+#endif
+
+#ifdef _MSC_VER
+#pragma warning(push)
+// include/pdfium\core/fxcrt/fx_memcpy_wrappers.h(48,30): warning C4244: 'argument': conversion from 'int' to 'wchar_t', possible loss of data
+#pragma warning(disable : 4244)
 #endif
 
 #include <cstring>
@@ -144,11 +165,17 @@ typedef unsigned char Guchar;
 #include "core/fpdfdoc/cpdf_annotlist.h"
 #include "core/fxcrt/bytestring.h"
 #include "core/fxge/cfx_defaultrenderdevice.h"
+#include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/agg/fx_agg_driver.h"
 #include "core/fxge/renderdevicedriver_iface.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "fpdfsdk/cpdfsdk_pauseadapter.h"
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 #endif  // HAVE_PDFIUM
 
 #endif

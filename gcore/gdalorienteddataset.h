@@ -43,7 +43,7 @@ class CPL_DLL GDALOrientedDataset : public GDALDataset
     /** Origin of the source dataset.
      *
      * Defines of the point at (row, col) = (0, 0) in the source dataset
-     * should be interpretated to generate the dataset taking into account
+     * should be interpreted to generate the dataset taking into account
      * this orientation.
      *
      * Numeric values are the same as in TIFF and EXIF Orientation tags.
@@ -71,6 +71,7 @@ class CPL_DLL GDALOrientedDataset : public GDALDataset
     {
         return m_poSrcDS->GetMetadataDomainList();
     }
+
     char **GetMetadata(const char *pszDomain = "") override;
     const char *GetMetadataItem(const char *pszName,
                                 const char *pszDomain = "") override;

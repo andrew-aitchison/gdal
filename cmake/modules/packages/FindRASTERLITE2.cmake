@@ -31,11 +31,6 @@ This module defines the following variables:
   The version of RasterLite2 found.
 #]=======================================================================]
 
-if(CMAKE_VERSION VERSION_LESS 3.13)
-    set(RASTERLITE2_ROOT CACHE PATH "")
-    mark_as_advanced(RASTERLITE2_ROOT)
-endif()
-
 find_package(PkgConfig QUIET)
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(PC_RASTERLITE2 QUIET rasterlite2)
@@ -78,13 +73,13 @@ find_package_handle_standard_args(RASTERLITE2
                                   REQUIRED_VARS RASTERLITE2_LIBRARY RASTERLITE2_INCLUDE_DIR
                                   VERSION_VAR RASTERLITE2_VERSION_STRING)
 if(RASTERLITE2_FOUND)
-    set(RASTERLITE2_LIBRARIES ${RASTERLITE2_LIBRARY})
-    set(RASTERLITE2_INCLUDE_DIRS ${RASTERLITE2_INCLUDE_DIR})
+    set(RASTERLITE2_LIBRARIES "${RASTERLITE2_LIBRARY}")
+    set(RASTERLITE2_INCLUDE_DIRS "${RASTERLITE2_INCLUDE_DIR}")
     if(NOT TARGET RASTERLITE2::RASTERLITE2)
         add_library(RASTERLITE2::RASTERLITE2 UNKNOWN IMPORTED)
         set_target_properties(RASTERLITE2::RASTERLITE2 PROPERTIES
-                              INTERFACE_INCLUDE_DIRECTORIES ${RASTERLITE2_INCLUDE_DIR}
+                              INTERFACE_INCLUDE_DIRECTORIES "${RASTERLITE2_INCLUDE_DIR}"
                               IMPORTED_LINK_INTERFACE_LANGUAGES "C"
-                              IMPORTED_LOCATION ${RASTERLITE2_LIBRARY})
+                              IMPORTED_LOCATION "${RASTERLITE2_LIBRARY}")
     endif()
 endif()

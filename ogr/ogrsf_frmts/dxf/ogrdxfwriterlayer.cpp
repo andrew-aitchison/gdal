@@ -97,7 +97,8 @@ int OGRDXFWriterLayer::TestCapability(const char *pszCap)
 /*      This is really a dummy as our fields are precreated.            */
 /************************************************************************/
 
-OGRErr OGRDXFWriterLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRDXFWriterLayer::CreateField(const OGRFieldDefn *poField,
+                                      int bApproxOK)
 
 {
     if (poFeatureDefn->GetFieldIndex(poField->GetNameRef()) >= 0 && bApproxOK)
@@ -184,7 +185,9 @@ OGRErr OGRDXFWriterLayer::WriteCore(OGRFeature *poFeature)
     /*      Also, for reasons I don't understand these ids seem to have     */
     /*      to start somewhere around 0x50 hex (80 decimal).                */
     /* -------------------------------------------------------------------- */
-    poFeature->SetFID(poDS->WriteEntityID(fp, (int)poFeature->GetFID()));
+    long nGotFID = -1;
+    poDS->WriteEntityID(fp, nGotFID, (int)poFeature->GetFID());
+    poFeature->SetFID(nGotFID);
 
     WriteValue(100, "AcDbEntity");
 
@@ -602,7 +605,7 @@ OGRErr OGRDXFWriterLayer::WriteTEXT(OGRFeature *poFeature)
                 osStyleName.Printf("AutoTextStyle-%d", nNextAutoID++);
             } while (poDS->oHeaderDS.TextStyleExists(osStyleName));
 
-            oNewTextStyles[osStyleName] = oTextStyleDef;
+            oNewTextStyles[osStyleName] = std::move(oTextStyleDef);
         }
 
         WriteValue(7, osStyleName);
@@ -925,7 +928,7 @@ OGRErr OGRDXFWriterLayer::WritePOLYLINE(OGRFeature *poFeature,
             if (poDS->oHeaderDS.LookupLineType(osLineType).empty() &&
                 oNewLineTypes.count(osLineType) == 0)
             {
-                oNewLineTypes[osLineType] = adfDefinition;
+                oNewLineTypes[osLineType] = std::move(adfDefinition);
             }
 
             WriteValue(6, osLineType);
@@ -1366,4 +1369,13 @@ int OGRDXFWriterLayer::ColorStringToDXFColor(const char *pszRGB)
     }
 
     return nBestColor;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRDXFWriterLayer::GetDataset()
+{
+    return poDS;
 }

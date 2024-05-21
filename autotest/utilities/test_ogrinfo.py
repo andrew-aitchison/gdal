@@ -30,40 +30,56 @@
 ###############################################################################
 
 import os
+import pathlib
+import stat
 
 import gdaltest
 import ogrtest
 import pytest
 import test_cli_utilities
 
-from osgeo import gdal
+from osgeo import gdal, ogr
+
+pytestmark = pytest.mark.skipif(
+    test_cli_utilities.get_ogrinfo_path() is None, reason="ogrinfo not available"
+)
+
+
+@pytest.fixture()
+def ogrinfo_path():
+    return test_cli_utilities.get_ogrinfo_path()
+
 
 ###############################################################################
 # Simple test
 
 
-def test_ogrinfo_1():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_1(ogrinfo_path):
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " ../ogr/data/poly.shp"
+        ogrinfo_path + " ../ogr/data/poly.shp"
     )
     assert err is None or err == "", "got error/warning"
     assert ret.find("ESRI Shapefile") != -1
 
 
 ###############################################################################
+# Missing filename
+
+
+def test_ogrinfo_missing_filename(ogrinfo_path):
+
+    (_, err) = gdaltest.runexternal_out_and_err(ogrinfo_path)
+    assert "filename: 1 argument(s) expected. 0 provided" in err
+
+
+###############################################################################
 # Test -ro option
 
 
-def test_ogrinfo_2():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_2(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " -ro ../ogr/data/poly.shp"
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " -ro ../ogr/data/poly.shp")
     assert ret.find("ESRI Shapefile") != -1
 
 
@@ -71,13 +87,9 @@ def test_ogrinfo_2():
 # Test -al option
 
 
-def test_ogrinfo_3():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_3(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " -al ../ogr/data/poly.shp"
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " -al ../ogr/data/poly.shp")
     assert ret.find("Layer name: poly") != -1
     assert ret.find("Geometry: Polygon") != -1
     assert ret.find("Feature Count: 10") != -1
@@ -90,13 +102,9 @@ def test_ogrinfo_3():
 # Test layer name
 
 
-def test_ogrinfo_4():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_4(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " ../ogr/data/poly.shp poly"
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " ../ogr/data/poly.shp poly")
     assert ret.find("Feature Count: 10") != -1
 
 
@@ -104,13 +112,10 @@ def test_ogrinfo_4():
 # Test -sql option
 
 
-def test_ogrinfo_5():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_5(ogrinfo_path):
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + ' ../ogr/data/poly.shp -sql "select * from poly"'
+        ogrinfo_path + ' ../ogr/data/poly.shp -sql "select * from poly"'
     )
     assert ret.find("Feature Count: 10") != -1
 
@@ -119,13 +124,9 @@ def test_ogrinfo_5():
 # Test -geom=NO option
 
 
-def test_ogrinfo_6():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_6(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " ../ogr/data/poly.shp poly -geom=no"
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " ../ogr/data/poly.shp poly -geom=no")
     assert ret.find("Feature Count: 10") != -1
     assert ret.find("POLYGON") == -1
 
@@ -134,13 +135,10 @@ def test_ogrinfo_6():
 # Test -geom=SUMMARY option
 
 
-def test_ogrinfo_7():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_7(ogrinfo_path):
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + " ../ogr/data/poly.shp poly -geom=summary"
+        ogrinfo_path + " ../ogr/data/poly.shp poly -geom=summary"
     )
     assert ret.find("Feature Count: 10") != -1
     assert ret.find("POLYGON (") == -1
@@ -151,13 +149,10 @@ def test_ogrinfo_7():
 # Test -spat option
 
 
-def test_ogrinfo_8():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_8(ogrinfo_path):
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + " ../ogr/data/poly.shp poly -spat 479609 4764629 479764 4764817"
+        ogrinfo_path + " ../ogr/data/poly.shp poly -spat 479609 4764629 479764 4764817"
     )
     if ogrtest.have_geos():
         assert ret.find("Feature Count: 4") != -1
@@ -171,13 +166,10 @@ def test_ogrinfo_8():
 # Test -where option
 
 
-def test_ogrinfo_9():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_9(ogrinfo_path):
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + ' ../ogr/data/poly.shp poly -where "EAS_ID=171"'
+        ogrinfo_path + ' ../ogr/data/poly.shp poly -where "EAS_ID=171"'
     )
     assert ret.find("Feature Count: 1") != -1
 
@@ -186,13 +178,9 @@ def test_ogrinfo_9():
 # Test -fid option
 
 
-def test_ogrinfo_10():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_10(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " ../ogr/data/poly.shp poly -fid 9"
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " ../ogr/data/poly.shp poly -fid 9")
     assert ret.find("OGRFeature(poly):9") != -1
 
 
@@ -200,13 +188,9 @@ def test_ogrinfo_10():
 # Test -fields=no option
 
 
-def test_ogrinfo_11():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_11(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " ../ogr/data/poly.shp poly -fields=no"
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " ../ogr/data/poly.shp poly -fields=no")
     assert ret.find("AREA (Real") == -1
     assert ret.find("POLYGON (") != -1
 
@@ -215,13 +199,9 @@ def test_ogrinfo_11():
 # Test ogrinfo --version
 
 
-def test_ogrinfo_12():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_12(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " --version", check_memleak=False
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " --version", check_memleak=False)
     assert ret.startswith(gdal.VersionInfo("--version"))
 
 
@@ -229,26 +209,34 @@ def test_ogrinfo_12():
 # Test erroneous use of --config
 
 
-def test_ogrinfo_13():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_erroneous_config(ogrinfo_path):
 
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " --config", check_memleak=False
+        ogrinfo_path + " --config", check_memleak=False
     )
-    assert "--config option given without a key and value argument" in err
+    assert "--config option given without" in err
+
+
+###############################################################################
+# Test erroneous use of --config
+
+
+def test_ogrinfo_erroneous_config_2(ogrinfo_path):
+
+    (_, err) = gdaltest.runexternal_out_and_err(
+        ogrinfo_path + " --config foo", check_memleak=False
+    )
+    assert "--config option given without" in err
 
 
 ###############################################################################
 # Test erroneous use of --mempreload.
 
 
-def test_ogrinfo_14():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_14(ogrinfo_path):
 
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " --mempreload", check_memleak=False
+        ogrinfo_path + " --mempreload", check_memleak=False
     )
     assert "--mempreload option given without directory path" in err
 
@@ -257,13 +245,10 @@ def test_ogrinfo_14():
 # Test --mempreload
 
 
-def test_ogrinfo_15():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_15(ogrinfo_path):
 
     (ret, _) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " --debug on --mempreload ../ogr/data /vsimem/poly.shp",
+        ogrinfo_path + " --debug on --mempreload ../ogr/data /vsimem/poly.shp",
         check_memleak=False,
     )
     assert "ESRI Shapefile" in ret
@@ -273,12 +258,10 @@ def test_ogrinfo_15():
 # Test erroneous use of --debug.
 
 
-def test_ogrinfo_16():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_16(ogrinfo_path):
 
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " --debug", check_memleak=False
+        ogrinfo_path + " --debug", check_memleak=False
     )
     assert "--debug option given without debug level" in err
 
@@ -287,29 +270,28 @@ def test_ogrinfo_16():
 # Test erroneous use of --optfile.
 
 
-def test_ogrinfo_17():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_17(ogrinfo_path, tmp_path):
+
+    optfile_txt = str(tmp_path / "optfile.txt")
 
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " --optfile", check_memleak=False
+        ogrinfo_path + " --optfile", check_memleak=False
     )
     assert "--optfile option given without filename" in err
 
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " --optfile /foo/bar",
+        ogrinfo_path + " --optfile /foo/bar",
         check_memleak=False,
     )
     assert "Unable to open optfile" in err
 
-    f = open("tmp/optfile.txt", "wt")
+    f = open(optfile_txt, "wt")
     f.write("--config foo\n")
     f.close()
     (_, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " --optfile tmp/optfile.txt",
+        ogrinfo_path + f" --optfile {optfile_txt}",
         check_memleak=False,
     )
-    os.unlink("tmp/optfile.txt")
     assert "--config option given without a key and value argument" in err
 
 
@@ -317,19 +299,18 @@ def test_ogrinfo_17():
 # Test --optfile
 
 
-def test_ogrinfo_18():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_18(ogrinfo_path, tmp_path):
 
-    f = open("tmp/optfile.txt", "wt")
+    optfile_txt = str(tmp_path / "optfile.txt")
+
+    f = open(optfile_txt, "wt")
     f.write("# comment\n")
     f.write("../ogr/data/poly.shp\n")
     f.close()
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " --optfile tmp/optfile.txt",
+        ogrinfo_path + f" --optfile {optfile_txt}",
         check_memleak=False,
     )
-    os.unlink("tmp/optfile.txt")
     assert "ESRI Shapefile" in ret
 
 
@@ -337,13 +318,9 @@ def test_ogrinfo_18():
 # Test --formats
 
 
-def test_ogrinfo_19():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_19(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " --formats", check_memleak=False
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " --formats", check_memleak=False)
     assert "ESRI Shapefile -vector- (rw+v): ESRI Shapefile" in ret
 
 
@@ -351,13 +328,9 @@ def test_ogrinfo_19():
 # Test --help-general
 
 
-def test_ogrinfo_20():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_20(ogrinfo_path):
 
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " --help-general", check_memleak=False
-    )
+    ret = gdaltest.runexternal(ogrinfo_path + " --help-general", check_memleak=False)
     assert "Generic GDAL utility command options" in ret
 
 
@@ -365,12 +338,10 @@ def test_ogrinfo_20():
 # Test --locale
 
 
-def test_ogrinfo_21():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_21(ogrinfo_path):
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " --locale C ../ogr/data/poly.shp",
+        ogrinfo_path + " --locale C ../ogr/data/poly.shp",
         check_memleak=False,
     )
     assert "ESRI Shapefile" in ret
@@ -380,30 +351,27 @@ def test_ogrinfo_21():
 # Test RFC 41 support
 
 
-def test_ogrinfo_22():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+@pytest.mark.require_driver("CSV")
+def test_ogrinfo_22(ogrinfo_path, tmp_path):
 
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver is missing")
+    csv_fname = str(tmp_path / "test_ogrinfo_22.csv")
 
-    f = open("tmp/test_ogrinfo_22.csv", "wt")
+    f = open(csv_fname, "wt")
     f.write("_WKTgeom1_EPSG_4326,_WKTgeom2_EPSG_32631\n")
     f.write('"POINT(1 2)","POINT(3 4)"\n')
     f.close()
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " tmp/test_ogrinfo_22.csv",
+        ogrinfo_path + f" {csv_fname}",
         check_memleak=False,
     )
     assert "1: test_ogrinfo_22 (Unknown (any), Unknown (any))" in ret
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -al -wkt_format wkt1 tmp/test_ogrinfo_22.csv",
+        ogrinfo_path + f" -al -wkt_format wkt1 {csv_fname}",
         check_memleak=False,
     )
-    expected_ret = """INFO: Open of `tmp/test_ogrinfo_22.csv'
+    expected_ret = f"""INFO: Open of `{csv_fname}'
       using driver `CSV' successful.
 
 Layer name: test_ogrinfo_22
@@ -465,32 +433,28 @@ OGRFeature(test_ogrinfo_22):1
     for i, exp_line in enumerate(expected_lines):
         assert exp_line == lines[i], ret
 
-    os.unlink("tmp/test_ogrinfo_22.csv")
-
 
 ###############################################################################
 # Test -geomfield (RFC 41) support
 
 
-def test_ogrinfo_23():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+@pytest.mark.require_driver("CSV")
+def test_ogrinfo_23(ogrinfo_path, tmp_path):
 
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver is missing")
+    csv_fname = str(tmp_path / "test_ogrinfo_23.csv")
 
-    f = open("tmp/test_ogrinfo_23.csv", "wt")
+    f = open(csv_fname, "wt")
     f.write("_WKTgeom1_EPSG_4326,_WKTgeom2_EPSG_32631\n")
     f.write('"POINT(1 2)","POINT(3 4)"\n')
     f.write('"POINT(3 4)","POINT(1 2)"\n')
     f.close()
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -al tmp/test_ogrinfo_23.csv -wkt_format wkt1 -spat 1 2 1 2 -geomfield geom__WKTgeom2_EPSG_32631",
+        ogrinfo_path
+        + f" -al {csv_fname} -wkt_format wkt1 -spat 1 2 1 2 -geomfield geom__WKTgeom2_EPSG_32631",
         check_memleak=False,
     )
-    expected_ret = """INFO: Open of `tmp/test_ogrinfo_23.csv'
+    expected_ret = f"""INFO: Open of `{csv_fname}'
       using driver `CSV' successful.
 
 Layer name: test_ogrinfo_23
@@ -552,20 +516,19 @@ OGRFeature(test_ogrinfo_23):2
     for i, exp_line in enumerate(expected_lines):
         assert exp_line == lines[i], ret
 
-    os.unlink("tmp/test_ogrinfo_23.csv")
-
 
 ###############################################################################
 # Test metadata
 
 
-def test_ogrinfo_24():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_24(ogrinfo_path, tmp_path):
 
-    f = open("tmp/test_ogrinfo_24.vrt", "wt")
+    vrt_fname = str(tmp_path / "test_ogrinfo_24.vrt")
+    poly_shp = str(pathlib.Path(__file__).parent.parent / "ogr" / "data" / "poly.shp")
+
+    f = open(vrt_fname, "wt")
     f.write(
-        """<OGRVRTDataSource>
+        f"""<OGRVRTDataSource>
     <Metadata>
         <MDI key="foo">bar</MDI>
     </Metadata>
@@ -576,7 +539,7 @@ def test_ogrinfo_24():
         <Metadata>
             <MDI key="bar">baz</MDI>
         </Metadata>
-        <SrcDataSource relativeToVRT="1" shared="1">../../ogr/data/poly.shp</SrcDataSource>
+        <SrcDataSource relativeToVRT="0" shared="1">{poly_shp}</SrcDataSource>
         <SrcLayer>poly</SrcLayer>
   </OGRVRTLayer>
 </OGRVRTDataSource>"""
@@ -584,15 +547,14 @@ def test_ogrinfo_24():
     f.close()
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path() + " -ro -al tmp/test_ogrinfo_24.vrt -so",
+        ogrinfo_path + f" -ro -al {vrt_fname} -so",
         check_memleak=False,
     )
     assert "foo=bar" in ret
     assert "bar=baz" in ret
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -ro -al tmp/test_ogrinfo_24.vrt -so -mdd all",
+        ogrinfo_path + f" -ro -al {vrt_fname} -so -mdd all",
         check_memleak=False,
     )
     assert "foo=bar" in ret
@@ -600,25 +562,20 @@ def test_ogrinfo_24():
     assert "bar=baz" in ret
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -ro -al tmp/test_ogrinfo_24.vrt -so -nomd",
+        ogrinfo_path + f" -ro -al {vrt_fname} -so -nomd",
         check_memleak=False,
     )
     assert "Metadata" not in ret
-
-    os.unlink("tmp/test_ogrinfo_24.vrt")
 
 
 ###############################################################################
 # Test -rl
 
 
-def test_ogrinfo_25():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_25(ogrinfo_path):
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " -rl -q ../ogr/data/poly.shp"
+        ogrinfo_path + " -rl -q ../ogr/data/poly.shp"
     )
     assert err is None or err == "", "got error/warning"
     assert "OGRFeature(poly):0" in ret and "OGRFeature(poly):9" in ret, "wrong output"
@@ -628,18 +585,16 @@ def test_ogrinfo_25():
 # Test SQLStatement with -sql @filename syntax
 
 
-def test_ogrinfo_sql_filename():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_sql_filename(ogrinfo_path, tmp_path):
 
-    open("tmp/my.sql", "wt").write(
+    sql_fname = str(tmp_path / "my.sql")
+
+    open(sql_fname, "wt").write(
         """-- initial comment\nselect\n'--''--',* from --comment\npoly\n-- trailing comment"""
     )
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -q ../ogr/data/poly.shp -sql @tmp/my.sql"
+        ogrinfo_path + f" -q ../ogr/data/poly.shp -sql @{sql_fname}"
     )
-    os.unlink("tmp/my.sql")
     assert err is None or err == "", "got error/warning"
     assert "OGRFeature(poly):0" in ret and "OGRFeature(poly):9" in ret, "wrong output"
 
@@ -648,12 +603,10 @@ def test_ogrinfo_sql_filename():
 # Test -nogeomtype
 
 
-def test_ogrinfo_nogeomtype():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
+def test_ogrinfo_nogeomtype(ogrinfo_path):
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " -nogeomtype ../ogr/data/poly.shp"
+        ogrinfo_path + " -nogeomtype ../ogr/data/poly.shp"
     )
     assert err is None or err == "", "got error/warning"
     expected_ret = """INFO: Open of `../ogr/data/poly.shp'
@@ -673,21 +626,17 @@ def test_ogrinfo_nogeomtype():
 # Test field domains
 
 
-def test_ogrinfo_fielddomains():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
-    if gdal.GetDriverByName("GPKG") is None:
-        pytest.skip("GPKG driver missing")
+@pytest.mark.require_driver("GPKG")
+def test_ogrinfo_fielddomains(ogrinfo_path):
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path() + " -al ../ogr/data/gpkg/domains.gpkg"
+        ogrinfo_path + " -al ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
     assert "with_range_domain_int: Integer (0.0), domain name=range_domain_int" in ret
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -fielddomain range_domain_int ../ogr/data/gpkg/domains.gpkg"
+        ogrinfo_path + " -fielddomain range_domain_int ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
     assert "Type: range" in ret
@@ -698,8 +647,7 @@ def test_ogrinfo_fielddomains():
     assert "Maximum value: 2 (excluded)" in ret
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -fielddomain range_domain_int64 ../ogr/data/gpkg/domains.gpkg"
+        ogrinfo_path + " -fielddomain range_domain_int64 ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
     assert "Type: range" in ret
@@ -710,8 +658,7 @@ def test_ogrinfo_fielddomains():
     assert "Maximum value: 1234567890123" in ret
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -fielddomain range_domain_real ../ogr/data/gpkg/domains.gpkg"
+        ogrinfo_path + " -fielddomain range_domain_real ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
     assert "Type: range" in ret
@@ -722,7 +669,7 @@ def test_ogrinfo_fielddomains():
     assert "Maximum value: 2.5" in ret
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
+        ogrinfo_path
         + " -fielddomain range_domain_real_inf ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
@@ -734,8 +681,7 @@ def test_ogrinfo_fielddomains():
     assert "Maximum value" not in ret
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -fielddomain enum_domain ../ogr/data/gpkg/domains.gpkg"
+        ogrinfo_path + " -fielddomain enum_domain ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
     assert "Type: coded" in ret
@@ -747,8 +693,7 @@ def test_ogrinfo_fielddomains():
     assert "2:" not in ret
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " -fielddomain glob_domain ../ogr/data/gpkg/domains.gpkg"
+        ogrinfo_path + " -fielddomain glob_domain ../ogr/data/gpkg/domains.gpkg"
     )
     assert err is None or err == "", "got error/warning"
     assert "Type: glob" in ret
@@ -762,16 +707,11 @@ def test_ogrinfo_fielddomains():
 # Test hiearchical presentation of layers
 
 
-def test_ogrinfo_hiearchical():
-    if test_cli_utilities.get_ogrinfo_path() is None:
-        pytest.skip()
-
-    if gdal.GetDriverByName("OpenFileGDB") is None:
-        pytest.skip("OpenFileGDB driver is missing")
+@pytest.mark.require_driver("OpenFileGDB")
+def test_ogrinfo_hiearchical(ogrinfo_path):
 
     (ret, err) = gdaltest.runexternal_out_and_err(
-        test_cli_utilities.get_ogrinfo_path()
-        + " ../ogr/data/filegdb/featuredataset.gdb"
+        ogrinfo_path + " ../ogr/data/filegdb/featuredataset.gdb"
     )
     assert err is None or err == "", "got error/warning"
     assert "Layer: standalone (Point)" in ret
@@ -780,3 +720,103 @@ def test_ogrinfo_hiearchical():
     assert "  Layer: fd1_lyr2 (Point)" in ret
     assert "Group fd2:" in ret
     assert "  Layer: fd2_lyr (Point)" in ret
+
+
+###############################################################################
+# Test failed -sql
+
+
+def test_ogrinfo_failed_sql(ogrinfo_path):
+
+    (ret, err) = gdaltest.runexternal_out_and_err(
+        ogrinfo_path + ' ../ogr/data/poly.shp -sql "SELECT bla"'
+    )
+    assert "ERROR ret code = 1" in err
+
+
+###############################################################################
+# Test opening an empty geopackage
+
+
+@pytest.mark.require_driver("GPKG")
+def test_ogrinfo_empty_gpkg(ogrinfo_path, tmp_path):
+
+    filename = str(tmp_path / "empty.gpkg")
+    ogr.GetDriverByName("GPKG").CreateDataSource(filename)
+
+    (ret, err) = gdaltest.runexternal_out_and_err(ogrinfo_path + f" {filename}")
+    assert err is None or err == "", "got error/warning"
+
+
+###############################################################################
+# Test -if
+
+
+@pytest.mark.require_driver("GPKG")
+def test_ogrinfo_if_ok(ogrinfo_path):
+
+    (ret, err) = gdaltest.runexternal_out_and_err(
+        ogrinfo_path + " -if GPKG ../ogr/data/gpkg/2d_envelope.gpkg"
+    )
+    assert err is None or err == "", "got error/warning"
+    assert ret.find("GPKG") != -1
+
+
+###############################################################################
+# Test -if
+
+
+@pytest.mark.require_driver("GeoJSON")
+def test_ogrinfo_if_ko(ogrinfo_path):
+
+    (_, err) = gdaltest.runexternal_out_and_err(
+        ogrinfo_path + " -if GeoJSON ../ogr/data/gpkg/2d_envelope.gpkg"
+    )
+    assert "not recognized as being in a supported file format" in err
+
+
+###############################################################################
+def test_ogrinfo_access_to_file_without_permission(ogrinfo_path, tmp_path):
+
+    tmpfilename = str(tmp_path / "test.bin")
+    with open(tmpfilename, "wb") as f:
+        f.write(b"\x00" * 1024)
+    os.chmod(tmpfilename, 0)
+
+    # Test that file is not accessible
+    try:
+        f = open(tmpfilename, "rb")
+        f.close()
+        pytest.skip("could not set non accessible permission")
+    except IOError:
+        pass
+
+    _, err = gdaltest.runexternal_out_and_err(
+        ogrinfo_path + " " + tmpfilename,
+        encoding="UTF-8",
+    )
+    lines = list(filter(lambda x: len(x) > 0, err.split("\n")))
+    assert (len(lines)) == 3
+
+    os.chmod(tmpfilename, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+
+
+###############################################################################
+# Test error messages when file cannot be opened
+
+
+def test_ogrinfo_file_does_not_exist(ogrinfo_path):
+
+    (ret, err) = gdaltest.runexternal_out_and_err(ogrinfo_path + " does_not_exist.shp")
+
+    assert "No such file or directory" in err
+    assert "gdalinfo" not in err
+
+
+def test_ogrinfo_open_raster(ogrinfo_path):
+
+    (ret, err) = gdaltest.runexternal_out_and_err(
+        ogrinfo_path + " ../gcore/data/byte.tif"
+    )
+
+    assert "Did you intend to call gdalinfo" in err

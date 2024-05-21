@@ -28,10 +28,12 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-
 import gdaltest
+import pytest
 
 from osgeo import osr
+
+pytestmark = pytest.mark.require_driver("GenBin")
 
 ###############################################################################
 # Perform simple read test.
@@ -54,4 +56,4 @@ def test_genbin_1():
             -82.021003723045894,
         )
 
-        return tst.testOpen(check_prj=sr.ExportToWkt(), check_gt=gt)
+        tst.testOpen(check_prj=sr.ExportToWkt(), check_gt=gt)

@@ -279,16 +279,22 @@ OGRErr OGRPolyhedralSurface::importFromWkb(const unsigned char *pabyData,
 /*                            exportToWkb()                             */
 /************************************************************************/
 
-OGRErr OGRPolyhedralSurface::exportToWkb(OGRwkbByteOrder eByteOrder,
-                                         unsigned char *pabyData,
-                                         OGRwkbVariant /*eWkbVariant*/) const
+OGRErr
+OGRPolyhedralSurface::exportToWkb(unsigned char *pabyData,
+                                  const OGRwkbExportOptions *psOptions) const
 
 {
+    if (!psOptions)
+    {
+        static const OGRwkbExportOptions defaultOptions;
+        psOptions = &defaultOptions;
+    }
+
     /* -------------------------------------------------------------------- */
     /*      Set the byte order.                                             */
     /* -------------------------------------------------------------------- */
-    pabyData[0] =
-        DB2_V72_UNFIX_BYTE_ORDER(static_cast<unsigned char>(eByteOrder));
+    pabyData[0] = DB2_V72_UNFIX_BYTE_ORDER(
+        static_cast<unsigned char>(psOptions->eByteOrder));
 
     /* -------------------------------------------------------------------- */
     /*      Set the geometry feature type, ensuring that 3D flag is         */
@@ -296,7 +302,7 @@ OGRErr OGRPolyhedralSurface::exportToWkb(OGRwkbByteOrder eByteOrder,
     /* -------------------------------------------------------------------- */
     GUInt32 nGType = getIsoGeometryType();
 
-    if (OGR_SWAP(eByteOrder))
+    if (OGR_SWAP(psOptions->eByteOrder))
     {
         nGType = CPL_SWAP32(nGType);
     }
@@ -304,7 +310,7 @@ OGRErr OGRPolyhedralSurface::exportToWkb(OGRwkbByteOrder eByteOrder,
     memcpy(pabyData + 1, &nGType, 4);
 
     // Copy the raw data
-    if (OGR_SWAP(eByteOrder))
+    if (OGR_SWAP(psOptions->eByteOrder))
     {
         int nCount = CPL_SWAP32(oMP.nGeomCount);
         memcpy(pabyData + 5, &nCount, 4);
@@ -317,7 +323,7 @@ OGRErr OGRPolyhedralSurface::exportToWkb(OGRwkbByteOrder eByteOrder,
     // serialize each of the geometries
     for (auto &&poSubGeom : *this)
     {
-        poSubGeom->exportToWkb(eByteOrder, pabyData + nOffset, wkbVariantIso);
+        poSubGeom->exportToWkb(pabyData + nOffset, psOptions);
         nOffset += poSubGeom->WkbSize();
     }
 
@@ -492,6 +498,7 @@ std::string OGRPolyhedralSurface::exportToWktInternal(const OGRWktOptions &opts,
         return std::string();
     }
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -532,6 +539,7 @@ OGRSurfaceCasterToPolygon OGRPolyhedralSurface::GetCasterToPolygon() const
 {
     return ::CasterToPolygon;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -552,6 +560,7 @@ OGRPolyhedralSurface::GetCasterToCurvePolygon() const
 {
     return ::CasterToCurvePolygon;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -564,6 +573,7 @@ OGRPolyhedralSurface::isCompatibleSubType(OGRwkbGeometryType eSubType) const
 {
     return wkbFlatten(eSubType) == wkbPolygon;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -575,6 +585,7 @@ const char *OGRPolyhedralSurface::getSubGeometryName() const
 {
     return "POLYGON";
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -586,6 +597,7 @@ OGRwkbGeometryType OGRPolyhedralSurface::getSubGeometryType() const
 {
     return wkbPolygon;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -657,6 +669,20 @@ double OGRPolyhedralSurface::get_Area() const
 }
 
 /************************************************************************/
+/*                        get_GeodesicArea()                            */
+/************************************************************************/
+
+double OGRPolyhedralSurface::get_GeodesicArea(const OGRSpatialReference *) const
+{
+    if (IsEmpty())
+        return 0;
+
+    CPLError(CE_Failure, CPLE_NotSupported,
+             "get_GeodesicArea() not implemented for PolyhedralSurface");
+    return -1;
+}
+
+/************************************************************************/
 /*                           PointOnSurface()                           */
 /************************************************************************/
 
@@ -687,6 +713,7 @@ OGRPolyhedralSurface::CastToMultiPolygonImpl(OGRPolyhedralSurface *poPS)
     delete poPS;
     return poMultiPolygon;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -749,6 +776,10 @@ OGRErr OGRPolyhedralSurface::addGeometry(const OGRGeometry *poNewGeom)
 /**
  * \brief Add a geometry directly to the container.
  *
+ * Ownership of the passed geometry is taken by the container rather than
+ * cloning as addCurve() does, but only if the method is successful.
+ * If the method fails, ownership still belongs to the caller.
+ *
  * This method is the same as the C function OGR_G_AddGeometryDirectly().
  *
  * There is no SFCOM analog to this method.
@@ -779,6 +810,30 @@ OGRErr OGRPolyhedralSurface::addGeometryDirectly(OGRGeometry *poNewGeom)
     oMP.nGeomCount++;
 
     return OGRERR_NONE;
+}
+
+/************************************************************************/
+/*                            addGeometry()                             */
+/************************************************************************/
+
+/**
+ * \brief Add a geometry directly to the container.
+ *
+ * There is no SFCOM analog to this method.
+ *
+ * @param geom geometry to add to the container.
+ *
+ * @return OGRERR_NONE if successful, or OGRERR_UNSUPPORTED_GEOMETRY_TYPE if
+ * the geometry type is illegal for the type of geometry container.
+ */
+
+OGRErr OGRPolyhedralSurface::addGeometry(std::unique_ptr<OGRGeometry> geom)
+{
+    OGRGeometry *poGeom = geom.release();
+    OGRErr eErr = addGeometryDirectly(poGeom);
+    if (eErr != OGRERR_NONE)
+        delete poGeom;
+    return eErr;
 }
 
 /************************************************************************/
@@ -958,7 +1013,8 @@ OGRErr OGRPolyhedralSurface::removeGeometry(int iGeom, int bDelete)
 /*                       assignSpatialReference()                       */
 /************************************************************************/
 
-void OGRPolyhedralSurface::assignSpatialReference(OGRSpatialReference *poSR)
+void OGRPolyhedralSurface::assignSpatialReference(
+    const OGRSpatialReference *poSR)
 {
     OGRGeometry::assignSpatialReference(poSR);
     oMP.assignSpatialReference(poSR);

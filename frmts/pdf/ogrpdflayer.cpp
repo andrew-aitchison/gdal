@@ -59,6 +59,11 @@ void OGRPDFLayer::Fill(GDALPDFArray *poArray)
         if (!(poA != nullptr && poA->GetType() == PDFObjectType_Dictionary))
             continue;
 
+        auto poO = poA->GetDictionary()->Get("O");
+        if (!(poO && poO->GetType() == PDFObjectType_Name &&
+              poO->GetName() == "UserProperties"))
+            continue;
+
         // P is supposed to be required in A, but past GDAL versions could
         // generate features without attributes without a P array
         GDALPDFObject *poP = poA->GetDictionary()->Get("P");
@@ -156,15 +161,17 @@ void OGRPDFLayer::Fill(GDALPDFArray *poArray)
         OGRGeometry *poGeom = poFeature->GetGeometryRef();
         if (!bGeomTypeMixed && poGeom != nullptr)
         {
+            auto poLayerDefn = GetLayerDefn();
             if (!bGeomTypeSet)
             {
                 bGeomTypeSet = TRUE;
-                GetLayerDefn()->SetGeomType(poGeom->getGeometryType());
+                whileUnsealing(poLayerDefn)
+                    ->SetGeomType(poGeom->getGeometryType());
             }
-            else if (GetLayerDefn()->GetGeomType() != poGeom->getGeometryType())
+            else if (poLayerDefn->GetGeomType() != poGeom->getGeometryType())
             {
                 bGeomTypeMixed = TRUE;
-                GetLayerDefn()->SetGeomType(wkbUnknown);
+                whileUnsealing(poLayerDefn)->SetGeomType(wkbUnknown);
             }
         }
         ICreateFeature(poFeature);
@@ -184,6 +191,15 @@ int OGRPDFLayer::TestCapability(const char *pszCap)
         return TRUE;
     else
         return OGRMemLayer::TestCapability(pszCap);
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRPDFLayer::GetDataset()
+{
+    return poDS;
 }
 
 #endif /* HAVE_PDF_READ_SUPPORT */
@@ -221,4 +237,13 @@ int OGRPDFWritableLayer::TestCapability(const char *pszCap)
         return TRUE;
     else
         return OGRMemLayer::TestCapability(pszCap);
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRPDFWritableLayer::GetDataset()
+{
+    return poDS;
 }

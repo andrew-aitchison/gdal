@@ -46,8 +46,6 @@ def startup_and_cleanup():
 
     yield
 
-    gdal.Unlink("/vsimem/ogr_jml.jml")
-
 
 ###############################################################################
 # Test reading
@@ -64,6 +62,7 @@ def test_ogr_jml_1():
     assert ds.TestCapability(ogr.ODsCCreateLayer) == 0
     assert ds.TestCapability(ogr.ODsCDeleteLayer) == 0
     lyr = ds.GetLayer(0)
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
     fields = [
         ("first_property", ogr.OFTString),
         ("another_property", ogr.OFTString),
@@ -120,22 +119,23 @@ def test_ogr_jml_1():
 # Test creating a file
 
 
-def test_ogr_jml_2():
+@gdaltest.disable_exceptions()
+def test_ogr_jml_2(tmp_vsimem):
 
     # Invalid filename
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/foo/ogr_jml.jml")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = ogr.GetDriverByName("JML").CreateDataSource("/foo/ogr_jml.jml")
     ds = None
 
     # Empty layer
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/vsimem/ogr_jml.jml")
+    ds = ogr.GetDriverByName("JML").CreateDataSource(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.CreateLayer("foo")
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
     lyr.ResetReading()
     lyr.GetNextFeature()
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_jml.jml", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_jml.jml", "rb")
     data = gdal.VSIFReadL(1, 1000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
@@ -162,10 +162,12 @@ def test_ogr_jml_2():
 """
     )
 
-    gdal.Unlink("/vsimem/ogr_jml.jml")
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_2a(tmp_vsimem):
 
     # Test all data types
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/vsimem/ogr_jml.jml")
+    ds = ogr.GetDriverByName("JML").CreateDataSource(tmp_vsimem / "ogr_jml.jml")
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(32632)
     lyr = ds.CreateLayer("foo", srs=srs)
@@ -176,7 +178,7 @@ def test_ogr_jml_2():
     lyr.CreateField(ogr.FieldDefn("datetime", ogr.OFTDateTime))
     lyr.CreateField(ogr.FieldDefn("datetime2", ogr.OFTDateTime))
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         lyr.CreateField(ogr.FieldDefn("time_as_str", ogr.OFTTime))
 
     assert lyr.TestCapability(ogr.OLCCreateField) == 1
@@ -212,7 +214,7 @@ def test_ogr_jml_2():
 
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_jml.jml", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_jml.jml", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
@@ -326,10 +328,12 @@ def test_ogr_jml_2():
 """
     )
 
-    gdal.Unlink("/vsimem/ogr_jml.jml")
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_2b(tmp_vsimem):
 
     # Test with an explicit R_G_B field
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/vsimem/ogr_jml.jml")
+    ds = ogr.GetDriverByName("JML").CreateDataSource(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.CreateLayer("foo")
     lyr.CreateField(ogr.FieldDefn("R_G_B", ogr.OFTString))
     f = ogr.Feature(lyr.GetLayerDefn())
@@ -345,32 +349,36 @@ def test_ogr_jml_2():
 
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_jml.jml", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_jml.jml", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
     assert "112233" in data and "445566" in data
 
-    gdal.Unlink("/vsimem/ogr_jml.jml")
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_2c(tmp_vsimem):
 
     # Test CREATE_R_G_B_FIELD=NO
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/vsimem/ogr_jml.jml")
+    ds = ogr.GetDriverByName("JML").CreateDataSource(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.CreateLayer("foo", options=["CREATE_R_G_B_FIELD=NO"])
     lyr.CreateField(ogr.FieldDefn("str", ogr.OFTString))
     f = ogr.Feature(lyr.GetLayerDefn())
     lyr.CreateFeature(f)
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_jml.jml", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_jml.jml", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
     assert "R_G_B" not in data
 
-    gdal.Unlink("/vsimem/ogr_jml.jml")
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_2d(tmp_vsimem):
 
     # Test CREATE_OGR_STYLE_FIELD=YES
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/vsimem/ogr_jml.jml")
+    ds = ogr.GetDriverByName("JML").CreateDataSource(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.CreateLayer("foo", options=["CREATE_OGR_STYLE_FIELD=YES"])
     lyr.CreateField(ogr.FieldDefn("str", ogr.OFTString))
     f = ogr.Feature(lyr.GetLayerDefn())
@@ -378,16 +386,18 @@ def test_ogr_jml_2():
     lyr.CreateFeature(f)
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_jml.jml", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_jml.jml", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
     assert "OGR_STYLE" in data and "PEN(c:#445566)" in data
 
-    gdal.Unlink("/vsimem/ogr_jml.jml")
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_2e(tmp_vsimem):
 
     # Test CREATE_OGR_STYLE_FIELD=YES with a R_G_B field
-    ds = ogr.GetDriverByName("JML").CreateDataSource("/vsimem/ogr_jml.jml")
+    ds = ogr.GetDriverByName("JML").CreateDataSource(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.CreateLayer("foo", options=["CREATE_OGR_STYLE_FIELD=YES"])
     lyr.CreateField(ogr.FieldDefn("R_G_B", ogr.OFTString))
     f = ogr.Feature(lyr.GetLayerDefn())
@@ -397,13 +407,11 @@ def test_ogr_jml_2():
     lyr.CreateFeature(f)
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_jml.jml", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_jml.jml", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
     assert "OGR_STYLE" in data and "PEN(c:#445566)" in data and "112233" in data
-
-    gdal.Unlink("/vsimem/ogr_jml.jml")
 
 
 ###############################################################################
@@ -431,14 +439,15 @@ def test_ogr_jml_3():
 # Test a few error cases
 
 
-def test_ogr_jml_4():
+@gdaltest.disable_exceptions()
+def test_ogr_jml_4(tmp_vsimem):
 
     if not gdaltest.jml_read_support:
         pytest.skip()
 
     # Missing CollectionElement, FeatureElement or GeometryElement
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_jml.jml",
+        tmp_vsimem / "ogr_jml.jml",
         """<?xml version='1.0' encoding='UTF-8'?>
 <JCSDataFile xmlns:gml="http://www.opengis.net/gml" xmlns:xsi="http://www.w3.org/2000/10/XMLSchema-instance" >
 <JCSGMLInputTemplate>
@@ -453,17 +462,23 @@ def test_ogr_jml_4():
 </JCSDataFile>""",
     )
 
-    ds = ogr.Open("/vsimem/ogr_jml.jml")
+    ds = ogr.Open(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.GetLayer(0)
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    lyr.GetLayerDefn()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        lyr.GetLayerDefn()
     assert gdal.GetLastErrorType() != 0
     ds = None
 
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_4a(tmp_vsimem):
+
+    if not gdaltest.jml_read_support:
+        pytest.skip()
+
     # XML malformed in JCSGMLInputTemplate
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_jml.jml",
+        tmp_vsimem / "ogr_jml.jml",
         """<?xml version='1.0' encoding='UTF-8'?>
 <JCSDataFile xmlns:gml="http://www.opengis.net/gml" xmlns:xsi="http://www.w3.org/2000/10/XMLSchema-instance" >
 <JCSGMLInputTemplate>
@@ -478,17 +493,23 @@ def test_ogr_jml_4():
 </JCSDataFile>""",
     )
 
-    ds = ogr.Open("/vsimem/ogr_jml.jml")
+    ds = ogr.Open(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.GetLayer(0)
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    lyr.GetLayerDefn()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        lyr.GetLayerDefn()
     assert gdal.GetLastErrorType() != 0
     ds = None
 
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_4b(tmp_vsimem):
+
+    if not gdaltest.jml_read_support:
+        pytest.skip()
+
     # XML malformed in featureCollection
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_jml.jml",
+        tmp_vsimem / "ogr_jml.jml",
         """<?xml version='1.0' encoding='UTF-8'?>
 <JCSDataFile xmlns:gml="http://www.opengis.net/gml" xmlns:xsi="http://www.w3.org/2000/10/XMLSchema-instance" >
 <JCSGMLInputTemplate>
@@ -509,17 +530,23 @@ def test_ogr_jml_4():
 </JCSDataFile>""",
     )
 
-    ds = ogr.Open("/vsimem/ogr_jml.jml")
+    ds = ogr.Open(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.GetLayer(0)
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    lyr.GetLayerDefn().GetFieldCount()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        lyr.GetLayerDefn().GetFieldCount()
     assert gdal.GetLastErrorType() != 0
     ds = None
 
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_4c(tmp_vsimem):
+
+    if not gdaltest.jml_read_support:
+        pytest.skip()
+
     # XML malformed in featureCollection
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_jml.jml",
+        tmp_vsimem / "ogr_jml.jml",
         """<?xml version='1.0' encoding='UTF-8'?>
 <JCSDataFile xmlns:gml="http://www.opengis.net/gml" xmlns:xsi="http://www.w3.org/2000/10/XMLSchema-instance" >
 <JCSGMLInputTemplate>
@@ -541,17 +568,23 @@ def test_ogr_jml_4():
 </JCSDataFile>""",
     )
 
-    ds = ogr.Open("/vsimem/ogr_jml.jml")
+    ds = ogr.Open(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.GetLayer(0)
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    lyr.GetLayerDefn().GetFieldCount()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        lyr.GetLayerDefn().GetFieldCount()
     assert gdal.GetLastErrorType() != 0
     del ds
 
+
+@gdaltest.disable_exceptions()
+def test_ogr_jml_4d(tmp_vsimem):
+
+    if not gdaltest.jml_read_support:
+        pytest.skip()
+
     # Invalid column definitions
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_jml.jml",
+        tmp_vsimem / "ogr_jml.jml",
         """<?xml version='1.0' encoding='UTF-8'?>
 <JCSDataFile xmlns:gml="http://www.opengis.net/gml" xmlns:xsi="http://www.w3.org/2000/10/XMLSchema-instance" >
 <JCSGMLInputTemplate>
@@ -615,7 +648,7 @@ def test_ogr_jml_4():
 </JCSDataFile>""",
     )
 
-    ds = ogr.Open("/vsimem/ogr_jml.jml")
+    ds = ogr.Open(tmp_vsimem / "ogr_jml.jml")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 0
     lyr.GetNextFeature()

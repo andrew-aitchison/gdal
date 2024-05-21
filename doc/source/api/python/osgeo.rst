@@ -1,5 +1,8 @@
-osgeo package
-=============
+.. _python_osgeo:
+
+Miscellaneous Python API
+========================
+
 
 Submodules
 ----------

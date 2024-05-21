@@ -30,6 +30,7 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
+import os
 import struct
 
 import gdaltest
@@ -47,7 +48,7 @@ def test_ehdr_1():
 
     tst = gdaltest.GDALTest("EHDR", "png/rgba16.png", 2, 2042)
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -58,7 +59,7 @@ def test_ehdr_2():
 
     tst = gdaltest.GDALTest("EHDR", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(check_gt=1, check_srs=1)
+    tst.testCreateCopy(check_gt=1, check_srs=1)
 
 
 ###############################################################################
@@ -69,7 +70,7 @@ def test_ehdr_3():
 
     tst = gdaltest.GDALTest("EHDR", "ehdr/float32.bil", 1, 27)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -102,12 +103,9 @@ def test_ehdr_4():
 
     ds = None
 
+    ###############################################################################
+    # verify dataset's colortable and nodata value.
 
-###############################################################################
-# verify last dataset's colortable and nodata value.
-
-
-def test_ehdr_5():
     ds = gdal.Open("tmp/test_4.bil")
     band = ds.GetRasterBand(1)
 
@@ -137,7 +135,7 @@ def test_ehdr_6():
 
     tst = gdaltest.GDALTest("EHDR", "ehdr/float32.bil", 1, 27)
 
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -148,7 +146,7 @@ def test_ehdr_7():
 
     tst = gdaltest.GDALTest("EHDR", "int32.tif", 1, 4672)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -199,7 +197,7 @@ def test_ehdr_9():
 
 def test_ehdr_10():
     tst = gdaltest.GDALTest("EHDR", "ehdr/ehdr10.bil", 1, 8202)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -208,13 +206,14 @@ def test_ehdr_10():
 
 def test_ehdr_11():
     tst = gdaltest.GDALTest("EHDR", "ehdr/ehdr11.flt", 1, 8202)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 # Test CreateCopy with 1bit data
 
 
+@pytest.mark.require_driver("BMP")
 def test_ehdr_12():
 
     src_ds = gdal.Open("../gcore/data/1bit.bmp")
@@ -239,7 +238,8 @@ def test_ehdr_12():
 
 def test_ehdr_13():
 
-    gdal.Unlink("data/byte.tif.aux.xml")
+    if os.path.exists("data/byte.tif.aux.xml"):
+        gdal.Unlink("data/byte.tif.aux.xml")
 
     src_ds = gdal.Open("data/byte.tif")
     ds = gdal.GetDriverByName("EHDR").CreateCopy("/vsimem/byte.bil", src_ds)
@@ -291,20 +291,20 @@ def test_ehdr_14():
 
     for space in [1, 2]:
         out_ds = gdal.GetDriverByName("EHDR").Create("/vsimem/byte_reduced.bil", 10, 10)
-        gdal.SetConfigOption("GDAL_ONE_BIG_READ", "YES")
-        data_ori = ds.GetRasterBand(1).ReadRaster(
-            0, 0, 20, 20, 20, 20, buf_pixel_space=space
-        )
-        data = ds.GetRasterBand(1).ReadRaster(
-            0, 0, 20, 20, 10, 10, buf_pixel_space=space
-        )
-        out_ds.GetRasterBand(1).WriteRaster(
-            0, 0, 10, 10, data, 10, 10, buf_pixel_space=space
-        )
-        out_ds.FlushCache()
-        data2 = out_ds.ReadRaster(0, 0, 10, 10, 10, 10, buf_pixel_space=space)
-        cs1 = out_ds.GetRasterBand(1).Checksum()
-        gdal.SetConfigOption("GDAL_ONE_BIG_READ", None)
+        with gdaltest.config_option("GDAL_ONE_BIG_READ", "YES"):
+            data_ori = ds.GetRasterBand(1).ReadRaster(
+                0, 0, 20, 20, 20, 20, buf_pixel_space=space
+            )
+            data = ds.GetRasterBand(1).ReadRaster(
+                0, 0, 20, 20, 10, 10, buf_pixel_space=space
+            )
+            out_ds.GetRasterBand(1).WriteRaster(
+                0, 0, 10, 10, data, 10, 10, buf_pixel_space=space
+            )
+            out_ds.FlushCache()
+            data2 = out_ds.ReadRaster(0, 0, 10, 10, 10, 10, buf_pixel_space=space)
+            cs1 = out_ds.GetRasterBand(1).Checksum()
+
         out_ds.FlushCache()
         cs2 = out_ds.GetRasterBand(1).Checksum()
 
@@ -312,11 +312,10 @@ def test_ehdr_14():
 
         assert not (cs1 != 1087 and cs1 != 1192) or (cs2 != 1087 and cs2 != 1192), space
 
-        gdal.SetConfigOption("GDAL_ONE_BIG_READ", "YES")
-        out_ds.GetRasterBand(1).WriteRaster(
-            0, 0, 10, 10, data_ori, 20, 20, buf_pixel_space=space
-        )
-        gdal.SetConfigOption("GDAL_ONE_BIG_READ", None)
+        with gdaltest.config_option("GDAL_ONE_BIG_READ", "YES"):
+            out_ds.GetRasterBand(1).WriteRaster(
+                0, 0, 10, 10, data_ori, 20, 20, buf_pixel_space=space
+            )
         out_ds.FlushCache()
         cs3 = out_ds.GetRasterBand(1).Checksum()
 
@@ -357,7 +356,7 @@ def test_ehdr_rat():
     assert not (
         ds.GetRasterBand(1).GetDefaultRAT() or ds.GetRasterBand(1).GetColorTable()
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret = ds.GetRasterBand(1).SetDefaultRAT(gdal.RasterAttributeTable())
     assert ret != 0
     ds = None

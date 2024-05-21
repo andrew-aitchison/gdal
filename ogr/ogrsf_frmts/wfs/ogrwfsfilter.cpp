@@ -37,7 +37,7 @@ typedef struct
     OGRDataSource *poDS;
     OGRFeatureDefn *poFDefn;
     int nUniqueGeomGMLId;
-    OGRSpatialReference *poSRS;
+    const OGRSpatialReference *poSRS;
     const char *pszNSPrefix;
 } ExprDumpFilterOptions;
 
@@ -839,6 +839,7 @@ class OGRWFSCustomFuncRegistrar : public swq_custom_func_registrar
     OGRWFSCustomFuncRegistrar()
     {
     }
+
     virtual const swq_operation *GetOperator(const char *) override;
 };
 

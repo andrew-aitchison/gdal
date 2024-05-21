@@ -301,10 +301,12 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
         }
 
         if (eDataType == GDT_Int16)
-            memcpy(pImage, &gasValues[nBlockYOff * nBlockXSize],
+            memcpy(pImage,
+                   &gasValues[static_cast<size_t>(nBlockYOff) * nBlockXSize],
                    sizeof(short) * nBlockXSize);
         else
-            memcpy(pImage, &gafValues[nBlockYOff * nBlockXSize],
+            memcpy(pImage,
+                   &gafValues[static_cast<size_t>(nBlockYOff) * nBlockXSize],
                    sizeof(float) * nBlockXSize);
         return CE_None;
     }
@@ -925,8 +927,7 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
     /* For better performance of CPLReadLine2L() we create a buffered reader */
     /* (except for /vsigzip/ since it has one internally) */
     if (!STARTS_WITH_CI(poOpenInfo->pszFilename, "/vsigzip/"))
-        fp = reinterpret_cast<VSILFILE *>(VSICreateBufferedReaderHandle(
-            reinterpret_cast<VSIVirtualHandle *>(fp)));
+        fp = VSICreateBufferedReaderHandle(fp);
 
     int nMinTokens = 0;
 
@@ -1336,7 +1337,7 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
                             ++oIter;
                         }
                     }
-                    adfStepX = adfStepXNew;
+                    adfStepX = std::move(adfStepXNew);
                     if (bAddNewValue)
                     {
                         CPLDebug("XYZ", "New stepX=%.15f", dfStepX);

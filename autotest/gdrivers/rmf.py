@@ -8,6 +8,7 @@
 #
 ###############################################################################
 # Copyright (c) 2008, Andrey Kiselev <dron@ak4719.spb.edu>
+# Copyright (c) 2023, NextGIS <info@nextgis.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -44,21 +45,21 @@ pytestmark = pytest.mark.require_driver("RMF")
 def test_rmf_1():
 
     tst = gdaltest.GDALTest("rmf", "rmf/byte.rsw", 1, 4672)
-    return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 def test_rmf_2():
 
     tst = gdaltest.GDALTest("rmf", "rmf/byte-lzw.rsw", 1, 40503)
-    with gdaltest.error_handler():
-        return tst.testOpen()
+    with gdal.quiet_errors():
+        tst.testOpen()
 
 
 def test_rmf_3():
 
     tst = gdaltest.GDALTest("rmf", "rmf/float64.mtw", 1, 4672)
-    with gdaltest.error_handler():
-        return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    with gdal.quiet_errors():
+        tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 def test_rmf_4():
@@ -76,31 +77,31 @@ def test_rmf_4():
 def test_rmf_5():
 
     tst = gdaltest.GDALTest("rmf", "rmf/rgbsmall-lzw.rsw", 1, 40503)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         tst.testOpen()
 
     tst = gdaltest.GDALTest("rmf", "rmf/rgbsmall-lzw.rsw", 2, 41429)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         tst.testOpen()
 
     tst = gdaltest.GDALTest("rmf", "rmf/rgbsmall-lzw.rsw", 3, 40238)
-    with gdaltest.error_handler():
-        return tst.testOpen()
+    with gdal.quiet_errors():
+        tst.testOpen()
 
 
 def test_rmf_6():
 
     tst = gdaltest.GDALTest("rmf", "rmf/big-endian.rsw", 1, 7782)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         tst.testOpen()
 
     tst = gdaltest.GDALTest("rmf", "rmf/big-endian.rsw", 2, 8480)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         tst.testOpen()
 
     tst = gdaltest.GDALTest("rmf", "rmf/big-endian.rsw", 3, 4195)
-    with gdaltest.error_handler():
-        return tst.testOpen()
+    with gdal.quiet_errors():
+        tst.testOpen()
 
 
 ###############################################################################
@@ -111,14 +112,14 @@ def test_rmf_7():
 
     tst = gdaltest.GDALTest("rmf", "rmf/byte.rsw", 1, 4672)
 
-    return tst.testCreateCopy(check_srs=1, check_gt=1, vsimem=1)
+    tst.testCreateCopy(check_srs=1, check_gt=1, vsimem=1)
 
 
 def test_rmf_8():
 
     tst = gdaltest.GDALTest("rmf", "rmf/rgbsmall.rsw", 2, 21053)
 
-    return tst.testCreateCopy(check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_srs=1, check_gt=1)
 
 
 ###############################################################################
@@ -129,7 +130,7 @@ def test_rmf_9():
 
     tst = gdaltest.GDALTest("rmf", "rmf/byte.rsw", 1, 4672, options=["RMFHUGE=YES"])
 
-    return tst.testCreateCopy(check_srs=1, check_gt=1, vsimem=1)
+    tst.testCreateCopy(check_srs=1, check_gt=1, vsimem=1)
 
 
 ###############################################################################
@@ -140,8 +141,8 @@ def test_rmf_10():
 
     tst = gdaltest.GDALTest("rmf", "rmf/t100.mtw", 1, 6388)
 
-    with gdaltest.error_handler():
-        return tst.testOpen()
+    with gdal.quiet_errors():
+        tst.testOpen()
 
 
 ###############################################################################
@@ -188,8 +189,8 @@ def test_rmf_11():
 def test_rmf_12a():
 
     tst = gdaltest.GDALTest("rmf", "rmf/cucled-1.rsw", 1, 4672)
-    with gdaltest.error_handler():
-        return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    with gdal.quiet_errors():
+        tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 ###############################################################################
@@ -199,8 +200,8 @@ def test_rmf_12a():
 def test_rmf_12b():
 
     tst = gdaltest.GDALTest("rmf", "rmf/cucled-2.rsw", 1, 4672)
-    with gdaltest.error_handler():
-        return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    with gdal.quiet_errors():
+        tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 ###############################################################################
@@ -210,8 +211,8 @@ def test_rmf_12b():
 def test_rmf_12c():
 
     tst = gdaltest.GDALTest("rmf", "rmf/invalid-subheader.rsw", 1, 4672)
-    with gdaltest.error_handler():
-        return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    with gdal.quiet_errors():
+        tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 ###############################################################################
@@ -221,7 +222,7 @@ def test_rmf_12c():
 def test_rmf_12d():
 
     tst = gdaltest.GDALTest("rmf", "rmf/corrupted-subheader.rsw", 1, 4672)
-    return tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
+    tst.testOpen(check_gt=(440720, 60, 0, 3751320, 0, -60))
 
 
 ###############################################################################
@@ -549,10 +550,8 @@ def test_rmf_26():
 # Test read JPEG compressed RMF dataset
 
 
+@pytest.mark.require_driver("JPEG")
 def test_rmf_27():
-
-    if gdal.GetDriverByName("JPEG") is None:
-        pytest.skip()
 
     cs1 = [50553, 27604, 36652]  #
     cs2 = [51009, 27640, 37765]  # osx, clang
@@ -669,7 +668,7 @@ def test_rmf_31a():
         "rmf", "small_world.tif", 1, 30111, options=["COMPRESS=NONE"]
     )
 
-    return tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
 
 
 def test_rmf_31b():
@@ -678,7 +677,7 @@ def test_rmf_31b():
         "rmf", "small_world.tif", 1, 30111, options=["COMPRESS=LZW"]
     )
 
-    return tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
 
 
 def test_rmf_31c():
@@ -708,7 +707,7 @@ def test_rmf_31d():
         "rmf", "rmf/t100.mtw", 1, 6388, options=["MTW=YES", "COMPRESS=RMF_DEM"]
     )
 
-    return tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
 
 
 def rmf_31e_data_gen(min_val, max_val, stripeSize, sx):
@@ -776,7 +775,7 @@ def test_rmf_31e():
         "rmf", "../" + tst_name, 1, cs, options=["MTW=YES", "COMPRESS=RMF_DEM"]
     )
 
-    return tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_minmax=0, check_srs=1, check_gt=1)
 
 
 ###############################################################################
@@ -794,10 +793,8 @@ def test_rmf_32a():
     )
 
     tst = gdaltest.GDALTest("rmf", "../" + ds_name, 1, 5540)
-    res = tst.testOpen(check_gt=None)
+    tst.testOpen(check_gt=None)
     os.remove(ds_name)
-
-    return res
 
 
 def test_rmf_32b():
@@ -811,10 +808,8 @@ def test_rmf_32b():
     )
 
     tst = gdaltest.GDALTest("rmf", "../" + ds_name, 1, 5540)
-    res = tst.testOpen(check_gt=None)
+    tst.testOpen(check_gt=None)
     os.remove(ds_name)
-
-    return res
 
 
 ###############################################################################
@@ -830,7 +825,7 @@ def test_rmf_32c():
         options="-outsize 400% 400% -co COMPRESS=LZW -co NUM_THREADS=4",
     )
 
-    res = rmf_build_ov(
+    rmf_build_ov(
         source=ds_name,
         testid="32c",
         options=["RMFHUGE=NO", "COMPRESS=LZW", "NUM_THREADS=4"],
@@ -840,8 +835,6 @@ def test_rmf_32c():
     )
     os.remove(ds_name)
 
-    return res
-
 
 ###############################################################################
 # Read 1-bit & 4-bit files
@@ -850,19 +843,19 @@ def test_rmf_32c():
 def test_rmf_33a():
 
     tst = gdaltest.GDALTest("rmf", "rmf/1bit.rsw", 1, 34325)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 def test_rmf_33b():
 
     tst = gdaltest.GDALTest("rmf", "rmf/4bit.rsw", 1, 55221)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 def test_rmf_33c():
 
     tst = gdaltest.GDALTest("rmf", "rmf/4bit-lzw.rsw", 1, 55221)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -911,6 +904,33 @@ def test_rmf_34():
     assert max_valid_data == int(tst_ds.GetMetadataItem("ELEVATION_MAXIMUM"))
     tst_ds = None
     os.remove(tst_name)
+
+
+###############################################################################
+# Write/Read frame to/from RSW
+
+
+def test_rmf_35():
+    src_path = "data/small_world.tif"
+
+    wkt = "POLYGON ((27.2 35.4,30.4 37.8,32.8 34.6,29.6 32.2,27.2 35.4))"
+    name = "Test metadata"
+    scale = "1 : 1000000"
+
+    tmpfilename = "/vsimem/rmf_35.rsw"
+
+    options = '-of RMF -mo "SCALE={}" -mo "NAME={}" -mo "FRAME={}"'.format(
+        scale, name, wkt
+    )
+    dst_ds = gdal.Translate(tmpfilename, src_path, options=options)
+    assert dst_ds is not None
+    assert dst_ds.GetMetadataItem("NAME") == name
+    assert dst_ds.GetMetadataItem("SCALE") == scale
+    assert dst_ds.GetMetadataItem("FRAME") == wkt
+
+    dst_ds = None
+
+    gdal.Unlink(tmpfilename)
 
 
 ###############################################################################

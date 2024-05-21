@@ -123,12 +123,13 @@ int VRTFilteredSource::IsTypeSupported(GDALDataType eTestType) const
 /*                              RasterIO()                              */
 /************************************************************************/
 
-CPLErr VRTFilteredSource::RasterIO(GDALDataType eBandDataType, int nXOff,
+CPLErr VRTFilteredSource::RasterIO(GDALDataType eVRTBandDataType, int nXOff,
                                    int nYOff, int nXSize, int nYSize,
                                    void *pData, int nBufXSize, int nBufYSize,
                                    GDALDataType eBufType, GSpacing nPixelSpace,
                                    GSpacing nLineSpace,
-                                   GDALRasterIOExtraArg *psExtraArg)
+                                   GDALRasterIOExtraArg *psExtraArg,
+                                   WorkingState &oWorkingState)
 
 {
     /* -------------------------------------------------------------------- */
@@ -139,8 +140,9 @@ CPLErr VRTFilteredSource::RasterIO(GDALDataType eBandDataType, int nXOff,
     if (nBufXSize != nXSize || nBufYSize != nYSize)
     {
         return VRTComplexSource::RasterIO(
-            eBandDataType, nXOff, nYOff, nXSize, nYSize, pData, nBufXSize,
-            nBufYSize, eBufType, nPixelSpace, nLineSpace, psExtraArg);
+            eVRTBandDataType, nXOff, nYOff, nXSize, nYSize, pData, nBufXSize,
+            nBufYSize, eBufType, nPixelSpace, nLineSpace, psExtraArg,
+            oWorkingState);
     }
 
     double dfXOff = nXOff;
@@ -317,10 +319,12 @@ CPLErr VRTFilteredSource::RasterIO(GDALDataType eBandDataType, int nXOff,
         const bool bIsComplex =
             CPL_TO_BOOL(GDALDataTypeIsComplex(eOperDataType));
         const CPLErr eErr = VRTComplexSource::RasterIOInternal<float>(
-            nFileXOff, nFileYOff, nFileXSize, nFileYSize,
+            l_band, eVRTBandDataType, nFileXOff, nFileYOff, nFileXSize,
+            nFileYSize,
             pabyWorkData + nLineOffset * nTopFill + nPixelOffset * nLeftFill,
             nFileXSize, nFileYSize, eOperDataType, nPixelOffset, nLineOffset,
-            &sExtraArgs, bIsComplex ? GDT_CFloat32 : GDT_Float32);
+            &sExtraArgs, bIsComplex ? GDT_CFloat32 : GDT_Float32,
+            oWorkingState);
 
         if (eErr != CE_None)
         {
@@ -537,7 +541,8 @@ CPLErr VRTKernelFilteredSource::FilterData(int nXSize, int nYSize,
 
                 for (int iI = nIMin; iI < nIMax; ++iI)
                 {
-                    const GPtrDiff_t iIndex = iI * nIStride + iJ * nJStride;
+                    const GPtrDiff_t iIndex =
+                        static_cast<GPtrDiff_t>(iI) * nIStride + iJ * nJStride;
 
                     if (bHasNoData && pafSrcData[iIndex] == fNoData)
                     {
@@ -587,7 +592,7 @@ CPLErr VRTKernelFilteredSource::FilterData(int nXSize, int nYSize,
 /************************************************************************/
 
 CPLErr VRTKernelFilteredSource::XMLInit(
-    CPLXMLNode *psTree, const char *pszVRTPath,
+    const CPLXMLNode *psTree, const char *pszVRTPath,
     std::map<CPLString, GDALDataset *> &oMapSharedSources)
 
 {
@@ -700,7 +705,7 @@ CPLXMLNode *VRTKernelFilteredSource::SerializeToXML(const char *pszVRTPath)
 /************************************************************************/
 
 VRTSource *
-VRTParseFilterSources(CPLXMLNode *psChild, const char *pszVRTPath,
+VRTParseFilterSources(const CPLXMLNode *psChild, const char *pszVRTPath,
                       std::map<CPLString, GDALDataset *> &oMapSharedSources)
 
 {

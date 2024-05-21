@@ -79,6 +79,7 @@ class NGSGEOIDRasterBand final : public GDALPamRasterBand
     explicit NGSGEOIDRasterBand(NGSGEOIDDataset *);
 
     virtual CPLErr IReadBlock(int, int, void *) override;
+
     virtual const char *GetUnitType() override
     {
         return "m";
@@ -279,8 +280,9 @@ int NGSGEOIDDataset::GetHeaderInfo(const GByte *pBuffer,
         return FALSE;
 
     /* Grids go over +180 in longitude */
-    if (dfSLAT < -90.0 || dfSLAT + nNLAT * dfDLAT > 90.0 || dfWLON < -180.0 ||
-        dfWLON + nNLON * dfDLON > 360.0)
+    // Test written that way to be robust to NaN values
+    if (!(dfSLAT >= -90.0 && dfSLAT + nNLAT * dfDLAT <= 90.0 &&
+          dfWLON >= -180.0 && dfWLON + nNLON * dfDLON <= 360.0))
         return FALSE;
 
     padfGeoTransform[0] = dfWLON - dfDLON / 2;

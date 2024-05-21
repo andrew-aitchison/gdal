@@ -44,7 +44,7 @@ associated with them. This leads to various selection of parameter names
 (and sometimes projection names) from different vendors. I have
 attempted to maintain a list of WKT bindings for different projections
 as part of my `GeoTIFF Projections
-List <https://web.archive.org/web/20130728081442/http://www.remotesensing.org/geotiff/proj_list/>`__
+List <https://gdal.org/proj_list>`__
 registry. Please try to adhere to the projection names and parameters
 listed there. That list also tries to relate the projections to the
 GeoTIFF, EPSG and PROJ.4 formulations where possible.
@@ -231,7 +231,7 @@ Sign of TOWGS84 Rotations
 Discussion
 ~~~~~~~~~~
 
-In EPSG there are two methods of defining the 7 parameter bursa wolf
+In EPSG there are two methods of defining the 7 parameter Bursa-Wolf
 parameters, 9606 (position vector 7-parameter) and 9607 (coordinate
 frame rotation). The only difference is that the sign of the rotation
 coefficients is reversed between them.
@@ -276,8 +276,8 @@ Current state of OGR implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 OGR imports from/exports to WKT assumes EPSG 9606 convention (position
-vector 7-parameter), as `proj.4
-does <http://proj4.org/parameters.html#towgs84-datum-transformation-to-wgs84>`__.
+vector 7-parameter), as `proj
+does <https://proj.org/>`__.
 
 When importing from EPSG parameters expressed with EPSG 9607, it does
 the appropriate conversion (negating the sign of the rotation terms).

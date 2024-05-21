@@ -33,18 +33,13 @@
 #include "ogr_attrind.h"
 #include "ogr_swq.h"
 #include "ograpispy.h"
-#include "ogr_recordbatch.h"
-#include "ograrrowarrayhelper.h"
+#include "ogr_wkb.h"
+#include "ogrlayer_private.h"
 
 #include "cpl_time.h"
 #include <cassert>
 #include <limits>
 #include <set>
-
-struct OGRLayer::Private
-{
-    bool m_bInFeatureIterator = false;
-};
 
 /************************************************************************/
 /*                              OGRLayer()                              */
@@ -228,6 +223,82 @@ OGRErr OGRLayer::GetExtent(int iGeomField, OGREnvelope *psExtent, int bForce)
         return GetExtentInternal(iGeomField, psExtent, bForce);
 }
 
+OGRErr OGRLayer::GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
+                             int bForce)
+
+{
+    psExtent3D->MinX = 0.0;
+    psExtent3D->MaxX = 0.0;
+    psExtent3D->MinY = 0.0;
+    psExtent3D->MaxY = 0.0;
+    psExtent3D->MinZ = std::numeric_limits<double>::infinity();
+    psExtent3D->MaxZ = -std::numeric_limits<double>::infinity();
+
+    /* -------------------------------------------------------------------- */
+    /*      If this layer has a none geometry type, then we can             */
+    /*      reasonably assume there are not extents available.              */
+    /* -------------------------------------------------------------------- */
+    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount() ||
+        GetLayerDefn()->GetGeomFieldDefn(iGeomField)->GetType() == wkbNone)
+    {
+        if (iGeomField != 0)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid geometry field index : %d", iGeomField);
+        }
+        return OGRERR_FAILURE;
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      If not forced, we should avoid having to scan all the           */
+    /*      features and just return a failure.                             */
+    /* -------------------------------------------------------------------- */
+    if (!bForce)
+        return OGRERR_FAILURE;
+
+    /* -------------------------------------------------------------------- */
+    /*      OK, we hate to do this, but go ahead and read through all       */
+    /*      the features to collect geometries and build extents.           */
+    /* -------------------------------------------------------------------- */
+    OGREnvelope3D oEnv;
+    bool bExtentSet = false;
+
+    for (auto &&poFeature : *this)
+    {
+        OGRGeometry *poGeom = poFeature->GetGeomFieldRef(iGeomField);
+        if (poGeom == nullptr || poGeom->IsEmpty())
+        {
+            /* Do nothing */
+        }
+        else if (!bExtentSet)
+        {
+            poGeom->getEnvelope(psExtent3D);
+            // This is required because getEnvelope initializes Z to 0 for 2D geometries
+            if (!poGeom->Is3D())
+            {
+                psExtent3D->MinZ = std::numeric_limits<double>::infinity();
+                psExtent3D->MaxZ = -std::numeric_limits<double>::infinity();
+            }
+            bExtentSet = true;
+        }
+        else
+        {
+            poGeom->getEnvelope(&oEnv);
+            // This is required because getEnvelope initializes Z to 0 for 2D geometries
+            if (!poGeom->Is3D())
+            {
+                oEnv.MinZ = std::numeric_limits<double>::infinity();
+                oEnv.MaxZ = -std::numeric_limits<double>::infinity();
+            }
+            // Merge handles infinity correctly
+            psExtent3D->Merge(oEnv);
+        }
+    }
+    ResetReading();
+
+    return bExtentSet ? OGRERR_NONE : OGRERR_FAILURE;
+}
+
 //! @cond Doxygen_Suppress
 OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent,
                                    int bForce)
@@ -300,6 +371,7 @@ OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent,
 
     return bExtentSet ? OGRERR_NONE : OGRERR_FAILURE;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -336,6 +408,25 @@ OGRErr OGR_L_GetExtentEx(OGRLayerH hLayer, int iGeomField,
 
     return OGRLayer::FromHandle(hLayer)->GetExtent(iGeomField, psExtent,
                                                    bForce);
+}
+
+/************************************************************************/
+/*                          OGR_L_GetExtent3D()                           */
+/************************************************************************/
+
+OGRErr OGR_L_GetExtent3D(OGRLayerH hLayer, int iGeomField,
+                         OGREnvelope3D *psExtent3D, int bForce)
+
+{
+    VALIDATE_POINTER1(hLayer, "OGR_L_GetExtent3D", OGRERR_INVALID_HANDLE);
+
+#ifdef OGRAPISPY_ENABLED
+    if (bOGRAPISpyEnabled)
+        OGRAPISpy_L_GetExtent3D(hLayer, iGeomField, bForce);
+#endif
+
+    return OGRLayer::FromHandle(hLayer)->GetExtent3D(iGeomField, psExtent3D,
+                                                     bForce);
 }
 
 /************************************************************************/
@@ -425,6 +516,7 @@ int OGRLayer::AttributeFilterEvaluationNeedsGeometry()
 
     return ContainGeomSpecialField(expr, nLayerFieldCount);
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -564,28 +656,80 @@ OGRFeatureH OGR_L_GetNextFeature(OGRLayerH hLayer)
 
 void OGRLayer::ConvertGeomsIfNecessary(OGRFeature *poFeature)
 {
-    const bool bSupportsCurve = CPL_TO_BOOL(TestCapability(OLCCurveGeometries));
-    const bool bSupportsM = CPL_TO_BOOL(TestCapability(OLCMeasuredGeometries));
-    if (!bSupportsCurve || !bSupportsM)
+    if (!m_poPrivate->m_bConvertGeomsIfNecessaryAlreadyCalled)
     {
-        int nGeomFieldCount = GetLayerDefn()->GetGeomFieldCount();
+        // One time initialization
+        m_poPrivate->m_bConvertGeomsIfNecessaryAlreadyCalled = true;
+        m_poPrivate->m_bSupportsCurve =
+            CPL_TO_BOOL(TestCapability(OLCCurveGeometries));
+        m_poPrivate->m_bSupportsM =
+            CPL_TO_BOOL(TestCapability(OLCMeasuredGeometries));
+        if (CPLTestBool(
+                CPLGetConfigOption("OGR_APPLY_GEOM_SET_PRECISION", "FALSE")))
+        {
+            const auto poFeatureDefn = GetLayerDefn();
+            const int nGeomFieldCount = poFeatureDefn->GetGeomFieldCount();
+            for (int i = 0; i < nGeomFieldCount; i++)
+            {
+                const double dfXYResolution = poFeatureDefn->GetGeomFieldDefn(i)
+                                                  ->GetCoordinatePrecision()
+                                                  .dfXYResolution;
+                if (dfXYResolution != OGRGeomCoordinatePrecision::UNKNOWN &&
+                    OGRGeometryFactory::haveGEOS())
+                {
+                    m_poPrivate->m_bApplyGeomSetPrecision = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!m_poPrivate->m_bSupportsCurve || !m_poPrivate->m_bSupportsM ||
+        m_poPrivate->m_bApplyGeomSetPrecision)
+    {
+        const auto poFeatureDefn = GetLayerDefn();
+        const int nGeomFieldCount = poFeatureDefn->GetGeomFieldCount();
         for (int i = 0; i < nGeomFieldCount; i++)
         {
             OGRGeometry *poGeom = poFeature->GetGeomFieldRef(i);
-            if (poGeom != nullptr &&
-                (!bSupportsM && OGR_GT_HasM(poGeom->getGeometryType())))
+            if (poGeom)
             {
-                poGeom->setMeasured(FALSE);
-            }
-            if (poGeom != nullptr &&
-                (!bSupportsCurve &&
-                 OGR_GT_IsNonLinear(poGeom->getGeometryType())))
-            {
-                OGRwkbGeometryType eTargetType =
-                    OGR_GT_GetLinear(poGeom->getGeometryType());
-                poFeature->SetGeomFieldDirectly(
-                    i, OGRGeometryFactory::forceTo(poFeature->StealGeometry(i),
-                                                   eTargetType));
+                if (!m_poPrivate->m_bSupportsM &&
+                    OGR_GT_HasM(poGeom->getGeometryType()))
+                {
+                    poGeom->setMeasured(FALSE);
+                }
+
+                if (!m_poPrivate->m_bSupportsCurve &&
+                    OGR_GT_IsNonLinear(poGeom->getGeometryType()))
+                {
+                    OGRwkbGeometryType eTargetType =
+                        OGR_GT_GetLinear(poGeom->getGeometryType());
+                    poGeom = OGRGeometryFactory::forceTo(
+                        poFeature->StealGeometry(i), eTargetType);
+                    poFeature->SetGeomFieldDirectly(i, poGeom);
+                    poGeom = poFeature->GetGeomFieldRef(i);
+                }
+
+                if (poGeom && m_poPrivate->m_bApplyGeomSetPrecision)
+                {
+                    const double dfXYResolution =
+                        poFeatureDefn->GetGeomFieldDefn(i)
+                            ->GetCoordinatePrecision()
+                            .dfXYResolution;
+                    if (dfXYResolution != OGRGeomCoordinatePrecision::UNKNOWN &&
+                        !poGeom->hasCurveGeometry())
+                    {
+                        auto poNewGeom = poGeom->SetPrecision(dfXYResolution,
+                                                              /* nFlags = */ 0);
+                        if (poNewGeom)
+                        {
+                            poFeature->SetGeomFieldDirectly(i, poNewGeom);
+                            // If there was potential further processing...
+                            // poGeom = poFeature->GetGeomFieldRef(i);
+                        }
+                    }
+                }
             }
         }
     }
@@ -711,10 +855,107 @@ OGRErr OGR_L_UpsertFeature(OGRLayerH hLayer, OGRFeatureH hFeat)
 }
 
 /************************************************************************/
+/*                           UpdateFeature()                            */
+/************************************************************************/
+
+OGRErr OGRLayer::UpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
+                               const int *panUpdatedFieldsIdx,
+                               int nUpdatedGeomFieldsCount,
+                               const int *panUpdatedGeomFieldsIdx,
+                               bool bUpdateStyleString)
+
+{
+    ConvertGeomsIfNecessary(poFeature);
+    const int nFieldCount = GetLayerDefn()->GetFieldCount();
+    for (int i = 0; i < nUpdatedFieldsCount; ++i)
+    {
+        if (panUpdatedFieldsIdx[i] < 0 || panUpdatedFieldsIdx[i] >= nFieldCount)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid panUpdatedFieldsIdx[%d] = %d", i,
+                     panUpdatedFieldsIdx[i]);
+            return OGRERR_FAILURE;
+        }
+    }
+    const int nGeomFieldCount = GetLayerDefn()->GetGeomFieldCount();
+    for (int i = 0; i < nUpdatedGeomFieldsCount; ++i)
+    {
+        if (panUpdatedGeomFieldsIdx[i] < 0 ||
+            panUpdatedGeomFieldsIdx[i] >= nGeomFieldCount)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid panUpdatedGeomFieldsIdx[%d] = %d", i,
+                     panUpdatedGeomFieldsIdx[i]);
+            return OGRERR_FAILURE;
+        }
+    }
+    return IUpdateFeature(poFeature, nUpdatedFieldsCount, panUpdatedFieldsIdx,
+                          nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx,
+                          bUpdateStyleString);
+}
+
+/************************************************************************/
+/*                           IUpdateFeature()                           */
+/************************************************************************/
+
+OGRErr OGRLayer::IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
+                                const int *panUpdatedFieldsIdx,
+                                int nUpdatedGeomFieldsCount,
+                                const int *panUpdatedGeomFieldsIdx,
+                                bool bUpdateStyleString)
+{
+    if (!TestCapability(OLCRandomWrite))
+        return OGRERR_UNSUPPORTED_OPERATION;
+
+    auto poFeatureExisting =
+        std::unique_ptr<OGRFeature>(GetFeature(poFeature->GetFID()));
+    if (!poFeatureExisting)
+        return OGRERR_NON_EXISTING_FEATURE;
+
+    for (int i = 0; i < nUpdatedFieldsCount; ++i)
+    {
+        poFeatureExisting->SetField(
+            panUpdatedFieldsIdx[i],
+            poFeature->GetRawFieldRef(panUpdatedFieldsIdx[i]));
+    }
+    for (int i = 0; i < nUpdatedGeomFieldsCount; ++i)
+    {
+        poFeatureExisting->SetGeomFieldDirectly(
+            panUpdatedGeomFieldsIdx[i],
+            poFeature->StealGeometry(panUpdatedGeomFieldsIdx[i]));
+    }
+    if (bUpdateStyleString)
+    {
+        poFeatureExisting->SetStyleString(poFeature->GetStyleString());
+    }
+    return ISetFeature(poFeatureExisting.get());
+}
+
+/************************************************************************/
+/*                        OGR_L_UpdateFeature()                         */
+/************************************************************************/
+
+OGRErr OGR_L_UpdateFeature(OGRLayerH hLayer, OGRFeatureH hFeat,
+                           int nUpdatedFieldsCount,
+                           const int *panUpdatedFieldsIdx,
+                           int nUpdatedGeomFieldsCount,
+                           const int *panUpdatedGeomFieldsIdx,
+                           bool bUpdateStyleString)
+
+{
+    VALIDATE_POINTER1(hLayer, "OGR_L_UpdateFeature", OGRERR_INVALID_HANDLE);
+    VALIDATE_POINTER1(hFeat, "OGR_L_UpdateFeature", OGRERR_INVALID_HANDLE);
+
+    return OGRLayer::FromHandle(hLayer)->UpdateFeature(
+        OGRFeature::FromHandle(hFeat), nUpdatedFieldsCount, panUpdatedFieldsIdx,
+        nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx, bUpdateStyleString);
+}
+
+/************************************************************************/
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 
 {
     (void)poField;
@@ -960,7 +1201,7 @@ OGRErr OGR_L_AlterGeomFieldDefn(OGRLayerH hLayer, int iGeomField,
 /*                         CreateGeomField()                            */
 /************************************************************************/
 
-OGRErr OGRLayer::CreateGeomField(OGRGeomFieldDefn *poField, int bApproxOK)
+OGRErr OGRLayer::CreateGeomField(const OGRGeomFieldDefn *poField, int bApproxOK)
 
 {
     (void)poField;
@@ -1128,7 +1369,8 @@ int OGRLayer::FindFieldIndex(const char *pszFieldName,
 OGRSpatialReference *OGRLayer::GetSpatialRef()
 {
     if (GetLayerDefn()->GetGeomFieldCount() > 0)
-        return GetLayerDefn()->GetGeomFieldDefn(0)->GetSpatialRef();
+        return const_cast<OGRSpatialReference *>(
+            GetLayerDefn()->GetGeomFieldDefn(0)->GetSpatialRef());
     else
         return nullptr;
 }
@@ -1198,12 +1440,56 @@ OGRGeometryH OGR_L_GetSpatialFilter(OGRLayerH hLayer)
 }
 
 /************************************************************************/
+/*             ValidateGeometryFieldIndexForSetSpatialFilter()          */
+/************************************************************************/
+
+//! @cond Doxygen_Suppress
+bool OGRLayer::ValidateGeometryFieldIndexForSetSpatialFilter(
+    int iGeomField, const OGRGeometry *poGeomIn, bool bIsSelectLayer)
+{
+    if (iGeomField == 0 && poGeomIn == nullptr &&
+        GetLayerDefn()->GetGeomFieldCount() == 0)
+    {
+        // Setting a null spatial filter on geometry field idx 0
+        // when there are no geometry field can't harm, and is accepted silently
+        // for backward compatibility with existing practice.
+    }
+    else if (iGeomField < 0 ||
+             iGeomField >= GetLayerDefn()->GetGeomFieldCount())
+    {
+        if (iGeomField == 0)
+        {
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                bIsSelectLayer
+                    ? "Cannot set spatial filter: no geometry field selected."
+                    : "Cannot set spatial filter: no geometry field present in "
+                      "layer.");
+        }
+        else
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot set spatial filter on non-existing geometry field "
+                     "of index %d.",
+                     iGeomField);
+        }
+        return false;
+    }
+    return true;
+}
+
+//! @endcond
+
+/************************************************************************/
 /*                          SetSpatialFilter()                          */
 /************************************************************************/
 
 void OGRLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
 
 {
+    if (poGeomIn && !ValidateGeometryFieldIndexForSetSpatialFilter(0, poGeomIn))
+        return;
+
     m_iGeomFieldFilter = 0;
     if (InstallFilter(poGeomIn))
         ResetReading();
@@ -1214,17 +1500,18 @@ void OGRLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeomIn)
 {
     if (iGeomField == 0)
     {
+        if (poGeomIn &&
+            !ValidateGeometryFieldIndexForSetSpatialFilter(0, poGeomIn))
+            return;
+
         m_iGeomFieldFilter = iGeomField;
         SetSpatialFilter(poGeomIn);
     }
     else
     {
-        if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount())
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
+        if (!ValidateGeometryFieldIndexForSetSpatialFilter(iGeomField,
+                                                           poGeomIn))
             return;
-        }
 
         m_iGeomFieldFilter = iGeomField;
         if (InstallFilter(poGeomIn))
@@ -1268,6 +1555,7 @@ void OGR_L_SetSpatialFilterEx(OGRLayerH hLayer, int iGeomField,
     OGRLayer::FromHandle(hLayer)->SetSpatialFilter(
         iGeomField, OGRGeometry::FromHandle(hGeom));
 }
+
 /************************************************************************/
 /*                        SetSpatialFilterRect()                        */
 /************************************************************************/
@@ -1431,7 +1719,74 @@ int OGRLayer::InstallFilter(OGRGeometry *poFilter)
 
     return TRUE;
 }
+
 //! @endcond
+
+/************************************************************************/
+/*                   DoesGeometryHavePointInEnvelope()                  */
+/************************************************************************/
+
+static bool DoesGeometryHavePointInEnvelope(const OGRGeometry *poGeometry,
+                                            const OGREnvelope &sEnvelope)
+{
+    const OGRLineString *poLS = nullptr;
+
+    switch (wkbFlatten(poGeometry->getGeometryType()))
+    {
+        case wkbPoint:
+        {
+            const auto poPoint = poGeometry->toPoint();
+            const double x = poPoint->getX();
+            const double y = poPoint->getY();
+            return (x >= sEnvelope.MinX && y >= sEnvelope.MinY &&
+                    x <= sEnvelope.MaxX && y <= sEnvelope.MaxY);
+        }
+
+        case wkbLineString:
+            poLS = poGeometry->toLineString();
+            break;
+
+        case wkbPolygon:
+        {
+            const OGRPolygon *poPoly = poGeometry->toPolygon();
+            poLS = poPoly->getExteriorRing();
+            break;
+        }
+
+        case wkbMultiPoint:
+        case wkbMultiLineString:
+        case wkbMultiPolygon:
+        case wkbGeometryCollection:
+        {
+            for (const auto &poSubGeom : *(poGeometry->toGeometryCollection()))
+            {
+                if (DoesGeometryHavePointInEnvelope(poSubGeom, sEnvelope))
+                    return true;
+            }
+            return false;
+        }
+
+        default:
+            return false;
+    }
+
+    if (poLS != nullptr)
+    {
+        const int nNumPoints = poLS->getNumPoints();
+        for (int i = 0; i < nNumPoints; i++)
+        {
+            const double x = poLS->getX(i);
+            const double y = poLS->getY(i);
+            if (x >= sEnvelope.MinX && y >= sEnvelope.MinY &&
+                x <= sEnvelope.MaxX && y <= sEnvelope.MaxY)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 
 /************************************************************************/
 /*                           FilterGeometry()                           */
@@ -1442,7 +1797,7 @@ int OGRLayer::InstallFilter(OGRGeometry *poFilter)
 /************************************************************************/
 
 //! @cond Doxygen_Suppress
-int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
+int OGRLayer::FilterGeometry(const OGRGeometry *poGeometry)
 
 {
     /* -------------------------------------------------------------------- */
@@ -1485,57 +1840,13 @@ int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
     }
     else
     {
-        /* --------------------------------------------------------------------
-         */
-        /*      If the filter geometry is its own envelope and if the */
-        /*      the geometry (line, or polygon without hole) h has at least one
-         */
-        /*      point inside the filter geometry, the geometry itself is inside
-         */
-        /*      the filter geometry. */
-        /* --------------------------------------------------------------------
-         */
+        // If the filter geometry is its own envelope and if the geometry has
+        // at least one point inside the filter geometry, the geometry itself
+        // intersects the filter geometry.
         if (m_bFilterIsEnvelope)
         {
-            OGRLineString *poLS = nullptr;
-
-            switch (wkbFlatten(poGeometry->getGeometryType()))
-            {
-                case wkbPolygon:
-                {
-                    OGRPolygon *poPoly = poGeometry->toPolygon();
-                    OGRLinearRing *poRing = poPoly->getExteriorRing();
-                    if (poRing != nullptr && poPoly->getNumInteriorRings() == 0)
-                    {
-                        poLS = poRing;
-                    }
-                    break;
-                }
-
-                case wkbLineString:
-                    poLS = poGeometry->toLineString();
-                    break;
-
-                default:
-                    break;
-            }
-
-            if (poLS != nullptr)
-            {
-                int nNumPoints = poLS->getNumPoints();
-                for (int i = 0; i < nNumPoints; i++)
-                {
-                    double x = poLS->getX(i);
-                    double y = poLS->getY(i);
-                    if (x >= m_sFilterEnvelope.MinX &&
-                        y >= m_sFilterEnvelope.MinY &&
-                        x <= m_sFilterEnvelope.MaxX &&
-                        y <= m_sFilterEnvelope.MaxY)
-                    {
-                        return TRUE;
-                    }
-                }
-            }
+            if (DoesGeometryHavePointInEnvelope(poGeometry, m_sFilterEnvelope))
+                return true;
         }
 
         /* --------------------------------------------------------------------
@@ -1549,7 +1860,9 @@ int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
             // CPLDebug("OGRLayer", "GEOS intersection");
             if (m_pPreparedFilterGeom != nullptr)
                 return OGRPreparedGeometryIntersects(
-                    m_pPreparedFilterGeom, OGRGeometry::ToHandle(poGeometry));
+                    m_pPreparedFilterGeom,
+                    OGRGeometry::ToHandle(
+                        const_cast<OGRGeometry *>(poGeometry)));
             else
                 return m_poFilterGeom->Intersects(poGeometry);
         }
@@ -1557,6 +1870,62 @@ int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
             return TRUE;
     }
 }
+
+/************************************************************************/
+/*                         FilterWKBGeometry()                          */
+/************************************************************************/
+
+bool OGRLayer::FilterWKBGeometry(const GByte *pabyWKB, size_t nWKBSize,
+                                 bool bEnvelopeAlreadySet,
+                                 OGREnvelope &sEnvelope) const
+{
+    if (!m_poFilterGeom)
+        return true;
+
+    if ((bEnvelopeAlreadySet ||
+         OGRWKBGetBoundingBox(pabyWKB, nWKBSize, sEnvelope)) &&
+        m_sFilterEnvelope.Intersects(sEnvelope))
+    {
+        if (m_bFilterIsEnvelope && m_sFilterEnvelope.Contains(sEnvelope))
+        {
+            return true;
+        }
+        else
+        {
+            if (m_bFilterIsEnvelope &&
+                OGRWKBIntersectsPessimistic(pabyWKB, nWKBSize,
+                                            m_sFilterEnvelope))
+            {
+                return true;
+            }
+            else if (OGRGeometryFactory::haveGEOS())
+            {
+                OGRGeometry *poGeom = nullptr;
+                int ret = FALSE;
+                if (OGRGeometryFactory::createFromWkb(pabyWKB, nullptr, &poGeom,
+                                                      nWKBSize) == OGRERR_NONE)
+                {
+                    if (m_pPreparedFilterGeom)
+                        ret = OGRPreparedGeometryIntersects(
+                            m_pPreparedFilterGeom,
+                            OGRGeometry::ToHandle(poGeom));
+                    else
+                        ret = m_poFilterGeom->Intersects(poGeom);
+                }
+                delete poGeom;
+                return CPL_TO_BOOL(ret);
+            }
+            else
+            {
+                // Assume intersection
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 //! @endcond
 
 /************************************************************************/
@@ -1604,6 +1973,7 @@ OGRErr OGRLayer::InitializeIndexSupport(const char *pszFilename)
 
     return eErr;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -1669,6 +2039,7 @@ GIntBig OGRLayer::GetFeaturesRead()
 {
     return m_nFeaturesRead;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -1880,7 +2251,7 @@ OGRwkbGeometryType OGR_L_GetGeomType(OGRLayerH hLayer)
 /*                          SetIgnoredFields()                          */
 /************************************************************************/
 
-OGRErr OGRLayer::SetIgnoredFields(const char **papszFields)
+OGRErr OGRLayer::SetIgnoredFields(CSLConstList papszFields)
 {
     OGRFeatureDefn *poDefn = GetLayerDefn();
 
@@ -1895,13 +2266,9 @@ OGRErr OGRLayer::SetIgnoredFields(const char **papszFields)
     }
     poDefn->SetStyleIgnored(FALSE);
 
-    if (papszFields == nullptr)
-        return OGRERR_NONE;
-
     // ignore some fields
-    while (*papszFields)
+    for (const char *pszFieldName : cpl::Iterate(papszFields))
     {
-        const char *pszFieldName = *papszFields;
         // check special fields
         if (EQUAL(pszFieldName, "OGR_GEOMETRY"))
             poDefn->SetGeometryIgnored(TRUE);
@@ -1925,7 +2292,6 @@ OGRErr OGRLayer::SetIgnoredFields(const char **papszFields)
             else
                 poDefn->GetFieldDefn(iField)->SetIgnored(TRUE);
         }
-        papszFields++;
     }
 
     return OGRERR_NONE;
@@ -4978,1938 +5344,6 @@ OGRLayer::FeatureIterator OGRLayer::end()
 }
 
 /************************************************************************/
-/*                          DefaultReleaseSchema()                      */
-/************************************************************************/
-
-static void OGRLayerDefaultReleaseSchema(struct ArrowSchema *schema)
-{
-    CPLAssert(schema->release != nullptr);
-    if (STARTS_WITH(schema->format, "w:"))
-        CPLFree(const_cast<char *>(schema->format));
-    CPLFree(const_cast<char *>(schema->name));
-    CPLFree(const_cast<char *>(schema->metadata));
-    for (int i = 0; i < static_cast<int>(schema->n_children); ++i)
-    {
-        if (schema->children[i]->release)
-        {
-            schema->children[i]->release(schema->children[i]);
-            CPLFree(schema->children[i]);
-        }
-    }
-    CPLFree(schema->children);
-    if (schema->dictionary)
-    {
-        if (schema->dictionary->release)
-        {
-            schema->dictionary->release(schema->dictionary);
-            CPLFree(schema->dictionary);
-        }
-    }
-    schema->release = nullptr;
-}
-
-/** Release a ArrowSchema.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @param schema Schema to release.
- * @since GDAL 3.6
- */
-
-void OGRLayer::ReleaseSchema(struct ArrowSchema *schema)
-{
-    OGRLayerDefaultReleaseSchema(schema);
-}
-
-/************************************************************************/
-/*                        AddDictToSchema()                             */
-/************************************************************************/
-
-static void AddDictToSchema(struct ArrowSchema *psChild,
-                            const OGRCodedFieldDomain *poCodedDomain)
-{
-    const OGRCodedValue *psIter = poCodedDomain->GetEnumeration();
-    int nLastCode = -1;
-    int nCountNull = 0;
-    uint32_t nCountChars = 0;
-    for (; psIter->pszCode; ++psIter)
-    {
-        if (CPLGetValueType(psIter->pszCode) != CPL_VALUE_INTEGER)
-        {
-            return;
-        }
-        int nCode = atoi(psIter->pszCode);
-        if (nCode <= nLastCode || nCode - nLastCode > 100)
-        {
-            return;
-        }
-        for (int i = nLastCode + 1; i < nCode; ++i)
-        {
-            nCountNull++;
-        }
-        if (psIter->pszValue != nullptr)
-        {
-            const size_t nLen = strlen(psIter->pszValue);
-            if (nLen > std::numeric_limits<uint32_t>::max() - nCountChars)
-                return;
-            nCountChars += static_cast<uint32_t>(nLen);
-        }
-        else
-            nCountNull++;
-        nLastCode = nCode;
-    }
-
-    auto psChildDict = static_cast<struct ArrowSchema *>(
-        CPLCalloc(1, sizeof(struct ArrowSchema)));
-    psChild->dictionary = psChildDict;
-    psChildDict->release = OGRLayerDefaultReleaseSchema;
-    psChildDict->name = CPLStrdup(poCodedDomain->GetName().c_str());
-    psChildDict->format = "u";
-    if (nCountNull)
-        psChildDict->flags = ARROW_FLAG_NULLABLE;
-}
-
-/************************************************************************/
-/*                     DefaultGetArrowSchema()                          */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_schema() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::GetArrowSchema(struct ArrowArrayStream *,
-                             struct ArrowSchema *out_schema)
-{
-    const bool bIncludeFID = CPLTestBool(
-        m_aosArrowArrayStreamOptions.FetchNameValueDef("INCLUDE_FID", "YES"));
-    memset(out_schema, 0, sizeof(*out_schema));
-    out_schema->format = "+s";
-    out_schema->name = CPLStrdup("");
-    out_schema->metadata = nullptr;
-    auto poLayerDefn = GetLayerDefn();
-    const int nFieldCount = poLayerDefn->GetFieldCount();
-    const int nGeomFieldCount = poLayerDefn->GetGeomFieldCount();
-    const int nChildren = 1 + nFieldCount + nGeomFieldCount;
-
-    out_schema->children = static_cast<struct ArrowSchema **>(
-        CPLCalloc(nChildren, sizeof(struct ArrowSchema *)));
-    int iSchemaChild = 0;
-    if (bIncludeFID)
-    {
-        out_schema->children[iSchemaChild] = static_cast<struct ArrowSchema *>(
-            CPLCalloc(1, sizeof(struct ArrowSchema)));
-        auto psChild = out_schema->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayer::ReleaseSchema;
-        const char *pszFIDName = GetFIDColumn();
-        psChild->name =
-            CPLStrdup((pszFIDName && pszFIDName[0]) ? pszFIDName : "OGC_FID");
-        psChild->format = "l";
-    }
-    for (int i = 0; i < nFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_schema->children[iSchemaChild] = static_cast<struct ArrowSchema *>(
-            CPLCalloc(1, sizeof(struct ArrowSchema)));
-        auto psChild = out_schema->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayer::ReleaseSchema;
-        psChild->name = CPLStrdup(poFieldDefn->GetNameRef());
-        if (poFieldDefn->IsNullable())
-            psChild->flags = ARROW_FLAG_NULLABLE;
-        const auto eSubType = poFieldDefn->GetSubType();
-        const char *item_format = nullptr;
-        switch (poFieldDefn->GetType())
-        {
-            case OFTInteger:
-            {
-                if (eSubType == OFSTBoolean)
-                    psChild->format = "b";
-                else if (eSubType == OFSTInt16)
-                    psChild->format = "s";
-                else
-                    psChild->format = "i";
-
-                const auto &osDomainName = poFieldDefn->GetDomainName();
-                if (!osDomainName.empty())
-                {
-                    auto poDS = GetDataset();
-                    if (poDS)
-                    {
-                        const auto poFieldDomain =
-                            poDS->GetFieldDomain(osDomainName);
-                        if (poFieldDomain &&
-                            poFieldDomain->GetDomainType() == OFDT_CODED)
-                        {
-                            const OGRCodedFieldDomain *poCodedDomain =
-                                static_cast<const OGRCodedFieldDomain *>(
-                                    poFieldDomain);
-                            AddDictToSchema(psChild, poCodedDomain);
-                        }
-                    }
-                }
-
-                break;
-            }
-
-            case OFTInteger64:
-                psChild->format = "l";
-                break;
-
-            case OFTReal:
-            {
-                if (eSubType == OFSTFloat32)
-                    psChild->format = "f";
-                else
-                    psChild->format = "g";
-                break;
-            }
-
-            case OFTString:
-            case OFTWideString:
-                psChild->format = "u";
-                break;
-
-            case OFTBinary:
-            {
-                if (poFieldDefn->GetWidth() > 0)
-                    psChild->format =
-                        CPLStrdup(CPLSPrintf("w:%d", poFieldDefn->GetWidth()));
-                else
-                    psChild->format = "z";
-                break;
-            }
-
-            case OFTIntegerList:
-            {
-                if (eSubType == OFSTBoolean)
-                    item_format = "b";
-                else if (eSubType == OFSTInt16)
-                    item_format = "s";
-                else
-                    item_format = "i";
-                break;
-            }
-
-            case OFTInteger64List:
-                item_format = "l";
-                break;
-
-            case OFTRealList:
-            {
-                if (eSubType == OFSTFloat32)
-                    item_format = "f";
-                else
-                    item_format = "g";
-                break;
-            }
-
-            case OFTStringList:
-            case OFTWideStringList:
-                item_format = "u";
-                break;
-
-            case OFTDate:
-                psChild->format = "tdD";
-                break;
-
-            case OFTTime:
-                psChild->format = "ttm";
-                break;
-
-            case OFTDateTime:
-                psChild->format = "tsm:";
-                break;
-        }
-
-        if (item_format)
-        {
-            psChild->format = "+l";
-            psChild->n_children = 1;
-            psChild->children = static_cast<struct ArrowSchema **>(
-                CPLCalloc(1, sizeof(struct ArrowSchema *)));
-            psChild->children[0] = static_cast<struct ArrowSchema *>(
-                CPLCalloc(1, sizeof(struct ArrowSchema)));
-            psChild->children[0]->release = OGRLayer::ReleaseSchema;
-            psChild->children[0]->name = CPLStrdup("item");
-            psChild->children[0]->format = item_format;
-        }
-    }
-    for (int i = 0; i < nGeomFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetGeomFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_schema->children[iSchemaChild] = static_cast<struct ArrowSchema *>(
-            CPLCalloc(1, sizeof(struct ArrowSchema)));
-        auto psChild = out_schema->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayer::ReleaseSchema;
-        const char *pszGeomFieldName = poFieldDefn->GetNameRef();
-        if (pszGeomFieldName[0] == '\0')
-            pszGeomFieldName = "wkb_geometry";
-        psChild->name = CPLStrdup(pszGeomFieldName);
-        if (poFieldDefn->IsNullable())
-            psChild->flags = ARROW_FLAG_NULLABLE;
-        psChild->format = "z";
-        constexpr const char *ARROW_EXTENSION_NAME_KEY = "ARROW:extension:name";
-        constexpr const char *EXTENSION_NAME = "ogc.wkb";
-        char *pszMetadata = static_cast<char *>(
-            CPLMalloc(sizeof(int32_t) + sizeof(int32_t) +
-                      strlen(ARROW_EXTENSION_NAME_KEY) + sizeof(int32_t) +
-                      strlen(EXTENSION_NAME)));
-        psChild->metadata = pszMetadata;
-        int offsetMD = 0;
-        *reinterpret_cast<int32_t *>(pszMetadata + offsetMD) = 1;
-        offsetMD += sizeof(int32_t);
-        *reinterpret_cast<int32_t *>(pszMetadata + offsetMD) =
-            static_cast<int32_t>(strlen(ARROW_EXTENSION_NAME_KEY));
-        offsetMD += sizeof(int32_t);
-        memcpy(pszMetadata + offsetMD, ARROW_EXTENSION_NAME_KEY,
-               strlen(ARROW_EXTENSION_NAME_KEY));
-        offsetMD += static_cast<int>(strlen(ARROW_EXTENSION_NAME_KEY));
-        *reinterpret_cast<int32_t *>(pszMetadata + offsetMD) =
-            static_cast<int32_t>(strlen(EXTENSION_NAME));
-        offsetMD += sizeof(int32_t);
-        memcpy(pszMetadata + offsetMD, EXTENSION_NAME, strlen(EXTENSION_NAME));
-    }
-
-    out_schema->n_children = iSchemaChild;
-    out_schema->release = OGRLayer::ReleaseSchema;
-    return 0;
-}
-
-/************************************************************************/
-/*                         StaticGetArrowSchema()                       */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_schema() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::StaticGetArrowSchema(struct ArrowArrayStream *stream,
-                                   struct ArrowSchema *out_schema)
-{
-    auto poLayer = static_cast<ArrowArrayStreamPrivateDataSharedDataWrapper *>(
-                       stream->private_data)
-                       ->poShared->m_poLayer;
-    if (poLayer == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "Calling get_schema() on a freed OGRLayer is not supported");
-        return EINVAL;
-    }
-    return poLayer->GetArrowSchema(stream, out_schema);
-}
-
-/************************************************************************/
-/*                         DefaultReleaseArray()                        */
-/************************************************************************/
-
-static void OGRLayerDefaultReleaseArray(struct ArrowArray *array)
-{
-    for (int i = 0; i < static_cast<int>(array->n_buffers); ++i)
-        VSIFreeAligned(const_cast<void *>(array->buffers[i]));
-    CPLFree(array->buffers);
-    for (int i = 0; i < static_cast<int>(array->n_children); ++i)
-    {
-        if (array->children[i] && array->children[i]->release)
-        {
-            array->children[i]->release(array->children[i]);
-            CPLFree(array->children[i]);
-        }
-    }
-    CPLFree(array->children);
-    if (array->dictionary)
-    {
-        if (array->dictionary->release)
-        {
-            array->dictionary->release(array->dictionary);
-            CPLFree(array->dictionary);
-        }
-    }
-    array->release = nullptr;
-}
-
-/** Release a ArrowArray.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @param array Arrow array to release.
- * @since GDAL 3.6
- */
-void OGRLayer::ReleaseArray(struct ArrowArray *array)
-{
-    OGRLayerDefaultReleaseArray(array);
-}
-
-/************************************************************************/
-/*                          IsValidField()                              */
-/************************************************************************/
-
-static inline bool IsValidField(const OGRField *psRawField)
-{
-    return (!(psRawField->Set.nMarker1 == OGRUnsetMarker &&
-              psRawField->Set.nMarker2 == OGRUnsetMarker &&
-              psRawField->Set.nMarker3 == OGRUnsetMarker) &&
-            !(psRawField->Set.nMarker1 == OGRNullMarker &&
-              psRawField->Set.nMarker2 == OGRNullMarker &&
-              psRawField->Set.nMarker3 == OGRNullMarker));
-}
-
-/************************************************************************/
-/*                           FillArray()                                */
-/************************************************************************/
-
-template <class T, typename TMember>
-static bool FillArray(struct ArrowArray *psChild,
-                      std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                      const bool bIsNullable, TMember member, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panValues = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            panValues[iFeat] = static_cast<T>((*psRawField).*member);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                         FillBoolArray()                              */
-/************************************************************************/
-
-template <typename TMember>
-static bool FillBoolArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, TMember member, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    uint8_t *panValues = static_cast<uint8_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE((apoFeatures.size() + 7) / 8));
-    if (panValues == nullptr)
-        return false;
-    memset(panValues, 0, (apoFeatures.size() + 7) / 8);
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            if ((*psRawField).*member)
-                panValues[iFeat / 8] |= static_cast<uint8_t>(1 << (iFeat % 8));
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                        FillListArray()                               */
-/************************************************************************/
-
-struct GetFromIntegerList
-{
-    static inline int getCount(const OGRField *psRawField)
-    {
-        return psRawField->IntegerList.nCount;
-    }
-
-    static inline const int *getValues(const OGRField *psRawField)
-    {
-        return psRawField->IntegerList.paList;
-    }
-};
-
-struct GetFromInteger64List
-{
-    static inline int getCount(const OGRField *psRawField)
-    {
-        return psRawField->Integer64List.nCount;
-    }
-
-    static inline const GIntBig *getValues(const OGRField *psRawField)
-    {
-        return psRawField->Integer64List.paList;
-    }
-};
-
-struct GetFromRealList
-{
-    static inline int getCount(const OGRField *psRawField)
-    {
-        return psRawField->RealList.nCount;
-    }
-
-    static inline const double *getValues(const OGRField *psRawField)
-    {
-        return psRawField->RealList.paList;
-    }
-};
-
-template <class OffsetType, class T, class GetFromList>
-static bool FillListArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    OffsetType *panOffsets =
-        static_cast<OffsetType *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-            sizeof(OffsetType) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    OffsetType nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nOffset;
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const unsigned nCount = GetFromList::getCount(psRawField);
-            if (nCount > static_cast<size_t>(
-                             std::numeric_limits<OffsetType>::max() - nOffset))
-                return false;
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nOffset;
-
-    psChild->n_children = 1;
-    psChild->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(1, sizeof(struct ArrowArray *)));
-    psChild->children[0] = static_cast<struct ArrowArray *>(
-        CPLCalloc(1, sizeof(struct ArrowArray)));
-    auto psValueChild = psChild->children[0];
-
-    psValueChild->release = OGRLayerDefaultReleaseArray;
-    psValueChild->n_buffers = 2;
-    psValueChild->buffers =
-        static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    psValueChild->length = nOffset;
-    T *panValues =
-        static_cast<T *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * nOffset));
-    if (panValues == nullptr)
-        return false;
-    psValueChild->buffers[1] = panValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = GetFromList::getCount(psRawField);
-            const auto paList = GetFromList::getValues(psRawField);
-            if (sizeof(*paList) == sizeof(T))
-                memcpy(panValues + nOffset, paList, nCount * sizeof(T));
-            else
-            {
-                for (int j = 0; j < nCount; ++j)
-                {
-                    panValues[nOffset + j] = static_cast<T>(paList[j]);
-                }
-            }
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-    }
-
-    return true;
-}
-
-template <class OffsetType, class GetFromList>
-static bool
-FillListArrayBool(struct ArrowArray *psChild,
-                  std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                  const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    OffsetType *panOffsets =
-        static_cast<OffsetType *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-            sizeof(OffsetType) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    OffsetType nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nOffset;
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const unsigned nCount = GetFromList::getCount(psRawField);
-            if (nCount > static_cast<size_t>(
-                             std::numeric_limits<OffsetType>::max() - nOffset))
-                return false;
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nOffset;
-
-    psChild->n_children = 1;
-    psChild->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(1, sizeof(struct ArrowArray *)));
-    psChild->children[0] = static_cast<struct ArrowArray *>(
-        CPLCalloc(1, sizeof(struct ArrowArray)));
-    auto psValueChild = psChild->children[0];
-
-    psValueChild->release = OGRLayerDefaultReleaseArray;
-    psValueChild->n_buffers = 2;
-    psValueChild->buffers =
-        static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    psValueChild->length = nOffset;
-    uint8_t *panValues = static_cast<uint8_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE((nOffset + 7) / 8));
-    if (panValues == nullptr)
-        return false;
-    memset(panValues, 0, (nOffset + 7) / 8);
-    psValueChild->buffers[1] = panValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = GetFromList::getCount(psRawField);
-            const auto paList = GetFromList::getValues(psRawField);
-
-            for (int j = 0; j < nCount; ++j)
-            {
-                if (paList[j])
-                    panValues[(nOffset + j) / 8] |=
-                        static_cast<uint8_t>(1 << ((nOffset + j) % 8));
-            }
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillStringArray()                             */
-/************************************************************************/
-
-template <class T>
-static bool
-FillStringArray(struct ArrowArray *psChild,
-                std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 3;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panOffsets = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    size_t nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = static_cast<T>(nOffset);
-        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const size_t nLen = strlen(psRawField->String);
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max()) - nOffset)
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = static_cast<T>(nOffset);
-
-    char *pachValues =
-        static_cast<char *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset));
-    if (pachValues == nullptr)
-        return false;
-    psChild->buffers[2] = pachValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const size_t nLen =
-            static_cast<size_t>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
-        if (nLen)
-        {
-            const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-            memcpy(pachValues + nOffset, psRawField->String, nLen);
-            nOffset += nLen;
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillStringListArray()                         */
-/************************************************************************/
-
-template <class OffsetType>
-static bool
-FillStringListArray(struct ArrowArray *psChild,
-                    std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                    const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    OffsetType *panOffsets =
-        static_cast<OffsetType *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-            sizeof(OffsetType) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    OffsetType nStrings = 0;
-    OffsetType nCountChars = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nStrings;
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = psRawField->StringList.nCount;
-            if (static_cast<size_t>(nCount) >
-                static_cast<size_t>(std::numeric_limits<OffsetType>::max() -
-                                    nStrings))
-                return false;
-            for (int j = 0; j < nCount; ++j)
-            {
-                const size_t nLen = strlen(psRawField->StringList.paList[j]);
-                if (nLen >
-                    static_cast<size_t>(std::numeric_limits<OffsetType>::max() -
-                                        nCountChars))
-                    return false;
-                nCountChars += static_cast<OffsetType>(nLen);
-            }
-            nStrings += static_cast<OffsetType>(nCount);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nStrings;
-
-    psChild->n_children = 1;
-    psChild->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(1, sizeof(struct ArrowArray *)));
-    psChild->children[0] = static_cast<struct ArrowArray *>(
-        CPLCalloc(1, sizeof(struct ArrowArray)));
-    auto psValueChild = psChild->children[0];
-
-    psValueChild->release = OGRLayerDefaultReleaseArray;
-    psValueChild->length = nStrings;
-    psValueChild->n_buffers = 3;
-    psValueChild->buffers =
-        static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-
-    OffsetType *panChildOffsets = static_cast<OffsetType *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(OffsetType) * (1 + nStrings)));
-    if (panChildOffsets == nullptr)
-        return false;
-    psValueChild->buffers[1] = panChildOffsets;
-
-    char *pachValues =
-        static_cast<char *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nCountChars));
-    if (pachValues == nullptr)
-        return false;
-    psValueChild->buffers[2] = pachValues;
-
-    nStrings = 0;
-    nCountChars = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = psRawField->StringList.nCount;
-            for (int j = 0; j < nCount; ++j)
-            {
-                panChildOffsets[nStrings] = nCountChars;
-                ++nStrings;
-                const size_t nLen = strlen(psRawField->StringList.paList[j]);
-                memcpy(pachValues + nCountChars,
-                       psRawField->StringList.paList[j], nLen);
-                nCountChars += static_cast<OffsetType>(nLen);
-            }
-        }
-    }
-    panChildOffsets[nStrings] = nCountChars;
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillBinaryArray()                             */
-/************************************************************************/
-
-template <class T>
-static bool
-FillBinaryArray(struct ArrowArray *psChild,
-                std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 3;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panOffsets = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    T nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nOffset;
-        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const size_t nLen = psRawField->Binary.nCount;
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max() - nOffset))
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nOffset;
-
-    GByte *pabyValues =
-        static_cast<GByte *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset));
-    if (pabyValues == nullptr)
-        return false;
-    psChild->buffers[2] = pabyValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const size_t nLen =
-            static_cast<size_t>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
-        if (nLen)
-        {
-            const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-            memcpy(pabyValues + nOffset, psRawField->Binary.paData, nLen);
-            nOffset += static_cast<T>(nLen);
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                     FillFixedWidthBinaryArray()                      */
-/************************************************************************/
-
-static bool
-FillFixedWidthBinaryArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int nWidth, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-
-    if (apoFeatures.size() > std::numeric_limits<size_t>::max() / nWidth)
-        return false;
-    GByte *pabyValues = static_cast<GByte *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(apoFeatures.size() * nWidth));
-    if (pabyValues == nullptr)
-        return false;
-    psChild->buffers[1] = pabyValues;
-
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const auto nLen = psRawField->Binary.nCount;
-            if (nLen < nWidth)
-            {
-                memcpy(pabyValues + iFeat * nWidth, psRawField->Binary.paData,
-                       nLen);
-                memset(pabyValues + iFeat * nWidth + nLen, 0, nWidth - nLen);
-            }
-            else
-            {
-                memcpy(pabyValues + iFeat * nWidth, psRawField->Binary.paData,
-                       nWidth);
-            }
-        }
-        else
-        {
-            memset(pabyValues + iFeat * nWidth, 0, nWidth);
-            if (bIsNullable)
-            {
-                ++psChild->null_count;
-                if (pabyNull == nullptr)
-                {
-                    pabyNull =
-                        static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                            (apoFeatures.size() + 7) / 8));
-                    if (pabyNull == nullptr)
-                        return false;
-                    memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                    psChild->buffers[0] = pabyNull;
-                }
-                pabyNull[iFeat / 8] &=
-                    static_cast<uint8_t>(~(1 << (iFeat % 8)));
-            }
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                      FillWKBGeometryArray()                          */
-/************************************************************************/
-
-template <class T>
-static bool
-FillWKBGeometryArray(struct ArrowArray *psChild,
-                     std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                     const OGRGeomFieldDefn *poFieldDefn, const int i)
-{
-    const bool bIsNullable = CPL_TO_BOOL(poFieldDefn->IsNullable());
-    psChild->n_buffers = 3;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panOffsets = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-    const auto eGeomType = poFieldDefn->GetType();
-    auto poEmptyGeom =
-        std::unique_ptr<OGRGeometry>(OGRGeometryFactory::createGeometry(
-            (eGeomType == wkbNone || wkbFlatten(eGeomType) == wkbUnknown)
-                ? wkbGeometryCollection
-                : eGeomType));
-
-    size_t nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = static_cast<T>(nOffset);
-        const auto poGeom = apoFeatures[iFeat]->GetGeomFieldRef(i);
-        if (poGeom != nullptr)
-        {
-            const size_t nLen = poGeom->WkbSize();
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max()) - nOffset)
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else if (poEmptyGeom)
-        {
-            const size_t nLen = poEmptyGeom->WkbSize();
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max()) - nOffset)
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-    }
-    panOffsets[apoFeatures.size()] = static_cast<T>(nOffset);
-
-    GByte *pabyValues =
-        static_cast<GByte *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset));
-    if (pabyValues == nullptr)
-        return false;
-    psChild->buffers[2] = pabyValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const size_t nLen =
-            static_cast<size_t>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
-        if (nLen)
-        {
-            const auto poGeom = apoFeatures[iFeat]->GetGeomFieldRef(i);
-            poGeom->exportToWkb(wkbNDR, pabyValues + nOffset, wkbVariantIso);
-            nOffset += nLen;
-        }
-        else if (!bIsNullable && poEmptyGeom)
-        {
-            poEmptyGeom->exportToWkb(wkbNDR, pabyValues + nOffset,
-                                     wkbVariantIso);
-            nOffset += nLen;
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillDateArray()                               */
-/************************************************************************/
-
-static bool FillDateArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    int32_t *panValues = static_cast<int32_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(int32_t) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            struct tm brokenDown;
-            memset(&brokenDown, 0, sizeof(brokenDown));
-            brokenDown.tm_year = psRawField->Date.Year - 1900;
-            brokenDown.tm_mon = psRawField->Date.Month - 1;
-            brokenDown.tm_mday = psRawField->Date.Day;
-            panValues[iFeat] = static_cast<int>(
-                (CPLYMDHMSToUnixTime(&brokenDown) + 36200) / 86400);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                        FillDateArray()                               */
-/************************************************************************/
-
-static bool FillTimeArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    int32_t *panValues = static_cast<int32_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(int32_t) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            panValues[iFeat] =
-                psRawField->Date.Hour * 3600000 +
-                psRawField->Date.Minute * 60000 +
-                static_cast<int>(psRawField->Date.Second * 1000 + 0.5);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                       FillDateTimeArray()                            */
-/************************************************************************/
-
-static bool
-FillDateTimeArray(struct ArrowArray *psChild,
-                  std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                  const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    int64_t *panValues = static_cast<int64_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(int64_t) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    struct tm brokenDown;
-    memset(&brokenDown, 0, sizeof(brokenDown));
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            brokenDown.tm_year = psRawField->Date.Year - 1900;
-            brokenDown.tm_mon = psRawField->Date.Month - 1;
-            brokenDown.tm_mday = psRawField->Date.Day;
-            brokenDown.tm_hour = psRawField->Date.Hour;
-            brokenDown.tm_min = psRawField->Date.Minute;
-            brokenDown.tm_sec = static_cast<int>(psRawField->Date.Second);
-            panValues[iFeat] =
-                CPLYMDHMSToUnixTime(&brokenDown) * 1000 +
-                (static_cast<int>(psRawField->Date.Second * 1000 + 0.5) % 1000);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                          GetNextArrowArray()                         */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_next() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::GetNextArrowArray(struct ArrowArrayStream *,
-                                struct ArrowArray *out_array)
-{
-    const bool bIncludeFID = CPLTestBool(
-        m_aosArrowArrayStreamOptions.FetchNameValueDef("INCLUDE_FID", "YES"));
-    int nMaxBatchSize = atoi(m_aosArrowArrayStreamOptions.FetchNameValueDef(
-        "MAX_FEATURES_IN_BATCH", "65536"));
-    if (nMaxBatchSize <= 0)
-        nMaxBatchSize = 1;
-    if (nMaxBatchSize > INT_MAX - 1)
-        nMaxBatchSize = INT_MAX - 1;
-
-    std::vector<std::unique_ptr<OGRFeature>> apoFeatures;
-    try
-    {
-        apoFeatures.reserve(nMaxBatchSize);
-    }
-    catch (const std::exception &e)
-    {
-        CPLError(CE_Failure, CPLE_OutOfMemory, "%s", e.what());
-        return ENOMEM;
-    }
-
-    memset(out_array, 0, sizeof(*out_array));
-    auto poLayerDefn = GetLayerDefn();
-    const int nFieldCount = poLayerDefn->GetFieldCount();
-    const int nGeomFieldCount = poLayerDefn->GetGeomFieldCount();
-    const int nMaxChildren =
-        (bIncludeFID ? 1 : 0) + nFieldCount + nGeomFieldCount;
-    int iSchemaChild = 0;
-
-    out_array->release = OGRLayerDefaultReleaseArray;
-
-    for (int i = 0; i < nMaxBatchSize; i++)
-    {
-        auto poFeature = std::unique_ptr<OGRFeature>(GetNextFeature());
-        if (!poFeature)
-            break;
-        apoFeatures.emplace_back(std::move(poFeature));
-    }
-    if (apoFeatures.empty())
-    {
-        out_array->release(out_array);
-        memset(out_array, 0, sizeof(*out_array));
-        return 0;
-    }
-
-    out_array->length = apoFeatures.size();
-    out_array->null_count = 0;
-
-    out_array->n_children = nMaxChildren;
-    out_array->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(nMaxChildren, sizeof(struct ArrowArray *)));
-    out_array->release = OGRLayerDefaultReleaseArray;
-    out_array->n_buffers = 1;
-    out_array->buffers =
-        static_cast<const void **>(CPLCalloc(1, sizeof(void *)));
-
-    if (bIncludeFID)
-    {
-        out_array->children[iSchemaChild] = static_cast<struct ArrowArray *>(
-            CPLCalloc(1, sizeof(struct ArrowArray)));
-        auto psChild = out_array->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayerDefaultReleaseArray;
-        psChild->length = apoFeatures.size();
-        psChild->n_buffers = 2;
-        psChild->buffers =
-            static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-        int64_t *panValues =
-            static_cast<int64_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                sizeof(int64_t) * apoFeatures.size()));
-        if (panValues == nullptr)
-            goto error;
-        psChild->buffers[1] = panValues;
-        for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-        {
-            panValues[iFeat] = apoFeatures[iFeat]->GetFID();
-        }
-    }
-
-    for (int i = 0; i < nFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_array->children[iSchemaChild] = static_cast<struct ArrowArray *>(
-            CPLCalloc(1, sizeof(struct ArrowArray)));
-        auto psChild = out_array->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayerDefaultReleaseArray;
-        psChild->length = apoFeatures.size();
-        const bool bIsNullable = CPL_TO_BOOL(poFieldDefn->IsNullable());
-        const auto eSubType = poFieldDefn->GetSubType();
-        switch (poFieldDefn->GetType())
-        {
-            case OFTInteger:
-            {
-                if (eSubType == OFSTBoolean)
-                {
-                    if (!FillBoolArray(psChild, apoFeatures, bIsNullable,
-                                       &OGRField::Integer, i))
-                        goto error;
-                }
-                else if (eSubType == OFSTInt16)
-                {
-                    if (!FillArray<int16_t>(psChild, apoFeatures, bIsNullable,
-                                            &OGRField::Integer, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillArray<int32_t>(psChild, apoFeatures, bIsNullable,
-                                            &OGRField::Integer, i))
-                        goto error;
-                }
-
-                const auto &osDomainName = poFieldDefn->GetDomainName();
-                if (!osDomainName.empty())
-                {
-                    auto poDS = GetDataset();
-                    if (poDS)
-                    {
-                        const auto poFieldDomain =
-                            poDS->GetFieldDomain(osDomainName);
-                        if (poFieldDomain &&
-                            poFieldDomain->GetDomainType() == OFDT_CODED)
-                        {
-                            const OGRCodedFieldDomain *poCodedDomain =
-                                static_cast<const OGRCodedFieldDomain *>(
-                                    poFieldDomain);
-                            OGRArrowArrayHelper::FillDict(psChild,
-                                                          poCodedDomain);
-                        }
-                    }
-                }
-
-                break;
-            }
-
-            case OFTInteger64:
-            {
-                if (!FillArray<int64_t>(psChild, apoFeatures, bIsNullable,
-                                        &OGRField::Integer64, i))
-                    goto error;
-                break;
-            }
-
-            case OFTReal:
-            {
-                if (eSubType == OFSTFloat32)
-                {
-                    if (!FillArray<float>(psChild, apoFeatures, bIsNullable,
-                                          &OGRField::Real, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillArray<double>(psChild, apoFeatures, bIsNullable,
-                                           &OGRField::Real, i))
-                        goto error;
-                }
-                break;
-            }
-
-            case OFTString:
-            case OFTWideString:
-            {
-                if (!FillStringArray<int32_t>(psChild, apoFeatures, bIsNullable,
-                                              i))
-                    goto error;
-                break;
-            }
-
-            case OFTBinary:
-            {
-                const int nWidth = poFieldDefn->GetWidth();
-                if (nWidth > 0)
-                {
-                    if (!FillFixedWidthBinaryArray(psChild, apoFeatures,
-                                                   bIsNullable, nWidth, i))
-                        goto error;
-                }
-                else if (!FillBinaryArray<int32_t>(psChild, apoFeatures,
-                                                   bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTIntegerList:
-            {
-                if (eSubType == OFSTBoolean)
-                {
-                    if (!FillListArrayBool<int32_t, GetFromIntegerList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                else if (eSubType == OFSTInt16)
-                {
-                    if (!FillListArray<int32_t, int16_t, GetFromIntegerList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillListArray<int32_t, int32_t, GetFromIntegerList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                break;
-            }
-
-            case OFTInteger64List:
-            {
-                if (!FillListArray<int32_t, int64_t, GetFromInteger64List>(
-                        psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTRealList:
-            {
-                if (eSubType == OFSTFloat32)
-                {
-                    if (!FillListArray<int32_t, float, GetFromRealList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillListArray<int32_t, double, GetFromRealList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                break;
-            }
-
-            case OFTStringList:
-            case OFTWideStringList:
-            {
-                if (!FillStringListArray<int32_t>(psChild, apoFeatures,
-                                                  bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTDate:
-            {
-                if (!FillDateArray(psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTTime:
-            {
-                if (!FillTimeArray(psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTDateTime:
-            {
-                if (!FillDateTimeArray(psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-        }
-    }
-    for (int i = 0; i < nGeomFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetGeomFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_array->children[iSchemaChild] = static_cast<struct ArrowArray *>(
-            CPLCalloc(1, sizeof(struct ArrowArray)));
-        auto psChild = out_array->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayerDefaultReleaseArray;
-        psChild->length = apoFeatures.size();
-        if (!FillWKBGeometryArray<int32_t>(psChild, apoFeatures, poFieldDefn,
-                                           i))
-            goto error;
-    }
-
-    out_array->n_children = iSchemaChild;
-
-    return 0;
-
-error:
-    out_array->release(out_array);
-    memset(out_array, 0, sizeof(*out_array));
-    return ENOMEM;
-}
-
-/************************************************************************/
-/*                       StaticGetNextArrowArray()                      */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_next() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::StaticGetNextArrowArray(struct ArrowArrayStream *stream,
-                                      struct ArrowArray *out_array)
-{
-    auto poLayer = static_cast<ArrowArrayStreamPrivateDataSharedDataWrapper *>(
-                       stream->private_data)
-                       ->poShared->m_poLayer;
-    if (poLayer == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "Calling get_next() on a freed OGRLayer is not supported");
-        return EINVAL;
-    }
-    return poLayer->GetNextArrowArray(stream, out_array);
-}
-
-/************************************************************************/
-/*                          GetDataset()                                */
-/************************************************************************/
-
-/** Return the dataset associated with this layer.
- *
- * NOTE: that method is implemented in very few drivers, and cannot generally
- * be relied on. It is currently only used by the GetRecordBatchSchema()
- * method to retrieve the field domain associated with a field, to fill the
- * dictionary field of a struct ArrowSchema.
- *
- * @return dataset, or nullptr when unknown.
- * @since GDAL 3.6
- */
-GDALDataset *OGRLayer::GetDataset()
-{
-    return nullptr;
-}
-
-/************************************************************************/
-/*                            ReleaseStream()                           */
-/************************************************************************/
-
-/** Release a ArrowArrayStream.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @param stream Arrow array stream to release.
- * @since GDAL 3.6
- */
-void OGRLayer::ReleaseStream(struct ArrowArrayStream *stream)
-{
-    assert(stream->release == OGRLayer::ReleaseStream);
-    ArrowArrayStreamPrivateDataSharedDataWrapper *poPrivate =
-        static_cast<ArrowArrayStreamPrivateDataSharedDataWrapper *>(
-            stream->private_data);
-    poPrivate->poShared->m_bArrowArrayStreamInProgress = false;
-    delete poPrivate;
-    stream->private_data = nullptr;
-    stream->release = nullptr;
-}
-
-/************************************************************************/
-/*                     GetLastErrorArrowArrayStream()                   */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_last_error() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-const char *OGRLayer::GetLastErrorArrowArrayStream(struct ArrowArrayStream *)
-{
-    const char *pszLastErrorMsg = CPLGetLastErrorMsg();
-    return pszLastErrorMsg[0] != '\0' ? pszLastErrorMsg : nullptr;
-}
-
-/************************************************************************/
-/*                          GetArrowStream()                            */
-/************************************************************************/
-
-/** Get a Arrow C stream.
- *
- * On successful return, and when the stream interfaces is no longer needed, it
-must must
- * be freed with out_stream->release(out_stream). Please carefully read
- * https://arrow.apache.org/docs/format/CStreamInterface.html for more details
- * on using Arrow C stream.
- *
- * The method may take into account ignored fields set with SetIgnoredFields()
- * (the default implementation does), and should take into account filters set
-with
- * SetSpatialFilter() and SetAttributeFilter(). Note however that specialized
- * implementations may fallback to the default (slower) implementation when
- * filters are set. Drivers that have a specialized implementation should
- * advertise the OLCFastGetArrowStream capability.
- *
- * There are extra precautions to take into account in a OGR context. Unless
- * otherwise specified by a particular driver implementation, the get_schema(),
- * get_next() and get_last_error() function pointers of the ArrowArrayStream
- * structure should no longer be used after the OGRLayer, from which the
- * ArrowArrayStream structure was initialized, has been destroyed (typically at
- * dataset closing). The reason is that those function pointers will typically
- * point to methods of the OGRLayer instance.
- * However, the ArrowSchema and ArrowArray structures filled from those
-callbacks
- * can be used and must be released independently from the
- * ArrowArrayStream or the layer.
- *
- * Furthermore, unless otherwise specified by a particular driver
- * implementation, only one ArrowArrayStream can be active at a time on
- * a given layer (that is the last active one must be explicitly released before
- * a next one is asked). Changing filter state, ignored columns, modifying the
-schema
- * or using ResetReading()/GetNextFeature() while using a ArrowArrayStream is
- * strongly discouraged and may lead to unexpected results. As a rule of thumb,
- * no OGRLayer methods that affect the state of a layer should be called on a
- * layer, while an ArrowArrayStream on it is active.
- *
- * A potential usage can be:
-\code{.cpp}
-    struct ArrowArrayStream stream;
-    if( !poLayer->GetArrowStream(&stream, nullptr))
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "GetArrowStream() failed\n");
-        exit(1);
-    }
-    struct ArrowSchema schema;
-    if( stream.get_schema(&stream, &schema) == 0 )
-    {
-        // Do something useful
-        schema.release(schema);
-    }
-    while( true )
-    {
-        struct ArrowArray array;
-        // Look for an error (get_next() returning a non-zero code), or
-        // end of iteration (array.release == nullptr)
-        if( stream.get_next(&stream, &array) != 0 ||
-            array.release == nullptr )
-        {
-            break;
-        }
-        // Do something useful
-        array.release(&array);
-    }
-    stream.release(&stream);
-\endcode
- *
- * A full example is available in the
- * <a
-href="https://gdal.org/tutorials/vector_api_tut.html#reading-from-ogr-using-the-arrow-c-stream-data-interface">Reading
-From OGR using the Arrow C Stream data interface</a> tutorial.
- *
- * Options may be driver specific. The default implementation recognizes the
- * following options:
- * <ul>
- * <li>INCLUDE_FID=YES/NO. Whether to include the FID column. Defaults to
-YES.</li>
- * <li>MAX_FEATURES_IN_BATCH=integer. Maximum number of features to retrieve in
- *     a ArrowArray batch. Defaults to 65 536.</li>
- * </ul>
- *
- * The Arrow/Parquet drivers recognize the following option:
- * <ul>
- * <li>GEOMETRY_ENCODING=WKB. To force a fallback to the generic implementation
- *     when the native geometry encoding is not WKB. Otherwise the geometry
- *     will be returned with its native Arrow encoding
- *     (possibly using GeoArrow encoding).</li>
- * </ul>
- *
- * @param out_stream Output stream. Must *not* be NULL. The content of the
- *                  structure does not need to be initialized.
- * @param papszOptions NULL terminated list of key=value options.
- * @return true in case of success.
- * @since GDAL 3.6
- */
-bool OGRLayer::GetArrowStream(struct ArrowArrayStream *out_stream,
-                              CSLConstList papszOptions)
-{
-    memset(out_stream, 0, sizeof(*out_stream));
-    if (m_poSharedArrowArrayStreamPrivateData &&
-        m_poSharedArrowArrayStreamPrivateData->m_bArrowArrayStreamInProgress)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "An arrow Arrow Stream is in progress on that layer. Only "
-                 "one at a time is allowed in this implementation.");
-        return false;
-    }
-    m_aosArrowArrayStreamOptions.Assign(CSLDuplicate(papszOptions), true);
-
-    ResetReading();
-
-    out_stream->get_schema = OGRLayer::StaticGetArrowSchema;
-    out_stream->get_next = OGRLayer::StaticGetNextArrowArray;
-    out_stream->get_last_error = OGRLayer::GetLastErrorArrowArrayStream;
-    out_stream->release = OGRLayer::ReleaseStream;
-
-    if (m_poSharedArrowArrayStreamPrivateData == nullptr)
-    {
-        m_poSharedArrowArrayStreamPrivateData =
-            std::make_shared<ArrowArrayStreamPrivateData>();
-        m_poSharedArrowArrayStreamPrivateData->m_poLayer = this;
-    }
-    m_poSharedArrowArrayStreamPrivateData->m_bArrowArrayStreamInProgress = true;
-    auto poPrivateData = new ArrowArrayStreamPrivateDataSharedDataWrapper();
-    poPrivateData->poShared = m_poSharedArrowArrayStreamPrivateData;
-    out_stream->private_data = poPrivateData;
-    return true;
-}
-
-/************************************************************************/
-/*                       OGR_L_GetArrowStream()                         */
-/************************************************************************/
-
-/** Get a Arrow C stream.
- *
- * On successful return, and when the stream interfaces is no longer needed, it
- * must be freed with out_stream->release(out_stream). Please carefully read
- * https://arrow.apache.org/docs/format/CStreamInterface.html for more details
- * on using Arrow C stream.
- *
- * The method may take into account ignored fields set with SetIgnoredFields()
- * (the default implementation does), and should take into account filters set
- * with SetSpatialFilter() and SetAttributeFilter(). Note however that
- * specialized implementations may fallback to the default (slower)
- * implementation when filters are set.
- * Drivers that have a specialized implementation should
- * advertise the OLCFastGetArrowStream capability.
- *
- * There are extra precautions to take into account in a OGR context. Unless
- * otherwise specified by a particular driver implementation, the get_schema(),
- * get_next() and get_last_error() function pointers of the ArrowArrayStream
- * structure should no longer be used after the OGRLayer, from which the
- * ArrowArrayStream structure was initialized, has been destroyed (typically at
- * dataset closing). The reason is that those function pointers will typically
- * point to methods of the OGRLayer instance.
- * However, the ArrowSchema and ArrowArray structures filled from those
- * callbacks can be used and must be released independently from the
- * ArrowArrayStream or the layer.
- *
- * Furthermore, unless otherwise specified by a particular driver
- * implementation, only one ArrowArrayStream can be active at a time on
- * a given layer (that is the last active one must be explicitly released before
- * a next one is asked). Changing filter state, ignored columns, modifying the
- * schema or using ResetReading()/GetNextFeature() while using a
- * ArrowArrayStream is strongly discouraged and may lead to unexpected results.
- * As a rule of thumb, no OGRLayer methods that affect the state of a layer
- * should be called on a layer, while an ArrowArrayStream on it is active.
- *
- * A potential usage can be:
-\code{.cpp}
-    struct ArrowArrayStream stream;
-    if( !OGR_L_GetArrowStream(hLayer, &stream, nullptr))
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "OGR_L_GetArrowStream() failed\n");
-        exit(1);
-    }
-    struct ArrowSchema schema;
-    if( stream.get_schema(&stream, &schema) == 0 )
-    {
-        // Do something useful
-        schema.release(schema);
-    }
-    while( true )
-    {
-        struct ArrowArray array;
-        // Look for an error (get_next() returning a non-zero code), or
-        // end of iteration (array.release == nullptr)
-        if( stream.get_next(&stream, &array) != 0 ||
-            array.release == nullptr )
-        {
-            break;
-        }
-        // Do something useful
-        array.release(&array);
-    }
-    stream.release(&stream);
-\endcode
- *
- * A full example is available in the
- * <a
-href="https://gdal.org/tutorials/vector_api_tut.html#reading-from-ogr-using-the-arrow-c-stream-data-interface">Reading
-From OGR using the Arrow C Stream data interface</a> tutorial.
- *
- * Options may be driver specific. The default implementation recognizes the
- * following options:
- * <ul>
- * <li>INCLUDE_FID=YES/NO. Whether to include the FID column. Defaults to
-YES.</li>
- * <li>MAX_FEATURES_IN_BATCH=integer. Maximum number of features to retrieve in
- *     a ArrowArray batch. Defaults to 65 536.</li>
- * </ul>
- *
- * The Arrow/Parquet drivers recognize the following option:
- * <ul>
- * <li>GEOMETRY_ENCODING=WKB. To force a fallback to the generic implementation
- *     when the native geometry encoding is not WKB. Otherwise the geometry
- *     will be returned with its native Arrow encoding
- *     (possibly using GeoArrow encoding).</li>
- * </ul>
- *
- * @param hLayer Layer
- * @param out_stream Output stream. Must *not* be NULL. The content of the
- *                  structure does not need to be initialized.
- * @param papszOptions NULL terminated list of key=value options.
- * @return true in case of success.
- * @since GDAL 3.6
- */
-bool OGR_L_GetArrowStream(OGRLayerH hLayer, struct ArrowArrayStream *out_stream,
-                          char **papszOptions)
-{
-    VALIDATE_POINTER1(hLayer, "OGR_L_GetArrowStream", false);
-    VALIDATE_POINTER1(out_stream, "OGR_L_GetArrowStream", false);
-
-    return OGRLayer::FromHandle(hLayer)->GetArrowStream(out_stream,
-                                                        papszOptions);
-}
-
-/************************************************************************/
 /*                     OGRLayer::GetGeometryTypes()                     */
 /************************************************************************/
 
@@ -7001,7 +5435,7 @@ OGRLayer::GetGeometryTypes(int iGeomField, int nFlagsGGT, int &nEntryCountOut,
     if (poDefn->IsStyleIgnored())
         aosIgnoredFieldsRestore.AddString("OGR_STYLE");
     aosIgnoredFields.AddString("OGR_STYLE");
-    SetIgnoredFields(const_cast<const char **>(aosIgnoredFields.List()));
+    SetIgnoredFields(aosIgnoredFields.List());
 
     // Iterate over features
     std::map<OGRwkbGeometryType, int64_t> oMapCount;
@@ -7049,7 +5483,7 @@ OGRLayer::GetGeometryTypes(int iGeomField, int nFlagsGGT, int &nEntryCountOut,
     }
 
     // Restore ignore fields state
-    SetIgnoredFields(const_cast<const char **>(aosIgnoredFieldsRestore.List()));
+    SetIgnoredFields(aosIgnoredFieldsRestore.List());
 
     if (bInterrupted)
     {
@@ -7242,4 +5676,59 @@ OGRErr OGR_L_SetActiveSRS(OGRLayerH hLayer, int iGeomField,
     VALIDATE_POINTER1(hLayer, "OGR_L_SetActiveSRS", OGRERR_FAILURE);
     return OGRLayer::FromHandle(hLayer)->SetActiveSRS(
         iGeomField, OGRSpatialReference::FromHandle(hSRS));
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+/** Return the dataset associated with this layer.
+ *
+ * As of GDAL 3.9, GetDataset() is implemented on all in-tree drivers that
+ * have CreateLayer() capability. It may not be implemented in read-only
+ * drivers or out-of-tree drivers.
+ *
+ * It is currently only used by the GetRecordBatchSchema()
+ * method to retrieve the field domain associated with a field, to fill the
+ * dictionary field of a struct ArrowSchema.
+ * It is also used by CreateFieldFromArrowSchema() to determine which field
+ * types and subtypes are supported by the layer, by inspecting the driver
+ * metadata, and potentially use fallback types when needed.
+ *
+ * This method is the same as the C function OGR_L_GetDataset().
+ *
+ * @return dataset, or nullptr when unknown.
+ * @since GDAL 3.6
+ */
+GDALDataset *OGRLayer::GetDataset()
+{
+    return nullptr;
+}
+
+/************************************************************************/
+/*                          OGR_L_GetDataset()                          */
+/************************************************************************/
+
+/** Return the dataset associated with this layer.
+ *
+ * As of GDAL 3.9, GetDataset() is implemented on all in-tree drivers that
+ * have CreateLayer() capability. It may not be implemented in read-only
+ * drivers or out-of-tree drivers.
+ *
+ * It is currently only used by the GetRecordBatchSchema()
+ * method to retrieve the field domain associated with a field, to fill the
+ * dictionary field of a struct ArrowSchema.
+ * It is also used by CreateFieldFromArrowSchema() to determine which field
+ * types and subtypes are supported by the layer, by inspecting the driver
+ * metadata, and potentially use fallback types when needed.
+ *
+ * This function is the same as the C++ method OGRLayer::GetDataset().
+ *
+ * @return dataset, or nullptr when unknown.
+ * @since GDAL 3.9
+ */
+GDALDatasetH OGR_L_GetDataset(OGRLayerH hLayer)
+{
+    VALIDATE_POINTER1(hLayer, "OGR_L_GetDataset", nullptr);
+    return GDALDataset::ToHandle(OGRLayer::FromHandle(hLayer)->GetDataset());
 }

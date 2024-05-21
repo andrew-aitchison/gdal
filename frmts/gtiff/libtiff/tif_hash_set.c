@@ -27,6 +27,7 @@
  ****************************************************************************/
 
 #include "tif_config.h"
+
 #include "tif_hash_set.h"
 
 #include <assert.h>
@@ -145,7 +146,7 @@ TIFFHashSet *TIFFHashSetNew(TIFFHashSetHashFunc fnHashFunc,
     set->fnEqualFunc = fnEqualFunc ? fnEqualFunc : TIFFHashSetEqualPointer;
     set->fnFreeEltFunc = fnFreeEltFunc;
     set->nSize = 0;
-    set->tabList = (TIFFList **)(calloc(sizeof(TIFFList *), 53));
+    set->tabList = (TIFFList **)(calloc(53, sizeof(TIFFList *)));
     if (set->tabList == NULL)
     {
         free(set);
@@ -162,7 +163,6 @@ TIFFHashSet *TIFFHashSetNew(TIFFHashSetHashFunc fnHashFunc,
     return set;
 }
 
-#ifdef notdef
 /************************************************************************/
 /*                          TIFFHashSetSize()                            */
 /************************************************************************/
@@ -182,7 +182,6 @@ int TIFFHashSetSize(const TIFFHashSet *set)
     assert(set != NULL);
     return set->nSize;
 }
-#endif
 
 /************************************************************************/
 /*                       TIFFHashSetGetNewListElt()                      */
@@ -368,7 +367,7 @@ static bool TIFFHashSetRehash(TIFFHashSet *set)
 {
     int nNewAllocatedSize = anPrimes[set->nIndiceAllocatedSize];
     TIFFList **newTabList =
-        (TIFFList **)(calloc(sizeof(TIFFList *), nNewAllocatedSize));
+        (TIFFList **)(calloc(nNewAllocatedSize, sizeof(TIFFList *)));
     if (newTabList == NULL)
         return false;
 #ifdef HASH_DEBUG

@@ -317,6 +317,7 @@ int OGRPolygon::checkRing(OGRCurve *poNewRing) const
 
     return TRUE;
 }
+
 /*! @endcond */
 
 /************************************************************************/
@@ -351,9 +352,39 @@ OGRErr OGRPolygon::importFromWkb(const unsigned char *pabyData, size_t nSize,
                                  size_t &nBytesConsumedOut)
 
 {
-    nBytesConsumedOut = 0;
     OGRwkbByteOrder eByteOrder = wkbNDR;
     size_t nDataOffset = 0;
+
+    if (oCC.nCurveCount == 1 && flags == 0 && nSize >= 9 &&
+        pabyData[0] == wkbNDR &&
+        memcmp(pabyData + 1, "\x03\x00\x00\x00\x01\x00\x00\x00", 8) == 0)
+    {
+        // Optimization to import a Intel-ordered 1-ring polygon on
+        // top of an existing 1-ring polygon, to save dynamic memory
+        // allocations.
+        size_t nBytesConsumedRing = 0;
+        nDataOffset = 9;
+        // cppcheck-suppress knownConditionTrueFalse
+        if (nSize != static_cast<size_t>(-1))
+            nSize -= nDataOffset;
+        OGRErr eErr =
+            cpl::down_cast<OGRLinearRing *>(oCC.papoCurves[0])
+                ->_importFromWkb(eByteOrder, flags, pabyData + nDataOffset,
+                                 nSize, nBytesConsumedRing);
+        if (eErr == OGRERR_NONE)
+        {
+            nBytesConsumedOut = nDataOffset + nBytesConsumedRing;
+        }
+        else
+        {
+            empty();
+        }
+
+        return eErr;
+    }
+
+    nBytesConsumedOut = 0;
+
     // coverity[tainted_data]
     OGRErr eErr = oCC.importPreambleFromWkb(this, pabyData, nSize, nDataOffset,
                                             eByteOrder, 4, eWkbVariant);
@@ -397,24 +428,28 @@ OGRErr OGRPolygon::importFromWkb(const unsigned char *pabyData, size_t nSize,
 /*      Build a well known binary representation of this object.        */
 /************************************************************************/
 
-OGRErr OGRPolygon::exportToWkb(OGRwkbByteOrder eByteOrder,
-                               unsigned char *pabyData,
-                               OGRwkbVariant eWkbVariant) const
+OGRErr OGRPolygon::exportToWkb(unsigned char *pabyData,
+                               const OGRwkbExportOptions *psOptions) const
 
 {
+    if (psOptions == nullptr)
+    {
+        static const OGRwkbExportOptions defaultOptions;
+        psOptions = &defaultOptions;
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Set the byte order.                                             */
     /* -------------------------------------------------------------------- */
-    pabyData[0] =
-        DB2_V72_UNFIX_BYTE_ORDER(static_cast<unsigned char>(eByteOrder));
+    pabyData[0] = DB2_V72_UNFIX_BYTE_ORDER(
+        static_cast<unsigned char>(psOptions->eByteOrder));
 
     /* -------------------------------------------------------------------- */
     /*      Set the geometry feature type.                                  */
     /* -------------------------------------------------------------------- */
     GUInt32 nGType = getGeometryType();
 
-    if (eWkbVariant == wkbVariantPostGIS1)
+    if (psOptions->eWkbVariant == wkbVariantPostGIS1)
     {
         nGType = wkbFlatten(nGType);
         if (Is3D())
@@ -424,10 +459,10 @@ OGRErr OGRPolygon::exportToWkb(OGRwkbByteOrder eByteOrder,
         if (IsMeasured())
             nGType = static_cast<OGRwkbGeometryType>(nGType | 0x40000000);
     }
-    else if (eWkbVariant == wkbVariantIso)
+    else if (psOptions->eWkbVariant == wkbVariantIso)
         nGType = getIsoGeometryType();
 
-    if (OGR_SWAP(eByteOrder))
+    if (OGR_SWAP(psOptions->eByteOrder))
     {
         nGType = CPL_SWAP32(nGType);
     }
@@ -437,7 +472,7 @@ OGRErr OGRPolygon::exportToWkb(OGRwkbByteOrder eByteOrder,
     /* -------------------------------------------------------------------- */
     /*      Copy in the raw data.                                           */
     /* -------------------------------------------------------------------- */
-    if (OGR_SWAP(eByteOrder))
+    if (OGR_SWAP(psOptions->eByteOrder))
     {
         const int nCount = CPL_SWAP32(oCC.nCurveCount);
         memcpy(pabyData + 5, &nCount, 4);
@@ -454,7 +489,7 @@ OGRErr OGRPolygon::exportToWkb(OGRwkbByteOrder eByteOrder,
 
     for (auto &&poRing : *this)
     {
-        poRing->_exportToWkb(eByteOrder, flags, pabyData + nOffset);
+        poRing->_exportToWkb(flags, pabyData + nOffset, psOptions);
 
         nOffset += poRing->_WkbSize(flags);
     }
@@ -644,6 +679,7 @@ OGRErr OGRPolygon::importFromWKTListOnly(const char **ppszInput, int bHasZ,
     *ppszInput = pszInput;
     return OGRERR_NONE;
 }
+
 /*! @endcond */
 
 /************************************************************************/
@@ -881,4 +917,5 @@ OGRSurfaceCasterToCurvePolygon OGRPolygon::GetCasterToCurvePolygon() const
 {
     return OGRPolygon::CasterToCurvePolygon;
 }
+
 /*! @endcond */

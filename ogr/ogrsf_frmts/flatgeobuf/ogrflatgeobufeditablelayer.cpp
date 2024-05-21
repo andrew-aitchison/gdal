@@ -57,6 +57,7 @@ class OGRFlatGeobufEditableLayerSynchronizer final
           m_papszOpenOptions(CSLDuplicate(papszOpenOptions))
     {
     }
+
     virtual ~OGRFlatGeobufEditableLayerSynchronizer() override;
 
     virtual OGRErr EditableSyncToDisk(OGRLayer *poEditableLayer,
@@ -89,8 +90,9 @@ OGRErr OGRFlatGeobufEditableLayerSynchronizer::EditableSyncToDisk(
     auto createIndex = m_poFlatGeobufLayer->GetIndexNodeSize() > 0;
 
     OGRFlatGeobufLayer *poFlatGeobufTmpLayer = OGRFlatGeobufLayer::Create(
-        osLayerName.c_str(), osTmpFilename.c_str(), spatialRef, gType,
-        createIndex, m_papszOpenOptions);
+        m_poFlatGeobufLayer->GetDataset(), osLayerName.c_str(),
+        osTmpFilename.c_str(), spatialRef, gType, createIndex,
+        m_papszOpenOptions);
     if (poFlatGeobufTmpLayer == nullptr)
         return OGRERR_FAILURE;
 

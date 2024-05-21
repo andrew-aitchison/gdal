@@ -120,7 +120,7 @@ static double average(double a, double b)
 
 static double degrees_to_radians(double d)
 {
-    return d * 0.017453292;
+    return d * (M_PI / 180);
 }
 
 static bool approx_equal(double a, double b)
@@ -180,10 +180,12 @@ class TerragenDataset final : public GDALPamDataset
     bool get(float &);
     bool put(GInt16);
     bool put(float);
+
     bool skip(size_t n)
     {
         return 0 == VSIFSeekL(m_fp, n, SEEK_CUR);
     }
+
     bool pad(size_t n)
     {
         return skip(n);
@@ -211,6 +213,7 @@ class TerragenRasterBand final : public GDALPamRasterBand
 
   public:
     explicit TerragenRasterBand(TerragenDataset *);
+
     virtual ~TerragenRasterBand()
     {
         if (m_pvLine != nullptr)
@@ -971,7 +974,7 @@ GDALDataset *TerragenDataset::Create(const char *pszFilename, int nXSize,
     // VSIFClose( poDS->m_fp );
 
     // return (GDALDataset *) GDALOpen( pszFilename, GA_Update );
-    return reinterpret_cast<GDALDataset *>(poDS);
+    return GDALDataset::FromHandle(poDS);
 }
 
 /************************************************************************/

@@ -40,8 +40,13 @@ check_include_file("dlfcn.h" HAVE_DLFCN_H)
 
 check_type_size("int" SIZEOF_INT)
 check_type_size("unsigned long" SIZEOF_UNSIGNED_LONG)
+check_type_size("long int" SIZEOF_LONG_INT)
 check_type_size("void*" SIZEOF_VOIDP)
 check_type_size("size_t" SIZEOF_SIZE_T)
+
+check_function_exists(ctime_r HAVE_CTIME_R)
+check_function_exists(gmtime_r HAVE_GMTIME_R)
+check_function_exists(localtime_r HAVE_LOCALTIME_R)
 
 if(MSVC AND NOT BUILD_SHARED_LIBS)
   set(CPL_DISABLE_DLL 1)
@@ -57,7 +62,6 @@ if (MSVC)
   set(HAVE_SEARCH_H 1)
   set(HAVE_DIRECT_H 1)
 
-  set(HAVE_LOCALTIME_R 0)
   set(HAVE_DLFCN_H 1)
 
   set(VSI_STAT64 _stat64)
@@ -109,15 +113,15 @@ else ()
     "
         #define _GNU_SOURCE
         #include <pthread.h>
-        int main() { pthread_spinlock_t spin; return 1; }
+        int main() { pthread_spinlock_t spin; return pthread_spin_lock(&spin); }
         "
-    HAVE_PTHREAD_SPINLOCK)
+    HAVE_PTHREAD_SPIN_LOCK)
 
   check_c_source_compiles(
     "
         #define _GNU_SOURCE
         #include <sys/mman.h>
-        int main() { return (mremap(0,0,0,0,0)); }
+        int main() { return (mremap(0,0,0,0,0) != 0); }
         "
     HAVE_5ARGS_MREMAP)
 
@@ -142,6 +146,12 @@ else ()
 
   check_function_exists(getrlimit HAVE_GETRLIMIT)
   check_symbol_exists(RLIMIT_AS "sys/resource.h" HAVE_RLIMIT_AS)
+
+  # For internal libjson-c
+  check_include_file(sys/random.h HAVE_SYS_RANDOM_H)
+  if (HAVE_SYS_RANDOM_H)
+    check_symbol_exists(getrandom "sys/random.h" HAVE_GETRANDOM)
+  endif()
 
   check_function_exists(ftell64 HAVE_FTELL64)
   if (HAVE_FTELL64)
@@ -216,13 +226,13 @@ else ()
         #endif
         #include <sys/types.h>
         #include <sys/stat.h>
-        int main() { struct _stat64 buf; _wstat64( \"\", &buf ); return 0; }
+        int main() { struct _stat64 buf; wchar_t path = 0; _wstat64( &path, &buf ); return 0; }
     "
-    NO_UNIX_STDIO_64)
+    WINDOWS_STAT64)
 
-  if (NO_UNIX_STDIO_64)
+  if (WINDOWS_STAT64)
     set(VSI_STAT64 _stat64)
-    set(VSI_STAT64_T __stat64)
+    set(VSI_STAT64_T _stat64)
   endif ()
 
   check_function_exists(fopen64 HAVE_FOPEN64)
@@ -247,7 +257,7 @@ else ()
   # available at build time.
   # This is also necessary for Mac Catalyst builds.
   # Cf https://lists.osgeo.org/pipermail/gdal-dev/2022-August/056174.html
-  if (${CMAKE_SYSTEM_NAME} MATCHES "iOS" OR ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  if (${CMAKE_SYSTEM_NAME} MATCHES "iOS|visionOS|tvOS|watchOS|Darwin")
     set(VSI_FOPEN64 "fopen")
     set(VSI_FTRUNCATE64 "ftruncate")
     set(VSI_FTELL64 "ftell")
@@ -357,6 +367,19 @@ else ()
     set(DONT_DEPRECATE_SPRINTF 1)
     add_definitions(-DDONT_DEPRECATE_SPRINTF)
   endif ()
+
+  check_cxx_source_compiles(
+    "
+    #include <shared_mutex>
+    int main(int argc, const char * argv[]) {
+        std::shared_mutex smtx;
+        smtx.lock_shared();
+        smtx.unlock_shared();
+        return 0;
+    }
+    "
+    HAVE_SHARED_MUTEX
+  )
 
   check_include_file("linux/userfaultfd.h" HAVE_USERFAULTFD_H)
 endif ()

@@ -52,7 +52,6 @@ set(CPL_SOURCES
     cplstring.cpp
     cpl_vsisimple.cpp
     cpl_vsil.cpp
-    cpl_vsi_mem.cpp
     cpl_http.cpp
     cpl_hash_set.cpp
     cplkeywordparser.cpp
@@ -66,6 +65,7 @@ set(CPL_SOURCES
     cpl_vsil_sparsefile.cpp
     cpl_vsil_abstract_archive.cpp
     cpl_vsil_tar.cpp
+    cpl_vsil_libarchive.cpp
     cpl_vsil_stdin.cpp
     cpl_vsil_buffered_reader.cpp
     cpl_vsil_plugin.cpp
@@ -109,10 +109,7 @@ add_library(cpl OBJECT ${CPL_SOURCES})
 target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:cpl>)
 target_compile_options(cpl PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
 set_property(TARGET cpl PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-  # Part of those files have CPL_CVSID() which break UNITY_BUILD
-  set_property(TARGET cpl PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
-endif ()
+
 # include path to generated cpl_config.h
 target_include_directories(cpl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -130,6 +127,19 @@ target_compile_definitions(cpl PRIVATE INST_DATA="${INST_DATA_PATH}")
 
 if(CMAKE_INSTALL_FULL_SYSCONFDIR)
     target_compile_definitions(cpl PRIVATE SYSCONFDIR="${CMAKE_INSTALL_FULL_SYSCONFDIR}")
+endif()
+
+# To enable conditional use of std::shared_mutex in cpl_vsi_mem.cpp
+add_library(cpl_vsi_mem OBJECT cpl_vsi_mem.cpp)
+target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:cpl_vsi_mem>)
+target_compile_options(cpl_vsi_mem PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
+set_property(TARGET cpl_vsi_mem PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+target_include_directories(cpl_vsi_mem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-std=c++17" COMPILER_SUPPORTS_CXX17)
+if(COMPILER_SUPPORTS_CXX17)
+    target_compile_features(cpl_vsi_mem PRIVATE cxx_std_17)
 endif()
 
 if (WIN32)
@@ -176,11 +186,14 @@ if (GDAL_USE_JSONC_INTERNAL)
 endif ()
 
 target_compile_definitions(cpl PRIVATE -DHAVE_LIBZ -DZIP_SUPPORT)
-target_public_header(TARGET gdal HEADERS cpl_minizip_ioapi.h cpl_minizip_unzip.h cpl_minizip_zip.h)
 target_sources(cpl PRIVATE cpl_vsil_gzip.cpp cpl_minizip_ioapi.cpp cpl_minizip_unzip.cpp cpl_minizip_zip.cpp)
 
 if (GDAL_USE_ZLIB_INTERNAL)
   gdal_add_vendored_lib(cpl libz)
+endif ()
+if (ENABLE_DEFLATE64)
+  gdal_add_vendored_lib(cpl infback9)
+  target_compile_definitions(cpl PRIVATE -DENABLE_DEFLATE64)
 endif ()
 
 # Now external libraries
@@ -190,10 +203,15 @@ endif ()
 
 if (NOT GDAL_USE_ZLIB_INTERNAL)
   target_compile_definitions(cpl PRIVATE -DHAVE_ZLIB_H -DHAVE_ZLIB)
-  if (MSVC)
+  if (MSVC AND NOT ZLIB_IS_STATIC)
     target_compile_definitions(cpl PRIVATE -DZLIB_DLL)
-  endif (MSVC)
+  endif ()
   gdal_target_link_libraries(cpl PRIVATE ZLIB::ZLIB)
+endif ()
+
+if (GDAL_USE_ARCHIVE)
+  target_compile_definitions(cpl PRIVATE -DHAVE_LIBARCHIVE)
+  gdal_target_link_libraries(cpl PRIVATE ARCHIVE::ARCHIVE)
 endif ()
 
 if (GDAL_USE_CURL)
@@ -249,11 +267,6 @@ endif ()
 
 if (HAVE_USERFAULTFD_H)
   target_compile_definitions(cpl PRIVATE -DENABLE_UFFD)
-endif ()
-
-option(HDFS_ENABLED "Include HDFS support" OFF)
-if (HDFS_ENABLED)
-  target_compile_definitions(cpl PRIVATE -DHDFS_ENABLED)
 endif ()
 
 # for plugin DLFCN: for win32 https://github.com/dlfcn-win32/dlfcn-win32/archive/v1.1.1.tar.gz if(WIN32)

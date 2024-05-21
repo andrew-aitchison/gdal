@@ -102,10 +102,8 @@ def test_rasterize_1():
 # Test rasterization with ALL_TOUCHED.
 
 
+@pytest.mark.require_driver("CSV")
 def test_rasterize_2():
-
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
 
     # Setup working spatial reference
     sr_wkt = 'LOCAL_CS["arbitrary"]'
@@ -122,15 +120,14 @@ def test_rasterize_2():
 
     # Run the algorithm.
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    err = gdal.RasterizeLayer(
-        target_ds,
-        [3, 2, 1],
-        cutline_ds.GetLayer(0),
-        burn_values=[200, 220, 240],
-        options=["ALL_TOUCHED=TRUE"],
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        err = gdal.RasterizeLayer(
+            target_ds,
+            [3, 2, 1],
+            cutline_ds.GetLayer(0),
+            burn_values=[200, 220, 240],
+            options=["ALL_TOUCHED=TRUE"],
+        )
 
     assert err == 0, "got non-zero result code from RasterizeLayer"
 
@@ -452,10 +449,8 @@ def test_rasterize_6():
 # Test rasterization with ALL_TOUCHED.
 
 
+@pytest.mark.require_driver("CSV")
 def test_rasterize_7():
-
-    if gdal.GetDriverByName("CSV") is None:
-        pytest.skip("CSV driver missing")
 
     # Setup working spatial reference
     sr_wkt = 'LOCAL_CS["arbitrary"]'
@@ -471,15 +466,14 @@ def test_rasterize_7():
 
     # Run the algorithm.
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    err = gdal.RasterizeLayer(
-        target_ds,
-        [1],
-        snapped_square_ds.GetLayer(0),
-        burn_values=[1],
-        options=["ALL_TOUCHED=TRUE"],
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        err = gdal.RasterizeLayer(
+            target_ds,
+            [1],
+            snapped_square_ds.GetLayer(0),
+            burn_values=[1],
+            options=["ALL_TOUCHED=TRUE"],
+        )
 
     assert err == 0, "got non-zero result code from RasterizeLayer"
 
@@ -491,6 +485,61 @@ def test_rasterize_7():
         print(checksum)
         gdal.GetDriverByName("GTiff").CreateCopy("tmp/rasterize_7.tif", target_ds)
         pytest.fail("Did not get expected image checksum")
+
+
+###############################################################################
+# Test rasterization with ALL_TOUCHED, and geometry close to a vertical line,
+# but not exactly on it
+
+
+def test_rasterize_all_touched_issue_7523():
+
+    # Setup working spatial reference
+    sr_wkt = 'LOCAL_CS["arbitrary"]'
+    sr = osr.SpatialReference(sr_wkt)
+
+    # Create a memory raster to rasterize into.
+    target_ds = gdal.GetDriverByName("MEM").Create("", 3, 5, 1, gdal.GDT_Byte)
+    target_ds.SetGeoTransform((475435, 5, 0, 424145, 0, -5))
+    target_ds.SetProjection(sr_wkt)
+
+    vect_ds = ogr.GetDriverByName("Memory").CreateDataSource("")
+    lyr = vect_ds.CreateLayer("test", sr)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometryDirectly(
+        ogr.CreateGeometryFromWkt(
+            "POLYGON ((475439.996613325 424122.228740036,475439.996613325 424142.201761073,475446.914301362 424124.133743847,475439.996613325 424122.228740036))"
+        )
+    )
+    lyr.CreateFeature(f)
+
+    # Run the algorithm.
+    gdal.RasterizeLayer(
+        target_ds,
+        [1],
+        lyr,
+        burn_values=[1],
+        options=["ALL_TOUCHED=TRUE"],
+    )
+
+    # Check results.
+    assert struct.unpack("B" * (3 * 5), target_ds.GetRasterBand(1).ReadRaster()) == (
+        1,
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+    )
 
 
 ###############################################################################
@@ -850,3 +899,115 @@ def test_rasterize_bugfix_gh6981():
         )
         == gdal.CE_None
     )
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "wkt",
+    [
+        "POLYGON((12.5 2.5, 12.5 12.5, 2.5 12.5, 2.5 2.5, 12.5 2.5))",
+        "POLYGON((12.5 2.5, 2.5 2.5, 2.5 12.5, 12.5 12.5, 12.5 2.5))",
+        "LINESTRING(12.5 2.5, 2.5 2.5, 2.5 12.5, 12.5 12.5, 12.5 2.5)",
+    ],
+    ids=["clockwise", "counterclockwise", "linestring"],
+)
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["MERGE_ALG=ADD", "ALL_TOUCHED=YES"],
+        ["ALL_TOUCHED=YES"],
+        ["MERGE_ALG=ADD"],
+        [],
+    ],
+)
+@pytest.mark.parametrize("nbands", [1, 2])
+def test_rasterize_bugfix_gh8437(wkt, options, nbands):
+
+    # Setup working spatial reference
+    sr_wkt = 'LOCAL_CS["arbitrary"]'
+    sr = osr.SpatialReference(sr_wkt)
+
+    # Create a memory raster to rasterize into.
+    target_ds = gdal.GetDriverByName("MEM").Create("", 15, 15, nbands, gdal.GDT_Byte)
+    target_ds.SetGeoTransform((15, -1, 0, 15, 0, -1))
+
+    target_ds.SetProjection(sr_wkt)
+
+    # Create a memory layer to rasterize from.
+    rast_ogr_ds = ogr.GetDriverByName("Memory").CreateDataSource("wrk")
+    rast_mem_lyr = rast_ogr_ds.CreateLayer("poly", srs=sr)
+
+    # Add a polygon.
+    feat = ogr.Feature(rast_mem_lyr.GetLayerDefn())
+    feat.SetGeometryDirectly(ogr.Geometry(wkt=wkt))
+
+    rast_mem_lyr.CreateFeature(feat)
+
+    # Run the algorithm.
+    gdal.RasterizeLayer(
+        target_ds,
+        [i + 1 for i in range(nbands)],
+        rast_mem_lyr,
+        burn_values=[80] * nbands,
+        options=options,
+    )
+
+    expected_checksum = (
+        519
+        if wkt.startswith("LINESTRING")
+        else 1727
+        if "ALL_TOUCHED=YES" in options
+        else 1435
+    )
+    for i in range(nbands):
+        _, maxval = target_ds.GetRasterBand(i + 1).ComputeRasterMinMax()
+        assert maxval == 80
+        assert target_ds.GetRasterBand(i + 1).Checksum() == expected_checksum
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "wkt",
+    [
+        "POLYGON((7.5 2.5, 7.5 8.0, 2.5 8.0, 2.5 2.5, 7.5 2.5))",
+        "POLYGON((8.0 2.5, 8.0 7.5, 2.5 7.5, 2.5 2.5, 8.0 2.5))",
+        "POLYGON((7.5 2.0, 7.5 7.5, 2.5 7.5, 2.5 2.0, 7.5 2.0))",
+        "POLYGON((7.5 2.5, 7.5 7.5, 2.0 7.5, 2.0 2.5, 7.5 2.5))",
+    ],
+)
+def test_rasterize_bugfix_gh8918(wkt):
+
+    # Setup working spatial reference
+    sr_wkt = 'LOCAL_CS["arbitrary"]'
+    sr = osr.SpatialReference(sr_wkt)
+
+    # Create a memory raster to rasterize into.
+    target_ds = gdal.GetDriverByName("MEM").Create("", 10, 10, 1, gdal.GDT_Byte)
+    target_ds.SetGeoTransform((0, 1, 0, 0, 0, 1))
+
+    target_ds.SetProjection(sr_wkt)
+
+    # Create a memory layer to rasterize from.
+    rast_ogr_ds = ogr.GetDriverByName("Memory").CreateDataSource("wrk")
+    rast_mem_lyr = rast_ogr_ds.CreateLayer("poly", srs=sr)
+
+    # Add a polygon.
+    feat = ogr.Feature(rast_mem_lyr.GetLayerDefn())
+    feat.SetGeometryDirectly(ogr.Geometry(wkt=wkt))
+
+    rast_mem_lyr.CreateFeature(feat)
+
+    # Run the algorithm.
+    gdal.RasterizeLayer(
+        target_ds,
+        [1],
+        rast_mem_lyr,
+        burn_values=[1],
+        options=["ALL_TOUCHED=YES"],
+    )
+
+    assert target_ds.GetRasterBand(1).Checksum() == 36

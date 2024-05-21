@@ -32,7 +32,7 @@
 import ogrtest
 import pytest
 
-from osgeo import gdal, ogr
+from osgeo import ogr
 
 pytestmark = [
     pytest.mark.require_driver("AVCE00"),
@@ -48,19 +48,16 @@ def check_content(ds):
     lyr = ds.GetLayerByName("ARC")
     expect = ["1", "2", "3", "4", "5", "6", "7"]
 
-    tr = ogrtest.check_features_against_list(lyr, "UserID", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "UserID", expect)
 
     lyr.ResetReading()
 
     feat = lyr.GetNextFeature()
-    assert (
-        ogrtest.check_feature_geometry(
-            feat,
-            "LINESTRING (340099.875 4100200.0,340400.0625 4100399.5,340900.125 4100200.0,340700.03125 4100199.5)",
-            max_error=0.01,
-        )
-        == 0
+
+    ogrtest.check_feature_geometry(
+        feat,
+        "LINESTRING (340099.875 4100200.0,340400.0625 4100399.5,340900.125 4100200.0,340700.03125 4100199.5)",
+        max_error=0.01,
     )
 
 
@@ -99,14 +96,8 @@ def test_ogr_avc_2():
 
 def test_ogr_avc_3():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    avc_ds = ogr.Open("data/avc/compressed.e00")
-    gdal.PopErrorHandler()
-    last_error_msg = gdal.GetLastErrorMsg()
-
-    assert avc_ds is None, "expected failure"
-
-    assert last_error_msg != "", "expected error message"
+    with pytest.raises(Exception):
+        ogr.Open("data/avc/compressed.e00")
 
 
 ###############################################################################

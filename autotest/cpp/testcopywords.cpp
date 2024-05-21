@@ -30,6 +30,7 @@
 #include "cpl_conv.h"
 #include "gdal.h"
 
+#include <cstdint>
 #include <iostream>
 
 #include "gtest_include.h"
@@ -765,6 +766,7 @@ void CheckPacked<GUInt16, GByte>(GDALDataType eIn, GDALDataType eOut)
                   arrayOut[i]);
     }
 }
+
 template <>
 void CheckPacked<GUInt16, GInt16>(GDALDataType eIn, GDALDataType eOut)
 {

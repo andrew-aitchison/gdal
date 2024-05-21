@@ -30,6 +30,9 @@
 
 
 import gdaltest
+import pytest
+
+pytestmark = pytest.mark.require_driver("NDF")
 
 ###############################################################################
 # Simple image test of an NLAPS/NDF2 dataset.
@@ -72,4 +75,4 @@ def test_ndf_1():
     PARAMETER["false_northing",0],
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, gt_epsilon=0.0001, check_prj=wkt)
+    tst.testOpen(check_gt=gt, gt_epsilon=0.0001, check_prj=wkt)

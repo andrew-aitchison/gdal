@@ -49,37 +49,39 @@ void PrintSRSOutputTypes(const OGRSpatialReference &oSRS,
 /*                               Usage()                                */
 /************************************************************************/
 
-static void Usage(const char *pszErrorMsg = nullptr)
+static void Usage(bool bIsError, const char *pszErrorMsg = nullptr)
 
 {
-    printf("\nUsage: gdalsrsinfo [options] srs_def\n"
-           "\n"
-           "srs_def may be the filename of a dataset supported by GDAL/OGR "
-           "from which to extract SRS information\n"
-           "OR any of the usual GDAL/OGR forms "
-           "(complete WKT, PROJ.4, EPSG:n or a file containing the SRS)\n"
-           "\n"
-           "Options: \n"
-           "   [--help-general] [-h]  Show help and exit\n"
-           "   [--single-line]        Print WKT on single line\n"
-           "   [-V]                   Validate SRS\n"
-           "   [-e]                   Search for EPSG number(s) corresponding "
-           "to SRS\n"
-           "   [-o out_type]          Output type { default, all, wkt_all,\n"
+    fprintf(bIsError ? stderr : stdout,
+            "Usage: gdalsrsinfo [options] <srs_def>\n"
+            "\n"
+            "srs_def may be the filename of a dataset supported by GDAL/OGR "
+            "from which to extract SRS information\n"
+            "OR any of the usual GDAL/OGR forms "
+            "(complete WKT, PROJ.4, EPSG:n or a file containing the SRS)\n"
+            "\n"
+            "Options: \n"
+            "   [--help-general]       Show help on general options and exit\n"
+            "   [--help] [-h]          Show help and exit\n"
+            "   [--single-line]        Print WKT on single line\n"
+            "   [-V]                   Validate SRS\n"
+            "   [-e]                   Search for EPSG number(s) corresponding "
+            "to SRS\n"
+            "   [-o <out_type>]          Output type { default, all, wkt_all,\n"
 #if PROJ_VERSION_MAJOR > 6 || PROJ_VERSION_MINOR >= 2
-           "                                        PROJJSON, proj4, epsg,\n"
+            "                                        PROJJSON, proj4, epsg,\n"
 #else
-           "                                        proj4, epsg,\n"
+            "                                        proj4, epsg,\n"
 #endif
-           "                                        wkt1, wkt_simple, "
-           "wkt_noct, wkt_esri,\n"
-           "                                        wkt2, wkt2_2015, "
-           "wkt2_2019, mapinfo, xml }\n\n");
+            "                                        wkt1, wkt_simple, "
+            "wkt_noct, wkt_esri,\n"
+            "                                        wkt2, wkt2_2015, "
+            "wkt2_2019, mapinfo, xml }\n\n");
 
     if (pszErrorMsg != nullptr)
         fprintf(stderr, "\nFAILURE: %s\n", pszErrorMsg);
 
-    exit(1);
+    exit(bIsError ? 1 : 0);
 }
 
 /************************************************************************/
@@ -90,8 +92,8 @@ static void Usage(const char *pszErrorMsg = nullptr)
     do                                                                         \
     {                                                                          \
         if (i + nExtraArg >= argc)                                             \
-            Usage(CPLSPrintf("%s option requires %d argument(s)", argv[i],     \
-                             nExtraArg));                                      \
+            Usage(true, CPLSPrintf("%s option requires %d argument(s)",        \
+                                   argv[i], nExtraArg));                       \
     } while (false)
 
 MAIN_START(argc, argv)
@@ -101,7 +103,7 @@ MAIN_START(argc, argv)
     bool bPretty = true;
     bool bValidate = false;
     bool bFindEPSG = false;
-    int nEPSGCode = -1;
+    std::string osIdentifiedCode = "EPSG:-1";
     const char *pszInput = nullptr;
     const char *pszOutputType = "default";
     OGRSpatialReference oSRS;
@@ -141,7 +143,7 @@ MAIN_START(argc, argv)
             return 0;
         }
         else if (EQUAL(argv[i], "-h") || EQUAL(argv[i], "--help"))
-            Usage();
+            Usage(false);
         else if (EQUAL(argv[i], "-e"))
             bFindEPSG = true;
         else if (EQUAL(argv[i], "-o"))
@@ -157,7 +159,7 @@ MAIN_START(argc, argv)
             bValidate = true;
         else if (argv[i][0] == '-')
         {
-            Usage(CPLSPrintf("Unknown option name '%s'", argv[i]));
+            Usage(true, CPLSPrintf("Unknown option name '%s'", argv[i]));
         }
         else
             pszInput = argv[i];
@@ -166,7 +168,7 @@ MAIN_START(argc, argv)
     if (pszInput == nullptr)
     {
         CSLDestroy(argv);
-        Usage("No input specified.");
+        Usage(true, "No input specified.");
     }
 
     /* Search for SRS */
@@ -216,9 +218,14 @@ MAIN_START(argc, argv)
                            panConfidence[i]);
                 }
 
+                const char *pszAuthorityName = oSRS.GetAuthorityName(nullptr);
                 const char *pszAuthorityCode = oSRS.GetAuthorityCode(nullptr);
-                if (pszAuthorityCode)
-                    nEPSGCode = atoi(pszAuthorityCode);
+                if (pszAuthorityName && pszAuthorityCode)
+                {
+                    osIdentifiedCode = pszAuthorityName;
+                    osIdentifiedCode += ':';
+                    osIdentifiedCode += pszAuthorityCode;
+                }
             }
 
             /* Validate - not well tested!*/
@@ -243,13 +250,13 @@ MAIN_START(argc, argv)
             {
                 const char *papszOutputTypes[] = {"proj4", "wkt2", nullptr};
                 if (bFindEPSG)
-                    printf("\nEPSG:%d\n", nEPSGCode);
+                    printf("\n%s\n", osIdentifiedCode.c_str());
                 PrintSRSOutputTypes(oSRS, papszOutputTypes, bPretty);
             }
             else if (EQUAL("all", pszOutputType))
             {
                 if (bFindEPSG)
-                    printf("\nEPSG:%d\n\n", nEPSGCode);
+                    printf("\n%s\n", osIdentifiedCode.c_str());
                 const char *papszOutputTypes[] = {
                     "proj4",
                     "wkt1",
@@ -279,7 +286,7 @@ MAIN_START(argc, argv)
                 if (bPretty)
                     printf("\n");
                 if (EQUAL(pszOutputType, "epsg"))
-                    printf("EPSG:%d\n", nEPSGCode);
+                    printf("\n%s\n", osIdentifiedCode.c_str());
                 else
                     PrintSRS(oSRS, pszOutputType, bPretty, FALSE);
                 if (bPretty)
@@ -298,6 +305,7 @@ MAIN_START(argc, argv)
 
     return 0;
 }
+
 MAIN_END
 
 /************************************************************************/
@@ -415,29 +423,6 @@ bool FindSRS(const char *pszInput, OGRSpatialReference &oSRS)
         {
             CPLDebug("gdalsrsinfo", "got SRS from user input");
             bGotSRS = true;
-
-            if (CPLGetConfigOption("OSR_USE_NON_DEPRECATED", nullptr) ==
-                nullptr)
-            {
-                const char *pszAuthName = oSRS.GetAuthorityName(nullptr);
-                const char *pszAuthCode = oSRS.GetAuthorityCode(nullptr);
-
-                CPLConfigOptionSetter oSetter("OSR_USE_NON_DEPRECATED", "NO",
-                                              false);
-                OGRSpatialReference oSRS2;
-                oSRS2.SetFromUserInput(pszInput);
-                const char *pszAuthCode2 = oSRS2.GetAuthorityCode(nullptr);
-                if (pszAuthName && pszAuthCode && pszAuthCode2 &&
-                    !EQUAL(pszAuthCode, pszAuthCode2))
-                {
-                    printf("CRS %s is deprecated, and the following output "
-                           "will use its non-deprecated replacement %s:%s.\n"
-                           "To use the original CRS, set the "
-                           "OSR_USE_NON_DEPRECATED "
-                           "configuration option to NO.\n",
-                           pszInput, pszAuthName, pszAuthCode);
-                }
-            }
         }
     }
 
@@ -466,7 +451,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         if (bPrintSep)
             printf("PROJ.4 : ");
         oSRS.exportToProj4(&pszOutput);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("PROJJSON", pszOutputType))
@@ -476,7 +461,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             bPretty ? "MULTILINE=YES" : "MULTILINE=NO", nullptr};
         oSRS.exportToPROJJSON(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("wkt1", pszOutputType))
@@ -486,7 +471,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             "FORMAT=WKT1_GDAL", bPretty ? "MULTILINE=YES" : nullptr, nullptr};
         oSRS.exportToWkt(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("wkt_simple", pszOutputType))
@@ -496,7 +481,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             "FORMAT=WKT1_SIMPLE", bPretty ? "MULTILINE=YES" : nullptr, nullptr};
         oSRS.exportToWkt(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("wkt_noct", pszOutputType))
@@ -506,7 +491,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             "FORMAT=SFSQL", bPretty ? "MULTILINE=YES" : nullptr, nullptr};
         oSRS.exportToWkt(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("wkt_esri", pszOutputType))
@@ -516,7 +501,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             "FORMAT=WKT1_ESRI", bPretty ? "MULTILINE=YES" : nullptr, nullptr};
         oSRS.exportToWkt(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("wkt2_2015", pszOutputType))
@@ -526,7 +511,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             "FORMAT=WKT2_2015", bPretty ? "MULTILINE=YES" : nullptr, nullptr};
         oSRS.exportToWkt(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("wkt", pszOutputType) || EQUAL("wkt2", pszOutputType) ||
@@ -538,7 +523,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         const char *const apszOptions[] = {
             "FORMAT=WKT2_2018", bPretty ? "MULTILINE=YES" : nullptr, nullptr};
         oSRS.exportToWkt(&pszOutput, apszOptions);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("mapinfo", pszOutputType))
@@ -546,7 +531,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         if (bPrintSep)
             printf("MAPINFO : ");
         oSRS.exportToMICoordSys(&pszOutput);
-        printf("\'%s\'\n", pszOutput);
+        printf("\'%s\'\n", pszOutput ? pszOutput : "(error)");
     }
 
     else if (EQUAL("xml", pszOutputType))
@@ -554,7 +539,7 @@ CPLErr PrintSRS(const OGRSpatialReference &oSRS, const char *pszOutputType,
         if (bPrintSep)
             printf("XML :\n");
         oSRS.exportToXML(&pszOutput, nullptr);
-        printf("%s\n", pszOutput);
+        printf("%s\n", pszOutput ? pszOutput : "(error)");
     }
 
     else

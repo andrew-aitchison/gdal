@@ -94,16 +94,19 @@ class GDALGMLJP2Expr
     CPLString osValue{};
 
     GDALGMLJP2Expr() = default;
+
     explicit GDALGMLJP2Expr(const char *pszVal)
         : eType(GDALGMLJP2ExprType::GDALGMLJP2Expr_STRING_LITERAL),
           osValue(pszVal)
     {
     }
+
     explicit GDALGMLJP2Expr(const CPLString &osVal)
         : eType(GDALGMLJP2ExprType::GDALGMLJP2Expr_STRING_LITERAL),
           osValue(osVal)
     {
     }
+
     ~GDALGMLJP2Expr() = default;
 
     GDALGMLJP2Expr Evaluate(xmlXPathContextPtr pXPathCtx, xmlDocPtr pDoc);
@@ -357,7 +360,12 @@ static CPLString GDALGMLJP2EvalExpr(const CPLString &osTemplate,
 /************************************************************************/
 
 static void GDALGMLJP2XPathErrorHandler(void * /* userData */,
-                                        xmlErrorPtr error)
+#if LIBXML_VERSION >= 21200
+                                        const xmlError *error
+#else
+                                        xmlErrorPtr error
+#endif
+)
 {
     if (error->domain == XML_FROM_XPATH && error->str1 != nullptr &&
         error->int1 < static_cast<int>(strlen(error->str1)))

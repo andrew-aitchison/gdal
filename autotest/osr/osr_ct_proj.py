@@ -35,7 +35,7 @@ import os
 import gdaltest
 import pytest
 
-from osgeo import gdal, osr
+from osgeo import gdal, ogr, osr
 
 bonne = 'PROJCS["bonne",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["bonne"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",0.0],PARAMETER["Standard_Parallel_1",60.0],UNIT["Meter",1.0]]'
 
@@ -160,12 +160,12 @@ transform_list = [
         "EPSG:4979",
         (31.5656461890308, -121.213327277021, 0.0),
         0.1,
-        "+proj=utm +zone=11 +datum=WGS84 +geoidgrids=egm96_15.gtx +units=us-ft",
+        "+proj=utm +zone=11 +datum=WGS84 +geoidgrids=egm96_15_extract.gtx +units=us-ft",
         (328083.333225467, 11482916.6665952, 41.4697855726348),
         0.01,
         "EGM 96 Conversion",
         None,
-        "egm96_15.gtx",
+        "egm96_15_extract.gtx",
         "6.2.1",
     ),
     # Test optimization in case of identical projections (projected)
@@ -283,7 +283,7 @@ transform_list = [
 map_old_grid_name_to_tif_ones = {
     "ntf_r93.gsb": "fr_ign_ntf_r93.tif",
     "BETA2007.gsb": "de_adv_BETA2007.tif",
-    "egm96_15.gtx": "us_nga_egm96_15.tif",
+    "egm96_15_extract.gtx": "egm96_15_extract.gtx",
 }
 
 ###############################################################################
@@ -461,12 +461,13 @@ def test_transform_bounds_densify_out_of_bounds():
         == 0
     )
     ctr = osr.CoordinateTransformation(src, dst)
-    assert ctr.TransformBounds(-120, 40, -80, 64, -1) == (
-        float("inf"),
-        float("inf"),
-        float("inf"),
-        float("inf"),
-    )
+    with osr.ExceptionMgr(useExceptions=False):
+        assert ctr.TransformBounds(-120, 40, -80, 64, -1) == (
+            float("inf"),
+            float("inf"),
+            float("inf"),
+            float("inf"),
+        )
 
 
 def test_transform_bounds_densify_out_of_bounds__geographic_output():
@@ -482,12 +483,8 @@ def test_transform_bounds_densify_out_of_bounds__geographic_output():
     dst.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
     assert dst.ImportFromEPSG(4326) == 0
     ctr = osr.CoordinateTransformation(src, dst)
-    assert ctr.TransformBounds(-120, 40, -80, 64, 1) == (
-        float("inf"),
-        float("inf"),
-        float("inf"),
-        float("inf"),
-    )
+    with pytest.raises(Exception):
+        ctr.TransformBounds(-120, 40, -80, 64, 1)
 
 
 def test_transform_bounds_antimeridian():
@@ -685,3 +682,28 @@ def test_transform_bounds__epsg_4326_to_esri_53037():
         (-17243953.787082285, -8392929.693707585, 17243953.787082285, 8392929.693707585)
     )
     assert gdal.GetLastErrorMsg() == ""
+
+
+def test_transform_bounds_polar_to_webmercator():
+    src = osr.SpatialReference()
+    src.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
+    assert (
+        src.ImportFromProj4(
+            "+proj=stere +lat_0=90 +lat_ts=60 +lon_0=-80 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+        == ogr.OGRERR_NONE
+    )
+    dst = osr.SpatialReference()
+    dst.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
+    assert dst.ImportFromEPSG(3857) == ogr.OGRERR_NONE
+    ctr = osr.CoordinateTransformation(src, dst)
+    assert ctr.TransformBounds(
+        -12288000, -12288000, 12288000, 12288000, 21
+    ) == pytest.approx(
+        (
+            -20037508.34167605,
+            -2450824.9835280986,
+            20037508.341676045,
+            20037508.329885136,
+        )
+    )

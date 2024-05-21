@@ -60,8 +60,9 @@
  *
  * Constructor.
  **********************************************************************/
-MIFFile::MIFFile()
-    : m_pszFname(nullptr), m_eAccessMode(TABRead), m_nVersion(300),
+MIFFile::MIFFile(GDALDataset *poDS)
+    : IMapInfoFile(poDS), m_pszFname(nullptr), m_eAccessMode(TABRead),
+      m_nVersion(300),
       // Tab is default delimiter in MIF spec if not explicitly specified.  Use
       // that by default for read mode. In write mode, we will use "," as
       // delimiter since it is more common than tab (we do this in Open())
@@ -316,6 +317,7 @@ int MIFFile::Open(const char *pszFname, TABAccess eAccess,
         CPLFree(pszFeatureClassName);
         // Ref count defaults to 0... set it to 1
         m_poDefn->Reference();
+        m_poDefn->Seal(/* bSealFields = */ true);
     }
 
     return 0;
@@ -341,6 +343,7 @@ int MIFFile::ParseMIFHeader(int *pbIsEmpty)
     CPLFree(pszFeatureClassName);
     // Ref count defaults to 0... set it to 1
     m_poDefn->Reference();
+    m_poDefn->Seal(/* bSealFields = */ true);
 
     if (m_eAccessMode != TABRead)
     {
@@ -645,6 +648,24 @@ int MIFFile::AddFields(const char *pszLine)
              *------------------------------------------------*/
             nStatus =
                 AddFieldNative(osFieldName, TABFSmallInt, atoi(papszToken[2]));
+        }
+    }
+    else if (numTok >= 2 && EQUAL(papszToken[1], "largeint"))
+    {
+        if (numTok == 2)
+        {
+            /*-------------------------------------------------
+             * LargeInt type without a specified width
+             *------------------------------------------------*/
+            nStatus = AddFieldNative(osFieldName, TABFLargeInt);
+        }
+        else /* if (numTok > 2) */
+        {
+            /*-------------------------------------------------
+             * LargeInt type with a specified width
+             *------------------------------------------------*/
+            nStatus =
+                AddFieldNative(osFieldName, TABFLargeInt, atoi(papszToken[2]));
         }
     }
     else if (numTok >= 4 && EQUAL(papszToken[1], "decimal"))
@@ -988,6 +1009,9 @@ int MIFFile::WriteMIFHeader()
                 break;
             case TABFSmallInt:
                 m_poMIFFile->WriteLine("  %s SmallInt\n", osFieldName.c_str());
+                break;
+            case TABFLargeInt:
+                m_poMIFFile->WriteLine("  %s LargeInt\n", osFieldName.c_str());
                 break;
             case TABFFloat:
                 m_poMIFFile->WriteLine("  %s Float\n", osFieldName.c_str());
@@ -1552,7 +1576,9 @@ int MIFFile::SetFeatureDefn(
             switch (poFieldDefn->GetType())
             {
                 case OFTInteger:
-                    eMapInfoType = TABFInteger;
+                    eMapInfoType = poFieldDefn->GetSubType() == OFSTBoolean
+                                       ? TABFLogical
+                                       : TABFInteger;
                     break;
                 case OFTReal:
                     eMapInfoType = TABFFloat;
@@ -1641,6 +1667,7 @@ int MIFFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
         CPLFree(pszFeatureClassName);
         // Ref count defaults to 0... set it to 1
         m_poDefn->Reference();
+        m_poDefn->Seal(/* bSealFields = */ true);
     }
 
     CPLString osName(NormalizeFieldName(pszName));
@@ -1671,6 +1698,13 @@ int MIFFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
              * SMALLINT type
              *------------------------------------------------*/
             poFieldDefn = new OGRFieldDefn(osName.c_str(), OFTInteger);
+            poFieldDefn->SetWidth(nWidth);
+            break;
+        case TABFLargeInt:
+            /*-------------------------------------------------
+             * LargeInt type
+             *------------------------------------------------*/
+            poFieldDefn = new OGRFieldDefn(osName.c_str(), OFTInteger64);
             poFieldDefn->SetWidth(nWidth);
             break;
         case TABFDecimal:
@@ -1732,7 +1766,8 @@ int MIFFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
             /*-------------------------------------------------
              * LOGICAL type (value "T" or "F")
              *------------------------------------------------*/
-            poFieldDefn = new OGRFieldDefn(osName.c_str(), OFTString);
+            poFieldDefn = new OGRFieldDefn(osName.c_str(), OFTInteger);
+            poFieldDefn->SetSubType(OFSTBoolean);
             poFieldDefn->SetWidth(1);
             break;
         default:
@@ -1744,7 +1779,7 @@ int MIFFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
     /*-----------------------------------------------------
      * Add the FieldDefn to the FeatureDefn
      *----------------------------------------------------*/
-    m_poDefn->AddFieldDefn(poFieldDefn);
+    whileUnsealing(m_poDefn)->AddFieldDefn(poFieldDefn);
     m_oSetFields.insert(CPLString(poFieldDefn->GetNameRef()).toupper());
     delete poFieldDefn;
 

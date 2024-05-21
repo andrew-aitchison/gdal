@@ -31,6 +31,11 @@
 #include "cpl_string.h"
 #include "rawdataset.h"
 
+#include <algorithm>
+
+#ifndef UTM_FORMAT_defined
+#define UTM_FORMAT_defined
+
 static const char UTM_FORMAT[] =
     "PROJCS[\"%s / UTM zone %dN\",GEOGCS[%s,PRIMEM[\"Greenwich\",0],"
     "UNIT[\"degree\",0.0174532925199433]],PROJECTION[\"Transverse_Mercator\"],"
@@ -51,6 +56,8 @@ static const char NAD27_DATUM[] =
 static const char NAD83_DATUM[] =
     "\"NAD83\",DATUM[\"North_American_Datum_1983\","
     "SPHEROID[\"GRS 1980\",6378137,298.257222101]]";
+
+#endif
 
 /************************************************************************/
 /*                            DOQGetField()                             */
@@ -120,11 +127,14 @@ class DOQ1Dataset final : public RawDataset
 
     CPL_DISALLOW_COPY_ASSIGN(DOQ1Dataset)
 
+    CPLErr Close() override;
+
   public:
     DOQ1Dataset();
     ~DOQ1Dataset();
 
     CPLErr GetGeoTransform(double *padfTransform) override;
+
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return m_oSRS.IsEmpty() ? nullptr : &m_oSRS;
@@ -149,10 +159,34 @@ DOQ1Dataset::DOQ1Dataset()
 DOQ1Dataset::~DOQ1Dataset()
 
 {
-    FlushCache(true);
+    DOQ1Dataset::Close();
+}
 
-    if (fpImage != nullptr)
-        CPL_IGNORE_RET_VAL(VSIFCloseL(fpImage));
+/************************************************************************/
+/*                              Close()                                 */
+/************************************************************************/
+
+CPLErr DOQ1Dataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (DOQ1Dataset::FlushCache(true) != CE_None)
+            eErr = CE_Failure;
+
+        if (fpImage)
+        {
+            if (VSIFCloseL(fpImage) != 0)
+            {
+                CPLError(CE_Failure, CPLE_FileIO, "I/O error");
+                eErr = CE_Failure;
+            }
+        }
+
+        if (GDALPamDataset::Close() != CE_None)
+            eErr = CE_Failure;
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -234,7 +268,7 @@ GDALDataset *DOQ1Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    DOQ1Dataset *poDS = new DOQ1Dataset();
+    auto poDS = std::make_unique<DOQ1Dataset>();
 
     /* -------------------------------------------------------------------- */
     /*      Capture some information from the file that is of interest.     */
@@ -242,8 +276,7 @@ GDALDataset *DOQ1Dataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->nRasterXSize = nWidth;
     poDS->nRasterYSize = nHeight;
 
-    poDS->fpImage = poOpenInfo->fpL;
-    poOpenInfo->fpL = nullptr;
+    std::swap(poDS->fpImage, poOpenInfo->fpL);
 
     /* -------------------------------------------------------------------- */
     /*      Compute layout of data.                                         */
@@ -261,19 +294,22 @@ GDALDataset *DOQ1Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
     /* -------------------------------------------------------------------- */
-    poDS->nBands = nBytesPerPixel;
-    for (int i = 0; i < poDS->nBands; i++)
+    for (int i = 0; i < nBytesPerPixel; i++)
     {
-        poDS->SetBand(i + 1, new RawRasterBand(poDS, i + 1, poDS->fpImage,
-                                               nSkipBytes + i, nBytesPerPixel,
-                                               nBytesPerLine, GDT_Byte, TRUE,
-                                               RawRasterBand::OwnFP::NO));
+        auto poBand = RawRasterBand::Create(
+            poDS.get(), i + 1, poDS->fpImage, nSkipBytes + i, nBytesPerPixel,
+            nBytesPerLine, GDT_Byte,
+            RawRasterBand::ByteOrder::ORDER_LITTLE_ENDIAN,
+            RawRasterBand::OwnFP::NO);
+        if (!poBand)
+            return nullptr;
+        poDS->SetBand(i + 1, std::move(poBand));
     }
 
     /* -------------------------------------------------------------------- */
     /*      Set the description.                                            */
     /* -------------------------------------------------------------------- */
-    DOQGetDescription(poDS, poOpenInfo->pabyHeader);
+    DOQGetDescription(poDS.get(), poOpenInfo->pabyHeader);
 
     /* -------------------------------------------------------------------- */
     /*      Establish the projection string.                                */
@@ -336,7 +372,6 @@ GDALDataset *DOQ1Dataset::Open(GDALOpenInfo *poOpenInfo)
     {
         CPLError(CE_Failure, CPLE_FileIO, "Header read error on %s.",
                  poOpenInfo->pszFilename);
-        delete poDS;
         return nullptr;
     }
 
@@ -348,7 +383,6 @@ GDALDataset *DOQ1Dataset::Open(GDALOpenInfo *poOpenInfo)
     {
         CPLError(CE_Failure, CPLE_FileIO, "Header read error on %s.",
                  poOpenInfo->pszFilename);
-        delete poDS;
         return nullptr;
     }
 
@@ -364,9 +398,9 @@ GDALDataset *DOQ1Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

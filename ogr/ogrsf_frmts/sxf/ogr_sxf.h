@@ -40,8 +40,8 @@
 #include "org_sxf_defs.h"
 
 #define CHECK_BIT(var, pos) (((var) & (1 << (pos))) != 0)
-#define TO_DEGREES 57.2957795130823208766
-#define TO_RADIANS 0.017453292519943295769
+constexpr double TO_DEGREES = 180.0 / M_PI;
+constexpr double TO_RADIANS = M_PI / 180.0;
 
 /************************************************************************/
 /*                         OGRSXFLayer                                */
@@ -88,6 +88,7 @@ class OGRSXFLayer final : public OGRLayer
     virtual OGRFeature *GetNextFeature() override;
     virtual OGRErr SetNextByIndex(GIntBig nIndex) override;
     virtual OGRFeature *GetFeature(GIntBig nFID) override;
+
     virtual OGRFeatureDefn *GetLayerDefn() override
     {
         return poFeatureDefn;
@@ -97,11 +98,13 @@ class OGRSXFLayer final : public OGRLayer
 
     virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
     virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
+
     virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
                              int bForce) override
     {
         return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
     }
+
     virtual OGRSpatialReference *GetSpatialRef() override;
     virtual const char *GetFIDColumn() override;
 
@@ -109,6 +112,7 @@ class OGRSXFLayer final : public OGRLayer
     {
         return nLayerID;
     }
+
     virtual void AddClassifyCode(unsigned nClassCode,
                                  const char *szName = nullptr);
     virtual bool AddRecord(long nFID, unsigned nClassCode, vsi_l_offset nOffset,
@@ -160,6 +164,7 @@ class OGRSXFDataSource final : public OGRDataSource
     {
         return static_cast<int>(m_apoLayers.size());
     }
+
     virtual OGRLayer *GetLayer(int) override;
 
     virtual int TestCapability(const char *) override;

@@ -123,8 +123,10 @@ class ECRGTOCDataset final : public GDALPamDataset
     }
 
     static GDALDataset *Build(const char *pszTOCFilename, CPLXMLNode *psXML,
-                              CPLString osProduct, CPLString osDiscId,
-                              CPLString osScale, const char *pszFilename);
+                              const std::string &osProduct,
+                              const std::string &osDiscId,
+                              const std::string &osScale,
+                              const char *pszFilename);
 
     static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
@@ -319,9 +321,10 @@ static int NEAR_ROUND(double a, double b)
 
 constexpr int ECRG_PIXELS = 2304;
 
-static int GetExtent(const char *pszFrameName, int nScale, int nZone,
-                     double &dfMinX, double &dfMaxX, double &dfMinY,
-                     double &dfMaxY, double &dfPixelXSize, double &dfPixelYSize)
+static void GetExtent(const char *pszFrameName, int nScale, int nZone,
+                      double &dfMinX, double &dfMaxX, double &dfMinY,
+                      double &dfMaxY, double &dfPixelXSize,
+                      double &dfPixelYSize)
 {
     const int nAbsZone = abs(nZone);
 #ifdef DEBUG
@@ -408,8 +411,6 @@ static int GetExtent(const char *pszFrameName, int nScale, int nZone,
              "Frame %s : minx=%.16g, maxy=%.16g, maxx=%.16g, miny=%.16g",
              pszFrameName, dfMinX, dfMaxY, dfMaxX, dfMinY);
 #endif
-
-    return TRUE;
 }
 
 /************************************************************************/
@@ -636,8 +637,10 @@ GDALDataset *ECRGTOCSubDataset::Build(
 /************************************************************************/
 
 GDALDataset *ECRGTOCDataset::Build(const char *pszTOCFilename,
-                                   CPLXMLNode *psXML, CPLString osProduct,
-                                   CPLString osDiscId, CPLString osScale,
+                                   CPLXMLNode *psXML,
+                                   const std::string &osProduct,
+                                   const std::string &osDiscId,
+                                   const std::string &osScale,
                                    const char *pszOpenInfoFilename)
 {
     CPLXMLNode *psTOC = CPLGetXMLNode(psXML, "=Table_of_Contents");
@@ -857,11 +860,8 @@ GDALDataset *ECRGTOCDataset::Build(const char *pszTOCFilename,
                     double dfMaxY = 0.0;
                     double dfPixelXSize = 0.0;
                     double dfPixelYSize = 0.0;
-                    if (!GetExtent(pszFrameName, nScale, nZone, dfMinX, dfMaxX,
-                                   dfMinY, dfMaxY, dfPixelXSize, dfPixelYSize))
-                    {
-                        continue;
-                    }
+                    GetExtent(pszFrameName, nScale, nZone, dfMinX, dfMaxX,
+                              dfMinY, dfMaxY, dfPixelXSize, dfPixelYSize);
 
                     nValidFrames++;
 

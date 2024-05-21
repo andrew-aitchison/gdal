@@ -1018,6 +1018,73 @@ by the OGRSFDriverManager.
 */
 
 /**
+ \fn OGRErr OGRLayer::GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D, int bForce = TRUE);
+
+ \brief Fetch the 3D extent of this layer, on the specified geometry field.
+
+ Returns the 3D extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ (Contrarty to GetExtent() 2D), the returned extent will always take into
+ account the attribute and spatial filters that may be installed.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ For layers that have no 3D geometries, the psExtent3D->MinZ and psExtent3D->MaxZ
+ fields will be respectively set to +Infinity and -Infinity.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This function is the same as the C function OGR_L_GetExtent3D().
+
+ @param iGeomField 0-based index of the geometry field to consider.
+ @param psExtent3D the computed 3D extent of the layer.
+ @param bForce if TRUE, the extent will be computed even if all the
+        layer features have to be fetched.
+ @return OGRERR_NONE on success or an error code in case of failure.
+ @since GDAL 3.9
+*/
+
+/**
+ \fn OGRErr OGR_L_GetExtent3D( OGRLayerH hLayer, int iGeomField, OGREnvelope3D *psExtent3D, int bForce);
+
+ \brief Fetch the 3D extent of this layer, on the specified geometry field.
+
+ Returns the 3D extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ (Contrarty to GetExtent() 2D), the returned extent will always take into
+ account the attribute and spatial filters that may be installed.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ For layers that have no 3D geometries, the psExtent3D->MinZ and psExtent3D->MaxZ
+ fields will be respectively set to +Infinity and -Infinity.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This function is the same as the C++ method OGRLayer::GetExtent3D().
+
+ @param hLayer the layer to consider.
+ @param iGeomField 0-based index of the geometry field to consider.
+ @param psExtent3D the computed 3D extent of the layer.
+ @param bForce if TRUE, the extent will be computed even if all the
+        layer features have to be fetched.
+ @return OGRERR_NONE on success or an error code in case of failure.
+ @since GDAL 3.9
+*/
+
+/**
  \fn void OGRLayer::SetSpatialFilter( OGRGeometry * poFilter );
 
  \brief Set a new spatial filter.
@@ -1340,12 +1407,13 @@ by the OGRSFDriverManager.
 
  The query string should be in the format of an SQL WHERE clause.  For
  instance "population > 1000000 and population < 5000000" where population
- is an attribute in the layer.  The query format is normally a restricted
- form of SQL  WHERE clause as described in the "WHERE" section of the
- <a href="https://gdal.org/user/ogr_sql_dialect.html">OGR SQL</a> tutorial.  In some cases (RDBMS
- backed drivers) the native capabilities of the database may be used to
- interpret the WHERE clause in which case the capabilities will be broader
- than those of OGR SQL.
+ is an attribute in the layer. The query format is normally a SQL WHERE clause
+ as described in the
+ <a href="https://gdal.org/user/ogr_sql_dialect.html#where">"WHERE"</a> section
+ of the OGR SQL dialect documentation.
+ In some cases (RDBMS backed drivers, SQLite, GeoPackage) the native
+ capabilities of the database may be used to to interpret the WHERE clause, in
+ which case the capabilities will be broader than those of OGR SQL.
 
  Note that installing a query string will generally result in resetting
  the current reading position (ala ResetReading()).
@@ -1371,11 +1439,13 @@ by the OGRSFDriverManager.
 
  The query string should be in the format of an SQL WHERE clause.  For
  instance "population > 1000000 and population < 5000000" where population
- is an attribute in the layer.  The query format is a restricted form of SQL
- WHERE clause as defined "eq_format=restricted_where" about half way through
- this document:
-
-   http://ogdi.sourceforge.net/prop/6.2.CapabilitiesMetadata.html
+ is an attribute in the layer. The query format is normally a SQL WHERE clause
+ as described in the
+ <a href="https://gdal.org/user/ogr_sql_dialect.html#where">"WHERE"</a> section
+ of the OGR SQL dialect documentation.
+ In some cases (RDBMS backed drivers, SQLite, GeoPackage) the native
+ capabilities of the database may be used to to interpret the WHERE clause, in
+ which case the capabilities will be broader than those of OGR SQL.
 
  Note that installing a query string will generally result in resetting
  the current reading position (ala OGR_L_ResetReading()).
@@ -1571,13 +1641,28 @@ by the OGRSFDriverManager.
 
  \fn OGRErr OGRLayer::SetFeature( OGRFeature * poFeature );
 
- \brief Rewrite an existing feature.
+ \brief Rewrite/replace an existing feature.
 
  This method will write a feature to the layer, based on the feature id
  within the OGRFeature.
 
  Use OGRLayer::TestCapability(OLCRandomWrite) to establish if this layer
  supports random access writing via SetFeature().
+
+ The way unset fields in the provided poFeature are processed is driver dependent:
+ <ul>
+ <li>
+ SQL based drivers which implement SetFeature() through SQL UPDATE will skip
+ unset fields, and thus the content of the existing feature will be preserved.
+ </li>
+ <li>
+ The shapefile driver will write a NULL value in the DBF file.
+ </li>
+ <li>
+ The GeoJSON driver will take into account unset fields to remove the corresponding
+ JSON member.
+ </li>
+ </ul>
 
  Starting with GDAL 2.0, drivers should specialize the ISetFeature() method,
  since SetFeature() is no longer virtual.
@@ -1591,13 +1676,15 @@ by the OGRSFDriverManager.
  @return OGRERR_NONE if the operation works, otherwise an appropriate error
  code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
 
+ @see UpdateFeature(), CreateFeature(), UpsertFeature()
+
 */
 
 /**
 
  \fn OGRErr OGRLayer::ISetFeature( OGRFeature * poFeature );
 
- \brief Rewrite an existing feature.
+ \brief Rewrite/replace an existing feature.
 
  This method is implemented by drivers and not called directly. User code should
  use SetFeature() instead.
@@ -1611,19 +1698,35 @@ by the OGRSFDriverManager.
  code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
  @since GDAL 2.0
 
+ @see SetFeature()
 */
 
 /**
 
  \fn OGRErr OGR_L_SetFeature( OGRLayerH hLayer, OGRFeatureH hFeat );
 
- \brief Rewrite an existing feature.
+ \brief Rewrite/replace an existing feature.
 
  This function will write a feature to the layer, based on the feature id
  within the OGRFeature.
 
  Use OGR_L_TestCapability(OLCRandomWrite) to establish if this layer
  supports random access writing via OGR_L_SetFeature().
+
+ The way unset fields in the provided poFeature are processed is driver dependent:
+ <ul>
+ <li>
+ SQL based drivers which implement SetFeature() through SQL UPDATE will skip
+ unset fields, and thus the content of the existing feature will be preserved.
+ </li>
+ <li>
+ The shapefile driver will write a NULL value in the DBF file.
+ </li>
+ <li>
+ The GeoJSON driver will take into account unset fields to remove the corresponding
+ JSON member.
+ </li>
+ </ul>
 
  This function is the same as the C++ method OGRLayer::SetFeature().
 
@@ -1634,6 +1737,8 @@ by the OGRSFDriverManager.
 
  @return OGRERR_NONE if the operation works, otherwise an appropriate error
  code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
+
+ @see OGR_L_UpdateFeature(), OGR_L_CreateFeature(), OGR_L_UpsertFeature()
 
 */
 
@@ -1660,6 +1765,8 @@ by the OGRSFDriverManager.
 
  @return OGRERR_NONE on success.
 
+ @see SetFeature(), UpdateFeature(), UpsertFeature()
+
 */
 
 /**
@@ -1682,6 +1789,7 @@ by the OGRSFDriverManager.
  @return OGRERR_NONE on success.
  @since GDAL 2.0
 
+ @see CreateFeature()
 */
 
 /**
@@ -1705,13 +1813,15 @@ by the OGRSFDriverManager.
 
  @return OGRERR_NONE on success.
 
+ @see OGR_L_SetFeature(), OGR_L_UpdateFeature(), OGR_L_UpsertFeature()
+
 */
 
 /**
 
  \fn OGRErr OGRLayer::UpsertFeature( OGRFeature * poFeature );
 
- \brief Rewrite an existing feature or create a new feature within a layer.
+ \brief Rewrite/replace an existing feature or create a new feature within a layer.
 
  This function will write a feature to the layer, based on the feature id
  within the OGRFeature.  If the feature id doesn't exist a new feature will be
@@ -1727,13 +1837,15 @@ by the OGRSFDriverManager.
  @return OGRERR_NONE on success.
  @since GDAL 3.6.0
 
+ @see SetFeature(), CreateFeature(), UpdateFeature()
+
 */
 
 /**
 
  \fn OGRErr OGRLayer::IUpsertFeature( OGRFeature * poFeature );
 
- \brief Rewrite an existing feature or create a new feature within a layer.
+ \brief Rewrite/replace an existing feature or create a new feature within a layer.
 
  This method is implemented by drivers and not called directly. User code should
  use UpsertFeature() instead.
@@ -1747,13 +1859,14 @@ by the OGRSFDriverManager.
  @return OGRERR_NONE on success.
  @since GDAL 3.6.0
 
+ @see UpsertFeature()
 */
 
 /**
 
  \fn OGRErr OGR_L_UpsertFeature( OGRLayerH hLayer, OGRFeatureH hFeat );
 
- \brief Rewrite an existing feature or create a new feature within a layer.
+ \brief Rewrite/replace an existing feature or create a new feature within a layer.
 
  This function will write a feature to the layer, based on the feature id
  within the OGRFeature.  If the feature id doesn't exist a new feature will be
@@ -1770,6 +1883,193 @@ by the OGRSFDriverManager.
  @return OGRERR_NONE on success.
  @since GDAL 3.6.0
 
+ @see OGR_L_SetFeature(), OGR_L_CreateFeature(), OGR_L_UpdateFeature()
+*/
+
+/**
+
+ \fn OGRErr OGRLayer::UpdateFeature( OGRFeature * poFeature,
+                                     int nUpdatedFieldsCount,
+                                     const int *panUpdatedFieldsIdx,
+                                     int nUpdatedGeomFieldsCount,
+                                     const int *panUpdatedGeomFieldsIdx,
+                                     bool bUpdateStyleString );
+
+ \brief Update (part of) an existing feature.
+
+ This method will update the specified attribute and geometry fields of a
+ feature to the layer, based on the feature id within the OGRFeature.
+
+ Use OGRLayer::TestCapability(OLCRandomWrite) to establish if this layer
+ supports random access writing via UpdateFeature(). And to know if the
+ driver supports a dedicated/efficient UpdateFeature() method, test for the
+ OLCUpdateFeature capability.
+
+ The way unset fields in the provided poFeature are processed is driver dependent:
+ <ul>
+ <li>
+ SQL based drivers which implement SetFeature() through SQL UPDATE will skip
+ unset fields, and thus the content of the existing feature will be preserved.
+ </li>
+ <li>
+ The shapefile driver will write a NULL value in the DBF file.
+ </li>
+ <li>
+ The GeoJSON driver will take into account unset fields to remove the corresponding
+ JSON member.
+ </li>
+ </ul>
+
+ This method is the same as the C function OGR_L_UpdateFeature().
+
+ To fully replace a feature, see OGRLayer::SetFeature().
+
+ Note that after this call the content of hFeat might have changed, and will
+ *not* reflect the content you would get with GetFeature().
+ In particular for performance reasons, passed geometries might have been "stolen",
+ in particular for the default implementation of UpdateFeature() which relies
+ on GetFeature() + SetFeature().
+
+ @param poFeature the feature to update.
+
+ @param nUpdatedFieldsCount number of attribute fields to update. May be 0
+
+ @param panUpdatedFieldsIdx array of nUpdatedFieldsCount values, each between
+                            0 and GetLayerDefn()->GetFieldCount() - 1, indicating
+                            which fields of poFeature must be updated in the
+                            layer.
+
+ @param nUpdatedGeomFieldsCount number of geometry fields to update. May be 0
+
+ @param panUpdatedGeomFieldsIdx array of nUpdatedGeomFieldsCount values, each between
+                                0 and GetLayerDefn()->GetGeomFieldCount() - 1, indicating
+                                which geometry fields of poFeature must be updated in the
+                                layer.
+
+ @param bUpdateStyleString whether the feature style string in the layer should
+                           be updated with the one of poFeature.
+
+ @return OGRERR_NONE if the operation works, otherwise an appropriate error
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
+
+ @since GDAL 3.7
+
+ @see UpdateFeature(), CreateFeature(), UpsertFeature()
+
+*/
+
+/**
+
+ \fn OGRErr OGRLayer::IUpdateFeature( OGRFeature * poFeature,
+                                      int nUpdatedFieldsCount,
+                                      const int *panUpdatedFieldsIdx,
+                                      int nUpdatedGeomFieldsCount,
+                                      const int *panUpdatedGeomFieldsIdx,
+                                      bool bUpdateStyleString );
+
+ \brief Update (part of) an existing feature.
+
+ This method is implemented by drivers and not called directly. User code should
+ use UpdateFeature() instead.
+
+ @param poFeature the feature to update.
+
+ @param nUpdatedFieldsCount number of attribute fields to update. May be 0
+
+ @param panUpdatedFieldsIdx array of nUpdatedFieldsCount values, each between
+                            0 and GetLayerDefn()->GetFieldCount() - 1, indicating
+                            which fields of poFeature must be updated in the
+                            layer.
+
+ @param nUpdatedGeomFieldsCount number of geometry fields to update. May be 0
+
+ @param panUpdatedGeomFieldsIdx array of nUpdatedGeomFieldsCount values, each between
+                                0 and GetLayerDefn()->GetGeomFieldCount() - 1, indicating
+                                which geometry fields of poFeature must be updated in the
+                                layer.
+
+ @param bUpdateStyleString whether the feature style string in the layer should
+                           be updated with the one of poFeature.
+
+ @return OGRERR_NONE if the operation works, otherwise an appropriate error
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
+
+ @since GDAL 3.7
+
+ @see UpdateFeature()
+*/
+
+/**
+
+ \fn OGRErr OGR_L_UpdateFeature( OGRLayerH hLayer, OGRFeatureH hFeat,
+                                 int nUpdatedFieldsCount,
+                                 const int *panUpdatedFieldsIdx,
+                                 int nUpdatedGeomFieldsCount,
+                                 const int *panUpdatedGeomFieldsIdx,
+                                 bool bUpdateStyleString );
+
+ \brief Update (part of) an existing feature.
+
+ This function will update the specified attribute and geometry fields of a
+ feature to the layer, based on the feature id within the OGRFeature.
+
+ Use OGR_L_TestCapability(OLCRandomWrite) to establish if this layer
+ supports random access writing via UpdateFeature(). And to know if the
+ driver supports a dedicated/efficient UpdateFeature() method, test for the
+ OLCUpdateFeature capability.
+
+ The way unset fields in the provided poFeature are processed is driver dependent:
+ <ul>
+ <li>
+ SQL based drivers which implement SetFeature() through SQL UPDATE will skip
+ unset fields, and thus the content of the existing feature will be preserved.
+ </li>
+ <li>
+ The shapefile driver will write a NULL value in the DBF file.
+ </li>
+ <li>
+ The GeoJSON driver will take into account unset fields to remove the corresponding
+ JSON member.
+ </li>
+ </ul>
+
+ This method is the same as the C++ method OGRLayer::UpdateFeature().
+
+ To fully replace a feature, see OGR_L_SetFeature()
+
+ Note that after this call the content of hFeat might have changed, and will
+ *not* reflect the content you would get with OGR_L_GetFeature().
+ In particular for performance reasons, passed geometries might have been "stolen",
+ in particular for the default implementation of UpdateFeature() which relies
+ on GetFeature() + SetFeature().
+
+ @param hLayer handle to the layer to write the feature.
+
+ @param hFeat the feature to update.
+
+ @param nUpdatedFieldsCount number of attribute fields to update. May be 0
+
+ @param panUpdatedFieldsIdx array of nUpdatedFieldsCount values, each between
+                            0 and GetLayerDefn()->GetFieldCount() - 1, indicating
+                            which fields of hFeat must be updated in the
+                            layer.
+
+ @param nUpdatedGeomFieldsCount number of geometry fields to update. May be 0
+
+ @param panUpdatedGeomFieldsIdx array of nUpdatedGeomFieldsCount values, each between
+                                0 and GetLayerDefn()->GetGeomFieldCount() - 1, indicating
+                                which geometry fields of hFeat must be updated in the
+                                layer.
+
+ @param bUpdateStyleString whether the feature style string in the layer should
+                           be updated with the one of hFeat.
+
+ @return OGRERR_NONE if the operation works, otherwise an appropriate error
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
+
+ @since GDAL 3.7
+
+ @see OGR_L_UpdateFeature(), OGR_L_CreateFeature(), OGR_L_UpsertFeature()
 */
 
 /**
@@ -1949,7 +2249,7 @@ particular layer is writable.  The same OGRLayer class may return FALSE
 for other layer instances that are effectively read-only.<p>
 
  <li> <b>OLCUpsertFeature</b> / "UpsertFeature": TRUE if the UpsertFeature()
-method is operational on this layer.  Note this means that this 
+method is operational on this layer.  Note this means that this
 particular layer is writable.  The same OGRLayer class may return FALSE
 for other layer instances that are effectively read-only.<p>
 
@@ -2847,6 +3147,10 @@ form depending on the limitations of the format driver.
 
  By default, no fields are ignored.
 
+ Note that fields that are used in an attribute filter should generally not be set as
+ ignored fields, as most drivers (such as those relying on the OGR SQL engine)
+ will be unable to correctly evaluate the attribute filter.
+
  This method is the same as the C function OGR_L_SetIgnoredFields()
 
  @param papszFields an array of field names terminated by NULL item. If NULL is passed, the ignored list is cleared.
@@ -2866,6 +3170,10 @@ form depending on the limitations of the format driver.
  "OGR_STYLE" to ignore layer style.
 
  By default, no fields are ignored.
+
+ Note that fields that are used in an attribute filter should generally not be set as
+ ignored fields, as most drivers (such as those relying on the OGR SQL engine)
+ will be unable to correctly evaluate the attribute filter.
 
  This method is the same as the C++ method OGRLayer::SetIgnoredFields()
 

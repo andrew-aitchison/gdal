@@ -97,16 +97,17 @@ class GDALDatasetPamInfo
     int bHaveGeoTransform = false;
     double adfGeoTransform[6]{0, 0, 0, 0, 0, 0};
 
-    int nGCPCount = 0;
-    GDAL_GCP *pasGCPList = nullptr;
+    std::vector<gdal::GCP> asGCPs{};
     OGRSpatialReference *poGCP_SRS = nullptr;
 
     CPLString osPhysicalFilename{};
     CPLString osSubdatasetName{};
+    CPLString osDerivedDatasetName{};
     CPLString osAuxFilename{};
 
     int bHasMetadata = false;
 };
+
 //! @endcond
 
 /* ******************************************************************** */
@@ -128,7 +129,7 @@ class CPL_DLL GDALPamDataset : public GDALDataset
     GDALDatasetPamInfo *psPam = nullptr;
 
     virtual CPLXMLNode *SerializeToXML(const char *);
-    virtual CPLErr XMLInit(CPLXMLNode *, const char *);
+    virtual CPLErr XMLInit(const CPLXMLNode *, const char *);
 
     virtual CPLErr TryLoadXML(char **papszSiblingFiles = nullptr);
     virtual CPLErr TrySaveXML();
@@ -145,12 +146,13 @@ class CPL_DLL GDALPamDataset : public GDALDataset
     const char *GetPhysicalFilename();
     void SetSubdatasetName(const char *);
     const char *GetSubdatasetName();
+    void SetDerivedDatasetName(const char *);
     //! @endcond
 
   public:
     ~GDALPamDataset() override;
 
-    void FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
@@ -188,22 +190,23 @@ class CPL_DLL GDALPamDataset : public GDALDataset
                            CSLConstList papszOptions) override;
 
     // "semi private" methods.
-    void MarkPamDirty()
-    {
-        nPamFlags |= GPF_DIRTY;
-    }
+    void MarkPamDirty();
+
     GDALDatasetPamInfo *GetPamInfo()
     {
         return psPam;
     }
+
     int GetPamFlags()
     {
         return nPamFlags;
     }
+
     void SetPamFlags(int nValue)
     {
         nPamFlags = nValue;
     }
+
     //! @endcond
 
   private:
@@ -266,6 +269,7 @@ struct GDALRasterBandPamInfo
     bool bOffsetSet = false;
     bool bScaleSet = false;
 };
+
 //! @endcond
 /* ******************************************************************** */
 /*                          GDALPamRasterBand                           */
@@ -279,7 +283,7 @@ class CPL_DLL GDALPamRasterBand : public GDALRasterBand
   protected:
     //! @cond Doxygen_Suppress
     virtual CPLXMLNode *SerializeToXML(const char *pszVRTPath);
-    virtual CPLErr XMLInit(CPLXMLNode *, const char *);
+    virtual CPLErr XMLInit(const CPLXMLNode *, const char *);
 
     void PamInitialize();
     void PamClear();
@@ -352,6 +356,7 @@ class CPL_DLL GDALPamRasterBand : public GDALRasterBand
     {
         return psPam;
     }
+
     //! @endcond
   private:
     CPL_DISALLOW_COPY_ASSIGN(GDALPamRasterBand)
@@ -381,22 +386,30 @@ class CPL_DLL GDALPamMultiDim
     virtual ~GDALPamMultiDim();
 
     std::shared_ptr<OGRSpatialReference>
-    GetSpatialRef(const std::string &osArrayFullName);
+    GetSpatialRef(const std::string &osArrayFullName,
+                  const std::string &osContext);
 
     void SetSpatialRef(const std::string &osArrayFullName,
+                       const std::string &osContext,
                        const OGRSpatialReference *poSRS);
 
-    CPLErr GetStatistics(const std::string &osArrayFullName, bool bApproxOK,
+    CPLErr GetStatistics(const std::string &osArrayFullName,
+                         const std::string &osContext, bool bApproxOK,
                          double *pdfMin, double *pdfMax, double *pdfMean,
                          double *pdfStdDev, GUInt64 *pnValidCount);
 
-    void SetStatistics(const std::string &osArrayFullName, bool bApproxStats,
+    void SetStatistics(const std::string &osArrayFullName,
+                       const std::string &osContext, bool bApproxStats,
                        double dfMin, double dfMax, double dfMean,
                        double dfStdDev, GUInt64 nValidCount);
 
     void ClearStatistics();
 
-    void ClearStatistics(const std::string &osArrayFullName);
+    void ClearStatistics(const std::string &osArrayFullName,
+                         const std::string &osContext);
+
+    static std::shared_ptr<GDALPamMultiDim>
+    GetPAM(const std::shared_ptr<GDALMDArray> &poParent);
 };
 
 /* ******************************************************************** */
@@ -410,11 +423,12 @@ class CPL_DLL GDALPamMDArray : public GDALMDArray
 
   protected:
     GDALPamMDArray(const std::string &osParentName, const std::string &osName,
-                   const std::shared_ptr<GDALPamMultiDim> &poPam);
+                   const std::shared_ptr<GDALPamMultiDim> &poPam,
+                   const std::string &osContext = std::string());
 
     bool SetStatistics(bool bApproxStats, double dfMin, double dfMax,
-                       double dfMean, double dfStdDev,
-                       GUInt64 nValidCount) override;
+                       double dfMean, double dfStdDev, GUInt64 nValidCount,
+                       CSLConstList papszOptions) override;
 
   public:
     const std::shared_ptr<GDALPamMultiDim> &GetPAM() const

@@ -43,29 +43,25 @@ from osgeo import gdal, gdalconst
 pytestmark = pytest.mark.require_driver("JPEG")
 
 ###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+###############################################################################
 # Perform simple read test.
 
 
-def test_jpeg_1():
+def test_jpeg_1(jpeg_version):
 
-    ds = gdal.Open("data/jpeg/albania.jpg")
-    assert ds.GetMetadataItem("JPEG_QUALITY", "IMAGE_STRUCTURE") == "80"
-    cs = ds.GetRasterBand(2).Checksum()
-    if cs == 34296:
-        gdaltest.jpeg_version = "9b"
-    elif cs == 34298:
-        gdaltest.jpeg_version = "8"
-    else:
-        gdaltest.jpeg_version = "pre8"
-    ds = None
-
-    if gdaltest.jpeg_version == "9b":
+    if jpeg_version == "9b":
         tst = gdaltest.GDALTest("JPEG", "jpeg/albania.jpg", 2, 34296)
-    elif gdaltest.jpeg_version == "8":
+    elif jpeg_version == "8":
         tst = gdaltest.GDALTest("JPEG", "jpeg/albania.jpg", 2, 34298)
     else:
         tst = gdaltest.GDALTest("JPEG", "jpeg/albania.jpg", 2, 17016)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -140,6 +136,10 @@ def test_jpeg_3():
             expected_gt[i], abs=1e-6
         ), "did not get expected geotransform from PAM"
 
+    ds = None
+
+    ds = gdal.Open("tmp/byte.jpg")
+    assert ds.GetMetadata() == {"AREA_OR_POINT": "Area"}
     ds = None
 
     os.unlink("tmp/byte.jpg.aux.xml")
@@ -324,9 +324,8 @@ def test_jpeg_8():
 
 def test_jpeg_9():
 
-    gdal.SetConfigOption("GDAL_JPEG_TO_RGB", "NO")
-    ds = gdal.Open("data/jpeg/rgb_ntf_cmyk.jpg")
-    gdal.SetConfigOption("GDAL_JPEG_TO_RGB", "YES")
+    with gdaltest.config_option("GDAL_JPEG_TO_RGB", "NO"):
+        ds = gdal.Open("data/jpeg/rgb_ntf_cmyk.jpg")
 
     expected_cs = 21187
 
@@ -373,9 +372,9 @@ def test_jpeg_9():
 # Check reading a 12-bit JPEG
 
 
-def test_jpeg_10():
+def test_jpeg_10(jpeg_version):
 
-    if gdaltest.jpeg_version == "9b":  # Fails for some reason
+    if jpeg_version == "9b":  # Fails for some reason
         pytest.skip()
 
     # Check if JPEG driver supports 12bit JPEG reading/writing
@@ -405,9 +404,9 @@ def test_jpeg_10():
 # Check creating a 12-bit JPEG
 
 
-def test_jpeg_11():
+def test_jpeg_11(jpeg_version):
 
-    if gdaltest.jpeg_version == "9b":  # Fails for some reason
+    if jpeg_version == "9b":  # Fails for some reason
         pytest.skip()
 
     # Check if JPEG driver supports 12bit JPEG reading/writing
@@ -474,9 +473,9 @@ def test_jpeg_13():
 # Test writing to /vsistdout/
 
 
-def test_jpeg_14():
+def test_jpeg_14(jpeg_version):
 
-    if gdaltest.jpeg_version == "9b":  # Fails for some reason
+    if jpeg_version == "9b":  # Fails for some reason
         pytest.skip()
 
     # Check if JPEG driver supports 12bit JPEG reading/writing
@@ -503,16 +502,21 @@ def test_jpeg_14():
 
 def test_jpeg_15():
 
-    tst = gdaltest.GDALTest("JPEG", "jpeg/albania.jpg", 2, 17016)
-
-    return tst.testCreateCopy(vsimem=1, interrupt_during_copy=True)
+    gdal.Translate("/vsimem/tmp.tif", "data/jpeg/albania.jpg")
+    try:
+        tst = gdaltest.GDALTest(
+            "JPEG", "/vsimem/tmp.tif", 2, 17016, filename_absolute=1
+        )
+        tst.testCreateCopy(vsimem=1, interrupt_during_copy=True)
+    finally:
+        gdal.Unlink("/vsimem/tmp.tif")
 
 
 ###############################################################################
 # Test overview support
 
 
-def test_jpeg_16():
+def test_jpeg_16(jpeg_version):
 
     shutil.copy("data/jpeg/albania.jpg", "tmp/albania.jpg")
     gdal.Unlink("tmp/albania.jpg.ovr")
@@ -525,7 +529,7 @@ def test_jpeg_16():
     # "Internal" overview
 
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    if gdaltest.jpeg_version in ("8", "9b"):
+    if jpeg_version in ("8", "9b"):
         expected_cs = 34218
     else:
         expected_cs = 31892
@@ -536,7 +540,7 @@ def test_jpeg_16():
     assert ds.GetRasterBand(1).GetOverviewCount() == 2
     # Check updated checksum
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    if gdaltest.jpeg_version in ("8", "9b"):
+    if jpeg_version in ("8", "9b"):
         expected_cs = 33698
     else:
         expected_cs = 32460
@@ -548,7 +552,7 @@ def test_jpeg_16():
     ds = gdal.Open("tmp/albania.jpg")
     assert ds.GetRasterBand(1).GetOverviewCount() == 2
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    if gdaltest.jpeg_version in ("8", "9b"):
+    if jpeg_version in ("8", "9b"):
         expected_cs = 33698
     else:
         expected_cs = 32460
@@ -583,25 +587,32 @@ def test_jpeg_17():
     gdal.ErrorReset()
     ds = gdal.Open("data/jpeg/byte_corrupted2.jpg")
     with gdaltest.error_handler("CPLQuietErrorHandler"):
-        # Get this warning:
+        # Get this error:
         #   libjpeg: Corrupt JPEG data: found marker 0x00 instead of RST63
-        ds.GetRasterBand(1).Checksum()
+        assert ds.GetRasterBand(1).Checksum() < 0
 
     assert not (
-        gdal.GetLastErrorType() != gdal.CE_Warning or gdal.GetLastErrorMsg() == ""
+        gdal.GetLastErrorType() != gdal.CE_Failure or gdal.GetLastErrorMsg() == ""
     )
 
     gdal.ErrorReset()
     ds = gdal.Open("data/jpeg/byte_corrupted2.jpg")
     with gdaltest.error_handler("CPLQuietErrorHandler"):
-        gdal.SetConfigOption("GDAL_ERROR_ON_LIBJPEG_WARNING", "TRUE")
-        # Get this ERROR 1:
-        #   libjpeg: Corrupt JPEG data: found marker 0x00 instead of RST63
-        ds.GetRasterBand(1).Checksum()
-        gdal.SetConfigOption("GDAL_ERROR_ON_LIBJPEG_WARNING", None)
+        with gdaltest.config_option("GDAL_ERROR_ON_LIBJPEG_WARNING", "TRUE"):
+            assert ds.GetRasterBand(1).Checksum() < 0
 
     assert not (
         gdal.GetLastErrorType() != gdal.CE_Failure or gdal.GetLastErrorMsg() == ""
+    )
+
+    gdal.ErrorReset()
+    ds = gdal.Open("data/jpeg/byte_corrupted2.jpg")
+    with gdaltest.error_handler("CPLQuietErrorHandler"):
+        with gdaltest.config_option("GDAL_ERROR_ON_LIBJPEG_WARNING", "FALSE"):
+            assert ds.GetRasterBand(1).Checksum() != 0
+
+    assert not (
+        gdal.GetLastErrorType() != gdal.CE_Warning or gdal.GetLastErrorMsg() == ""
     )
 
 
@@ -625,43 +636,42 @@ def test_jpeg_18():
     src_ds = None
     gdal.Unlink("/vsimem/jpeg_18.tif")
 
-    oldSize = gdal.GetCacheMax()
-    gdal.SetCacheMax(0)
+    with gdaltest.SetCacheMax(0):
 
-    line0 = ds.GetRasterBand(1).ReadRaster(0, 0, width, 1)
-    data = struct.unpack("B" * width, line0)
-    assert data[0] == pytest.approx(0, abs=10)
-    line1023 = ds.GetRasterBand(1).ReadRaster(0, height - 1, width, 1)
-    data = struct.unpack("B" * width, line1023)
-    assert data[0] == pytest.approx(255, abs=10)
-    line0_ovr1 = ds.GetRasterBand(1).GetOverview(1).ReadRaster(0, 0, int(width / 4), 1)
-    data = struct.unpack("B" * (int(width / 4)), line0_ovr1)
-    assert data[0] == pytest.approx(0, abs=10)
-    line1023_bis = ds.GetRasterBand(1).ReadRaster(0, height - 1, width, 1)
-    assert line1023_bis != line0 and line1023 == line1023_bis
-    line0_bis = ds.GetRasterBand(1).ReadRaster(0, 0, width, 1)
-    assert line0 == line0_bis
-    line255_ovr1 = (
-        ds.GetRasterBand(1)
-        .GetOverview(1)
-        .ReadRaster(0, int(height / 4) - 1, int(width / 4), 1)
-    )
-    data = struct.unpack("B" * int(width / 4), line255_ovr1)
-    assert data[0] == pytest.approx(255, abs=10)
-    line0_bis = ds.GetRasterBand(1).ReadRaster(0, 0, width, 1)
-    assert line0 == line0_bis
-    line0_ovr1_bis = (
-        ds.GetRasterBand(1).GetOverview(1).ReadRaster(0, 0, int(width / 4), 1)
-    )
-    assert line0_ovr1 == line0_ovr1_bis
-    line255_ovr1_bis = (
-        ds.GetRasterBand(1)
-        .GetOverview(1)
-        .ReadRaster(0, int(height / 4) - 1, int(width / 4), 1)
-    )
-    assert line255_ovr1 == line255_ovr1_bis
-
-    gdal.SetCacheMax(oldSize)
+        line0 = ds.GetRasterBand(1).ReadRaster(0, 0, width, 1)
+        data = struct.unpack("B" * width, line0)
+        assert data[0] == pytest.approx(0, abs=10)
+        line1023 = ds.GetRasterBand(1).ReadRaster(0, height - 1, width, 1)
+        data = struct.unpack("B" * width, line1023)
+        assert data[0] == pytest.approx(255, abs=10)
+        line0_ovr1 = (
+            ds.GetRasterBand(1).GetOverview(1).ReadRaster(0, 0, int(width / 4), 1)
+        )
+        data = struct.unpack("B" * (int(width / 4)), line0_ovr1)
+        assert data[0] == pytest.approx(0, abs=10)
+        line1023_bis = ds.GetRasterBand(1).ReadRaster(0, height - 1, width, 1)
+        assert line1023_bis != line0 and line1023 == line1023_bis
+        line0_bis = ds.GetRasterBand(1).ReadRaster(0, 0, width, 1)
+        assert line0 == line0_bis
+        line255_ovr1 = (
+            ds.GetRasterBand(1)
+            .GetOverview(1)
+            .ReadRaster(0, int(height / 4) - 1, int(width / 4), 1)
+        )
+        data = struct.unpack("B" * int(width / 4), line255_ovr1)
+        assert data[0] == pytest.approx(255, abs=10)
+        line0_bis = ds.GetRasterBand(1).ReadRaster(0, 0, width, 1)
+        assert line0 == line0_bis
+        line0_ovr1_bis = (
+            ds.GetRasterBand(1).GetOverview(1).ReadRaster(0, 0, int(width / 4), 1)
+        )
+        assert line0_ovr1 == line0_ovr1_bis
+        line255_ovr1_bis = (
+            ds.GetRasterBand(1)
+            .GetOverview(1)
+            .ReadRaster(0, int(height / 4) - 1, int(width / 4), 1)
+        )
+        assert line255_ovr1 == line255_ovr1_bis
 
     ds = None
     gdal.Unlink("/vsimem/jpeg_18.jpg")
@@ -693,12 +703,11 @@ def test_jpeg_19():
         out_ds = None
 
         # Generate a JPEG file with a MSB bit mask order
-        gdal.SetConfigOption("JPEG_WRITE_MASK_BIT_ORDER", "MSB")
-        out_ds = gdal.GetDriverByName("JPEG").CreateCopy(
-            "/vsimem/jpeg_19_msb.jpg", src_ds
-        )
-        del out_ds
-        gdal.SetConfigOption("JPEG_WRITE_MASK_BIT_ORDER", None)
+        with gdal.config_option("JPEG_WRITE_MASK_BIT_ORDER", "MSB"):
+            out_ds = gdal.GetDriverByName("JPEG").CreateCopy(
+                "/vsimem/jpeg_19_msb.jpg", src_ds
+            )
+            del out_ds
 
         src_ds = None
 
@@ -984,7 +993,7 @@ def test_jpeg_25():
 def test_jpeg_26():
 
     src_ds = gdal.GetDriverByName("Mem").Create("", 70000, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("JPEG").CreateCopy("/vsimem/jpeg_26.jpg", src_ds)
     assert ds is None
     gdal.Unlink("/vsimem/jpeg_26.jpg")
@@ -1002,15 +1011,14 @@ def test_jpeg_27_max_memory():
     # Should error out with 'Reading this image would require
     # libjpeg to allocate at least...'
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         os.environ["JPEGMEM"] = "10M"
-        gdal.SetConfigOption("GDAL_JPEG_MAX_ALLOWED_SCAN_NUMBER", "1000")
-        ds = gdal.Open(
-            "/vsisubfile/146,/vsizip/../gcore/data/eofloop_valid_huff.tif.zip"
-        )
-        cs = ds.GetRasterBand(1).Checksum()
-        del os.environ["JPEGMEM"]
-        gdal.SetConfigOption("GDAL_JPEG_MAX_ALLOWED_SCAN_NUMBER", None)
+        with gdal.config_option("GDAL_JPEG_MAX_ALLOWED_SCAN_NUMBER", "1000"):
+            ds = gdal.Open(
+                "/vsisubfile/146,/vsizip/../gcore/data/eofloop_valid_huff.tif.zip"
+            )
+            cs = ds.GetRasterBand(1).Checksum()
+            del os.environ["JPEGMEM"]
         assert cs == -1 and gdal.GetLastErrorMsg() != ""
 
 
@@ -1019,13 +1027,15 @@ def test_jpeg_27_max_scan_number():
     # Should error out with 'Scan number...
     gdal.ErrorReset()
     ds = gdal.Open("/vsisubfile/146,/vsizip/../gcore/data/eofloop_valid_huff.tif.zip")
-    with gdaltest.error_handler():
-        gdal.SetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", "YES")
-        gdal.SetConfigOption("GDAL_JPEG_MAX_ALLOWED_SCAN_NUMBER", "10")
+
+    options = {
+        "GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC": "YES",
+        "GDAL_JPEG_MAX_ALLOWED_SCAN_NUMBER": "10",
+    }
+
+    with gdal.config_options(options), gdaltest.error_handler():
         cs = ds.GetRasterBand(1).Checksum()
-        gdal.SetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", None)
-        gdal.SetConfigOption("GDAL_JPEG_MAX_ALLOWED_SCAN_NUMBER", None)
-        assert cs == -1 and gdal.GetLastErrorMsg() != ""
+    assert cs == -1 and gdal.GetLastErrorMsg() != ""
 
 
 ###############################################################################
@@ -1080,7 +1090,7 @@ def test_jpeg_28():
     src_ds.SetMetadataItem("EXIF_CompressedBitsPerPixel", "nan")  # invalid RATIONAL
     src_ds.SetMetadataItem("EXIF_ApertureValue", "-1")  # invalid RATIONAL
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("JPEG").CreateCopy(tmpfilename, src_ds)
     src_ds = None
     assert gdal.VSIStatL(tmpfilename + ".aux.xml") is None
@@ -1163,7 +1173,7 @@ def test_jpeg_28():
     src_ds.SetMetadataItem("EXIF_ExifVersion", "0231")
     src_ds.SetMetadataItem("EXIF_invalid", "foo")
     src_ds.SetMetadataItem("FOO", "BAR")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("JPEG").CreateCopy(tmpfilename, src_ds)
     src_ds = None
     assert gdal.VSIStatL(tmpfilename + ".aux.xml") is not None
@@ -1175,7 +1185,7 @@ def test_jpeg_28():
     # Too much content for EXIF
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
     src_ds.SetMetadataItem("EXIF_UserComment", "x" * 65535)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("JPEG").CreateCopy(tmpfilename, src_ds)
     src_ds = None
     ds = None
@@ -1340,15 +1350,15 @@ def test_jpeg_flir_raw():
 
 def test_jpeg_flir_error_flir_subds():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("JPEG:foo.jpg")
         assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("JPEG:foo.jpg:BAR")
         assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("JPEG:data/jpeg/masked.jpg:FLIR_RAW_THERMAL_IMAGE")
         assert ds is None
 
@@ -1382,7 +1392,7 @@ def test_jpeg_write_cmyk():
 def test_jpeg_write_4band_not_cmyk():
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 8, 8, 4)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("JPEG").CreateCopy("/vsimem/out.jpg", src_ds)
     assert gdal.GetLastErrorMsg() != ""
     gdal.GetDriverByName("JPEG").Delete("/vsimem/out.jpg")
@@ -1414,13 +1424,12 @@ def test_jpeg_apply_orientation(orientation):
 # Test lossless conversion from JPEGXL
 
 
+@pytest.mark.require_creation_option("JPEGXL", "COMPRESS_BOXES")
 def test_jpeg_from_jpegxl():
 
     jpegxl_drv = gdal.GetDriverByName("JPEGXL")
     if jpegxl_drv is None:
         pytest.skip("JPEGXL driver missing")
-    if "COMPRESS_BOXES" not in jpegxl_drv.GetMetadataItem("DMD_CREATIONOPTIONLIST"):
-        pytest.skip("not enough recent libjxl")
 
     src_ds = gdal.Open("data/jpeg/albania.jpg")
 
@@ -1456,6 +1465,126 @@ def test_jpeg_from_jpegxl():
 
     jpegxl_drv.Delete(tmp_filename)
     gdal.GetDriverByName("JPEG").Delete(out_filename)
+
+
+def test_jpeg_read_arcgis_geodataxform_gcp():
+
+    ds = gdal.Open("data/jpeg/arcgis_geodataxform_gcp.jpg")
+    assert ds.GetGCPProjection().find("26712") >= 0
+    assert ds.GetGCPCount() == 4
+    gcp = ds.GetGCPs()[0]
+    assert (
+        gcp.GCPPixel == pytest.approx(565, abs=1e-5)
+        and gcp.GCPLine == pytest.approx(11041, abs=1e-5)
+        and gcp.GCPX == pytest.approx(500000, abs=1e-5)
+        and gcp.GCPY == pytest.approx(4705078.79016612, abs=1e-5)
+        and gcp.GCPZ == pytest.approx(0, abs=1e-5)
+    )
+
+
+def test_jpeg_read_arcgis_metadata_geodataxform_gcp():
+
+    ds = gdal.Open("data/jpeg/arcgis_metadata_geodataxform_gcp.jpg")
+    assert ds.GetGCPProjection().find("26712") >= 0
+    assert ds.GetGCPCount() == 4
+    gcp = ds.GetGCPs()[0]
+    assert (
+        gcp.GCPPixel == pytest.approx(565, abs=1e-5)
+        and gcp.GCPLine == pytest.approx(11041, abs=1e-5)
+        and gcp.GCPX == pytest.approx(500000, abs=1e-5)
+        and gcp.GCPY == pytest.approx(4705078.79016612, abs=1e-5)
+        and gcp.GCPZ == pytest.approx(0, abs=1e-5)
+    )
+
+
+###############################################################################
+# Test reading lossless JPEG with libjpeg-turbo 2.2
+
+
+def test_jpeg_read_lossless():
+
+    if (
+        gdal.GetDriverByName("JPEG").GetMetadataItem("LOSSLESS_JPEG_SUPPORTED", "JPEG")
+        is None
+    ):
+        pytest.skip("lossless jpeg not supported")
+    ds = gdal.Open("data/jpeg/byte_lossless.jpg")
+    assert ds
+    assert ds.GetRasterBand(1).Checksum() == 4672
+    assert (
+        ds.GetMetadataItem("COMPRESSION_REVERSIBILITY", "IMAGE_STRUCTURE") == "LOSSLESS"
+    )
+
+
+###############################################################################
+# Test reading 16-bit lossless JPEG with libjpeg-turbo 2.2 (unsupported by GDAL)
+
+
+def test_jpeg_read_lossless_16bit():
+
+    if (
+        gdal.GetDriverByName("JPEG").GetMetadataItem("LOSSLESS_JPEG_SUPPORTED", "JPEG")
+        is None
+    ):
+        pytest.skip("lossless jpeg not supported")
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/jpeg/uint16_lossless.jpg")
+        assert ds is None
+
+
+###############################################################################
+def test_jpeg_copy_mdd():
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.SetMetadataItem("FOO", "BAR")
+    src_ds.SetMetadataItem("BAR", "BAZ", "OTHER_DOMAIN")
+    src_ds.SetMetadataItem("should_not", "be_copied", "IMAGE_STRUCTURE")
+
+    filename = "/vsimem/test_jpeg_copy_mdd.jpg"
+
+    gdal.GetDriverByName("JPEG").CreateCopy(filename, src_ds)
+    ds = gdal.Open(filename)
+    assert set(ds.GetMetadataDomainList()) == set(["", "DERIVED_SUBDATASETS"])
+    assert ds.GetMetadata_Dict() == {"FOO": "BAR"}
+    assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {}
+    ds = None
+
+    gdal.GetDriverByName("JPEG").CreateCopy(
+        filename, src_ds, options=["COPY_SRC_MDD=NO"]
+    )
+    ds = gdal.Open(filename)
+    assert ds.GetMetadata_Dict() == {}
+    assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {}
+    ds = None
+
+    gdal.GetDriverByName("JPEG").CreateCopy(
+        filename, src_ds, options=["COPY_SRC_MDD=YES"]
+    )
+    ds = gdal.Open(filename)
+    assert set(ds.GetMetadataDomainList()) == set(
+        ["", "DERIVED_SUBDATASETS", "OTHER_DOMAIN"]
+    )
+    assert ds.GetMetadata_Dict() == {"FOO": "BAR"}
+    assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {"BAR": "BAZ"}
+    ds = None
+
+    gdal.GetDriverByName("JPEG").CreateCopy(
+        filename, src_ds, options=["SRC_MDD=OTHER_DOMAIN"]
+    )
+    ds = gdal.Open(filename)
+    assert ds.GetMetadata_Dict() == {}
+    assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {"BAR": "BAZ"}
+    ds = None
+
+    gdal.GetDriverByName("JPEG").CreateCopy(
+        filename, src_ds, options=["SRC_MDD=", "SRC_MDD=OTHER_DOMAIN"]
+    )
+    ds = gdal.Open(filename)
+    assert ds.GetMetadata_Dict() == {"FOO": "BAR"}
+    assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {"BAR": "BAZ"}
+    ds = None
+
+    gdal.Unlink(filename)
 
 
 ###############################################################################

@@ -293,8 +293,9 @@ bool FileGDBTable::Sync(VSILFILE *fpTable, VSILFILE *fpTableX)
     if (m_bDirtyTableXTrailer && fpTableX)
     {
         m_nOffsetTableXTrailer =
-            TABLX_HEADER_SIZE + m_nTablxOffsetSize * TABLX_FEATURES_PER_PAGE *
-                                    (vsi_l_offset)m_n1024BlocksPresent;
+            TABLX_HEADER_SIZE +
+            m_nTablxOffsetSize * TABLX_FEATURES_PER_PAGE *
+                static_cast<vsi_l_offset>(m_n1024BlocksPresent);
         VSIFSeekL(fpTableX, m_nOffsetTableXTrailer, SEEK_SET);
         const uint32_t n1024BlocksTotal =
             DIV_ROUND_UP(m_nTotalRecordCount, TABLX_FEATURES_PER_PAGE);
@@ -525,6 +526,26 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
         return true;
     };
 
+    const auto ReserveXYZMArrays =
+        [this, bIs3D, bIsMeasured](const size_t nAdditionalSize)
+    {
+        size_t nNewMinSize = m_adfX.size() + nAdditionalSize;
+        if (nNewMinSize > m_adfX.capacity())
+        {
+            size_t nNewCapacity = nNewMinSize;
+            if (m_adfX.capacity() < std::numeric_limits<size_t>::max() / 2)
+            {
+                nNewCapacity = std::max(nNewCapacity, 2 * m_adfX.capacity());
+            }
+            m_adfX.reserve(nNewCapacity);
+            m_adfY.reserve(nNewCapacity);
+            if (bIs3D)
+                m_adfZ.reserve(nNewCapacity);
+            if (bIsMeasured)
+                m_adfM.reserve(nNewCapacity);
+        }
+    };
+
     const auto eFlatType = wkbFlatten(poGeom->getGeometryType());
     switch (eFlatType)
     {
@@ -557,38 +578,54 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                 }
             }
             const auto poPoint = poGeom->toPoint();
-            double dfVal;
-
-            dfVal = (poPoint->getX() - poGeomField->GetXOrigin()) *
-                        poGeomField->GetXYScale() +
-                    1;
-            CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal, "Cannot encode value");
-            WriteVarUInt(m_abyGeomBuffer, static_cast<uint64_t>(dfVal + 0.5));
-
-            dfVal = (poPoint->getY() - poGeomField->GetYOrigin()) *
-                        poGeomField->GetXYScale() +
-                    1;
-            CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal, "Cannot encode Y value");
-            WriteVarUInt(m_abyGeomBuffer, static_cast<uint64_t>(dfVal + 0.5));
-
-            if (bIs3D)
+            if (poPoint->IsEmpty())
             {
-                dfVal = (poPoint->getZ() - poGeomField->GetZOrigin()) *
-                            poGeomField->GetZScale() +
-                        1;
-                CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal, "Cannot encode Z value");
-                WriteVarUInt(m_abyGeomBuffer,
-                             static_cast<uint64_t>(dfVal + 0.5));
+                WriteUInt8(m_abyGeomBuffer, 0);
+                WriteUInt8(m_abyGeomBuffer, 0);
+                if (bIs3D)
+                    WriteUInt8(m_abyGeomBuffer, 0);
+                if (bIsMeasured)
+                    WriteUInt8(m_abyGeomBuffer, 0);
             }
-
-            if (bIsMeasured)
+            else
             {
-                dfVal = (poPoint->getM() - poGeomField->GetMOrigin()) *
-                            poGeomField->GetMScale() +
+                double dfVal;
+
+                dfVal = (poPoint->getX() - poGeomField->GetXOrigin()) *
+                            poGeomField->GetXYScale() +
                         1;
-                CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal, "Cannot encode M value");
+                CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal, "Cannot encode value");
                 WriteVarUInt(m_abyGeomBuffer,
                              static_cast<uint64_t>(dfVal + 0.5));
+
+                dfVal = (poPoint->getY() - poGeomField->GetYOrigin()) *
+                            poGeomField->GetXYScale() +
+                        1;
+                CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal, "Cannot encode Y value");
+                WriteVarUInt(m_abyGeomBuffer,
+                             static_cast<uint64_t>(dfVal + 0.5));
+
+                if (bIs3D)
+                {
+                    dfVal = (poPoint->getZ() - poGeomField->GetZOrigin()) *
+                                poGeomField->GetZScale() +
+                            1;
+                    CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal,
+                                                    "Cannot encode Z value");
+                    WriteVarUInt(m_abyGeomBuffer,
+                                 static_cast<uint64_t>(dfVal + 0.5));
+                }
+
+                if (bIsMeasured)
+                {
+                    dfVal = (poPoint->getM() - poGeomField->GetMOrigin()) *
+                                poGeomField->GetMScale() +
+                            1;
+                    CHECK_CAN_BE_ENCODED_ON_VARUINT(dfVal,
+                                                    "Cannot encode M value");
+                    WriteVarUInt(m_abyGeomBuffer,
+                                 static_cast<uint64_t>(dfVal + 0.5));
+                }
             }
 
             return true;
@@ -716,12 +753,20 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
 
             int nCurveDescrCount = 0;
             const auto ProcessCurve =
-                [this, bIs3D, bIsMeasured,
-                 &nCurveDescrCount](const OGRCurve *poCurve)
+                [this, bIs3D, bIsMeasured, &nCurveDescrCount,
+                 &ReserveXYZMArrays](const OGRCurve *poCurve)
             {
                 if (auto poCC = dynamic_cast<const OGRCompoundCurve *>(poCurve))
                 {
                     const size_t nSizeBefore = m_adfX.size();
+
+                    std::size_t nTotalSize = 0;
+                    for (const auto *poSubCurve : *poCC)
+                    {
+                        nTotalSize += poSubCurve->getNumPoints();
+                    }
+                    ReserveXYZMArrays(nTotalSize);
+
                     bool bFirstSubCurve = true;
                     for (const auto *poSubCurve : *poCC)
                     {
@@ -786,6 +831,7 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                 {
                     const int nNumPoints = poLS->getNumPoints();
                     m_anNumberPointsPerPart.push_back(nNumPoints);
+                    ReserveXYZMArrays(nNumPoints);
                     for (int i = 0; i < nNumPoints; ++i)
                     {
                         m_adfX.push_back(poLS->getX(i));
@@ -801,6 +847,7 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                 {
                     const int nNumPoints = poCS->getNumPoints();
                     const size_t nSizeBefore = m_adfX.size();
+                    ReserveXYZMArrays(nNumPoints);
                     for (int i = 0; i < nNumPoints; i++)
                     {
                         m_adfX.push_back(poCS->getX(i));
@@ -894,13 +941,21 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
 
             int nCurveDescrCount = 0;
             const auto ProcessSurface =
-                [this, bIs3D, bIsMeasured,
-                 &nCurveDescrCount](const OGRSurface *poSurface)
+                [this, bIs3D, bIsMeasured, &nCurveDescrCount,
+                 &ReserveXYZMArrays](const OGRSurface *poSurface)
             {
                 if (const auto poPolygon =
                         dynamic_cast<const OGRPolygon *>(poSurface))
                 {
                     bool bFirstRing = true;
+
+                    std::size_t nTotalSize = 0;
+                    for (const auto *poLS : *poPolygon)
+                    {
+                        nTotalSize += poLS->getNumPoints();
+                    }
+                    ReserveXYZMArrays(nTotalSize);
+
                     for (const auto *poLS : *poPolygon)
                     {
                         const int nNumPoints = poLS->getNumPoints();
@@ -1140,14 +1195,14 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
         case wkbGeometryCollection:
         {
             int nParts = 0;
-            int *panPartStart = nullptr;
-            int *panPartType = nullptr;
+            std::vector<int> anPartStart;
+            std::vector<int> anPartType;
             int nPoints = 0;
-            OGRRawPoint *poPoints = nullptr;
-            double *padfZ = nullptr;
+            std::vector<OGRRawPoint> aoPoints;
+            std::vector<double> adfZ;
             OGRErr eErr =
-                OGRCreateMultiPatch(poGeom, TRUE, nParts, panPartStart,
-                                    panPartType, nPoints, poPoints, padfZ);
+                OGRCreateMultiPatch(poGeom, TRUE, nParts, anPartStart,
+                                    anPartType, nPoints, aoPoints, adfZ);
             if (eErr != OGRERR_NONE)
                 return false;
 
@@ -1173,17 +1228,19 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                 WriteVarUInt(m_abyGeomBuffer, nParts);
 
                 if (!EncodeEnvelope(m_abyGeomBuffer, poGeomField, poGeom))
+                {
                     return false;
+                }
 
                 for (int i = 0; i < nParts - 1; i++)
                 {
                     WriteVarUInt(m_abyGeomBuffer,
-                                 panPartStart[i + 1] - panPartStart[i]);
+                                 anPartStart[i + 1] - anPartStart[i]);
                 }
 
                 for (int i = 0; i < nParts; i++)
                 {
-                    WriteVarUInt(m_abyGeomBuffer, panPartType[i]);
+                    WriteVarUInt(m_abyGeomBuffer, anPartType[i]);
                 }
 
                 {
@@ -1192,7 +1249,7 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                     for (int i = 0; i < nPoints; ++i)
                     {
                         double dfVal = std::round(
-                            (poPoints[i].x - poGeomField->GetXOrigin()) *
+                            (aoPoints[i].x - poGeomField->GetXOrigin()) *
                             poGeomField->GetXYScale());
                         CHECK_CAN_BE_ENCODED_ON_VARINT(dfVal, nLastX,
                                                        "Cannot encode value");
@@ -1200,7 +1257,7 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                         WriteVarInt(m_abyGeomBuffer, nX - nLastX);
 
                         dfVal = std::round(
-                            (poPoints[i].y - poGeomField->GetYOrigin()) *
+                            (aoPoints[i].y - poGeomField->GetYOrigin()) *
                             poGeomField->GetXYScale());
                         CHECK_CAN_BE_ENCODED_ON_VARINT(dfVal, nLastY,
                                                        "Cannot encode Y value");
@@ -1217,7 +1274,7 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                     for (int i = 0; i < nPoints; ++i)
                     {
                         double dfVal =
-                            std::round((padfZ[i] - poGeomField->GetZOrigin()) *
+                            std::round((adfZ[i] - poGeomField->GetZOrigin()) *
                                        poGeomField->GetZScale());
                         CHECK_CAN_BE_ENCODED_ON_VARINT(dfVal, nLastZ,
                                                        "Bad Z value");
@@ -1228,10 +1285,6 @@ bool FileGDBTable::EncodeGeometry(const FileGDBGeomField *poGeomField,
                     }
                 }
             }
-            CPLFree(panPartStart);
-            CPLFree(panPartType);
-            CPLFree(poPoints);
-            CPLFree(padfZ);
             return true;
         }
 
@@ -1417,9 +1470,12 @@ bool FileGDBTable::EncodeFeature(const std::vector<OGRField> &asRawFields,
             }
 
             case FGFT_DATETIME:
+            case FGFT_DATE:
             {
                 WriteFloat64(m_abyBuffer,
-                             FileGDBOGRDateToDoubleDate(&asRawFields[i]));
+                             FileGDBOGRDateToDoubleDate(
+                                 &asRawFields[i], /* bConvertToUTC = */ true,
+                                 poField->IsHighPrecision()));
                 break;
             }
 
@@ -1484,6 +1540,38 @@ bool FileGDBTable::EncodeFeature(const std::vector<OGRField> &asRawFields,
                 for (auto v : anVals)
                 {
                     m_abyBuffer.push_back(static_cast<uint8_t>(v));
+                }
+                break;
+            }
+
+            case FGFT_INT64:
+            {
+                WriteInt64(m_abyBuffer, asRawFields[i].Integer64);
+                break;
+            }
+
+            case FGFT_TIME:
+            {
+                WriteFloat64(m_abyBuffer,
+                             FileGDBOGRTimeToDoubleTime(&asRawFields[i]));
+                break;
+            }
+
+            case FGFT_DATETIME_WITH_OFFSET:
+            {
+                WriteFloat64(m_abyBuffer, FileGDBOGRDateToDoubleDate(
+                                              &asRawFields[i],
+                                              /* bConvertToUTC = */ false,
+                                              /* bIsHighPrecision = */ true));
+                if (asRawFields[i].Date.TZFlag > 1)
+                {
+                    WriteInt16(m_abyBuffer,
+                               static_cast<int16_t>(
+                                   (asRawFields[i].Date.TZFlag - 100) * 15));
+                }
+                else
+                {
+                    WriteInt16(m_abyBuffer, 0);
                 }
                 break;
             }
@@ -1570,10 +1658,11 @@ bool FileGDBTable::SeekIntoTableXForNewFeature(int nObjectID)
                 std::vector<GByte> abyTmp(nPageSize);
                 uint64_t nOffset =
                     TABLX_HEADER_SIZE +
-                    static_cast<uint64_t>(m_n1024BlocksPresent - 1) * nPageSize;
+                    static_cast<uint64_t>(m_n1024BlocksPresent) * nPageSize;
                 for (int i = m_n1024BlocksPresent - 1;
                      i >= static_cast<int>(nCountBlocksBefore); --i)
                 {
+                    nOffset -= nPageSize;
                     VSIFSeekL(m_fpTableX, nOffset, SEEK_SET);
                     if (VSIFReadL(abyTmp.data(), nPageSize, 1, m_fpTableX) != 1)
                     {
@@ -1591,7 +1680,6 @@ bool FileGDBTable::SeekIntoTableXForNewFeature(int nObjectID)
                                  static_cast<uint32_t>(nOffset));
                         return false;
                     }
-                    nOffset -= nPageSize;
                 }
                 abyTmp.clear();
                 abyTmp.resize(nPageSize);
@@ -1784,6 +1872,10 @@ bool FileGDBTable::CreateFeature(const std::vector<OGRField> &asRawFields,
         *pnFID = nObjectID;
 
     m_nRowBlobLength = static_cast<uint32_t>(m_abyBuffer.size());
+    if (m_nRowBlobLength > m_nHeaderBufferMaxSize)
+    {
+        m_nHeaderBufferMaxSize = m_nRowBlobLength;
+    }
     m_nRowBufferMaxSize = std::max(m_nRowBufferMaxSize, m_nRowBlobLength);
     if (nFreeOffset == OFFSET_MINUS_ONE)
     {
@@ -1875,9 +1967,11 @@ bool FileGDBTable::UpdateFeature(int nFID,
     }
     else
     {
-        // Updated feature is larger than older one: append at end of .gdbtable
+        // Updated feature is larger than older one: check if there's a chunk
+        // we can reuse by examining the .freelist, and if not, append at end
+        // of .gdbtable
         const uint64_t nFreeOffset = GetOffsetOfFreeAreaFromFreeList(
-            static_cast<uint32_t>(m_abyBuffer.size()));
+            static_cast<uint32_t>(sizeof(uint32_t) + m_abyBuffer.size()));
 
         if (nFreeOffset == OFFSET_MINUS_ONE)
         {
@@ -1914,6 +2008,11 @@ bool FileGDBTable::UpdateFeature(int nFID,
             return false;
 
         m_nRowBlobLength = static_cast<uint32_t>(m_abyBuffer.size());
+        if (m_nRowBlobLength > m_nHeaderBufferMaxSize)
+        {
+            m_bDirtyHeader = true;
+            m_nHeaderBufferMaxSize = m_nRowBlobLength;
+        }
         m_nRowBufferMaxSize = std::max(m_nRowBufferMaxSize, m_nRowBlobLength);
         if (nFreeOffset == OFFSET_MINUS_ONE)
         {

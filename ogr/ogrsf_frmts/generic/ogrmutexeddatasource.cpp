@@ -39,6 +39,8 @@ OGRMutexedDataSource::OGRMutexedDataSource(OGRDataSource *poBaseDataSource,
       m_hGlobalMutex(hMutexIn),
       m_bWrapLayersInMutexedLayer(bWrapLayersInMutexedLayer)
 {
+    SetDescription(poBaseDataSource->GetDescription());
+    poDriver = poBaseDataSource->GetDriver();
 }
 
 OGRMutexedDataSource::~OGRMutexedDataSource()
@@ -127,14 +129,14 @@ int OGRMutexedDataSource::TestCapability(const char *pszCap)
     return m_poBaseDataSource->TestCapability(pszCap);
 }
 
-OGRLayer *OGRMutexedDataSource::ICreateLayer(const char *pszName,
-                                             OGRSpatialReference *poSpatialRef,
-                                             OGRwkbGeometryType eGType,
-                                             char **papszOptions)
+OGRLayer *
+OGRMutexedDataSource::ICreateLayer(const char *pszName,
+                                   const OGRGeomFieldDefn *poGeomFieldDefn,
+                                   CSLConstList papszOptions)
 {
     CPLMutexHolderOptionalLockD(m_hGlobalMutex);
     return WrapLayerIfNecessary(m_poBaseDataSource->CreateLayer(
-        pszName, poSpatialRef, eGType, papszOptions));
+        pszName, poGeomFieldDefn, papszOptions));
 }
 
 OGRLayer *OGRMutexedDataSource::CopyLayer(OGRLayer *poSrcLayer,
@@ -191,7 +193,7 @@ void OGRMutexedDataSource::ReleaseResultSet(OGRLayer *poResultsSet)
     m_poBaseDataSource->ReleaseResultSet(poResultsSet);
 }
 
-void OGRMutexedDataSource::FlushCache(bool bAtClosing)
+CPLErr OGRMutexedDataSource::FlushCache(bool bAtClosing)
 {
     CPLMutexHolderOptionalLockD(m_hGlobalMutex);
     return m_poBaseDataSource->FlushCache(bAtClosing);
@@ -298,15 +300,5 @@ std::shared_ptr<GDALGroup> OGRMutexedDataSource::GetRootGroup() const
     CPLMutexHolderOptionalLockD(m_hGlobalMutex);
     return m_poBaseDataSource->GetRootGroup();
 }
-
-#if defined(WIN32) && defined(_MSC_VER)
-// Horrible hack: for some reason MSVC doesn't export the class
-// if it is not referenced from the DLL itself
-void OGRRegisterMutexedDataSource();
-void OGRRegisterMutexedDataSource()
-{
-    delete new OGRMutexedDataSource(NULL, FALSE, NULL, FALSE);
-}
-#endif
 
 #endif /* #ifndef DOXYGEN_SKIP */

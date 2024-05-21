@@ -6,18 +6,13 @@
 # a new member or virtual function in a public C++ class, etc.
 # This will typically happen for each GDAL feature release (change of X or Y in
 # a X.Y.Z numbering scheme), but should not happen for a bugfix release (change of Z)
-# Previous value: 32 for GDAL 3.6
-set(GDAL_SOVERSION 32)
+# Previous value: 35 for GDAL 3.9
+set(GDAL_SOVERSION 35)
 
 # Switches to control build targets(cached)
 option(ENABLE_GNM "Build GNM (Geography Network Model) component" ON)
 option(ENABLE_PAM "Set ON to enable Persistent Auxiliary Metadata (.aux.xml)" ON)
 option(BUILD_APPS "Build command line utilities" ON)
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/doc" AND NOT "${CMAKE_BINARY_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
-  # In-tree builds do not support Doc building because Sphinx requires (at least
-  # at first sight) a Makefile file which conflicts with the CMake generated one
-  option(BUILD_DOCS "Build documentation" ON)
-endif()
 
 # This option is to build drivers as plugins, for drivers that have external dependencies, that are not parf of GDAL
 # core dependencies Examples are netCDF, HDF4, Oracle, PDF, etc. This global setting can be overridden at the driver
@@ -189,7 +184,6 @@ else ()
   endif ()
 
   if (CMAKE_BUILD_TYPE MATCHES Debug)
-    add_definitions(-DDEBUG)
     check_c_compiler_flag(-ftrapv HAVE_FTRAPV)
     if (HAVE_FTRAPV)
       set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -ftrapv)
@@ -198,6 +192,8 @@ else ()
   endif ()
 
 endif ()
+
+add_compile_definitions($<$<CONFIG:DEBUG>:DEBUG>)
 
 # message(STATUS "GDAL_C_WARNING_FLAGS: ${GDAL_C_WARNING_FLAGS}") message(STATUS "GDAL_CXX_WARNING_FLAGS: ${GDAL_CXX_WARNING_FLAGS}")
 
@@ -319,8 +315,7 @@ macro(set_alternate_linker linker)
   endif()
 endmacro()
 
-# CMake >= 3.13 needed for add_link_options()
-if( (CMAKE_VERSION VERSION_GREATER_EQUAL 3.13) AND ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU") )
+if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" )
   set(USE_ALTERNATE_LINKER "" CACHE STRING "Use alternate linker. Leave empty for system default; potential alternatives are 'gold', 'lld', 'bfd', 'mold'")
   if(NOT "${USE_ALTERNATE_LINKER}" STREQUAL "")
     set_alternate_linker(${USE_ALTERNATE_LINKER})
@@ -334,13 +329,11 @@ endif()
 add_definitions(-DGDAL_COMPILATION)
 
 if (ENABLE_IPO)
-  if (POLICY CMP0069)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT result)
     if (result)
       set(CMAKE_INTERPROCEDURAL_OPTIMIZATION True)
     endif ()
-  endif ()
 endif ()
 
 # ######################################################################################################################
@@ -460,8 +453,8 @@ else ()
         ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}
         ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}
       )
-      if( NOT "${CMAKE_INSTALL_PREFIX}" STREQUAL "" )
-          message(WARNING "CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} will be ignored and replaced with ${base};${base}/${relDir} due to GDAL_SET_INSTALL_RELATIVE_RPATH being set")
+      if( NOT "${CMAKE_INSTALL_RPATH}" STREQUAL "" )
+          message(WARNING "CMAKE_INSTALL_RPATH=${CMAKE_INSTALL_RPATH} will be ignored and replaced with ${base};${base}/${relDir} due to GDAL_SET_INSTALL_RELATIVE_RPATH being set")
       endif()
       set(CMAKE_INSTALL_RPATH ${base} ${base}/${relDir})
   endif()
@@ -479,6 +472,12 @@ if (GDAL_USE_JSONC_INTERNAL)
   # Internal libjson symbols are renamed by default
   add_subdirectory(ogr/ogrsf_frmts/geojson/libjson)
 endif ()
+
+option(ENABLE_DEFLATE64 "Enable Deflate64 decompression" ON)
+mark_as_advanced(ENABLE_DEFLATE64)
+if(ENABLE_DEFLATE64)
+    add_subdirectory(frmts/zlib/contrib/infback9)
+endif()
 
 # Internal zlib and jsonc must be declared before
 add_subdirectory(port)
@@ -514,11 +513,6 @@ if (GDAL_USE_GEOTIFF_INTERNAL)
   mark_as_advanced(RENAME_INTERNAL_GEOTIFF_SYMBOLS)
   add_subdirectory(frmts/gtiff/libgeotiff)
 endif ()
-if (GDAL_USE_GIF_INTERNAL)
-  option(RENAME_INTERNAL_GIF_SYMBOLS "Rename internal giflib symbols" ON)
-  mark_as_advanced(RENAME_INTERNAL_GIF_SYMBOLS)
-  add_subdirectory(frmts/gif/giflib)
-endif ()
 if (GDAL_USE_PNG_INTERNAL)
   option(RENAME_INTERNAL_PNG_SYMBOLS "Rename internal libpng symbols" ON)
   mark_as_advanced(RENAME_INTERNAL_PNG_SYMBOLS)
@@ -540,12 +534,23 @@ endif ()
 set(GDAL_RASTER_FORMAT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/frmts")
 set(GDAL_VECTOR_FORMAT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/ogr/ogrsf_frmts")
 
+if(OGR_ENABLE_DRIVER_GPKG AND
+   NOT DEFINED OGR_ENABLE_DRIVER_SQLITE AND
+   DEFINED OGR_BUILD_OPTIONAL_DRIVERS AND
+   NOT OGR_BUILD_OPTIONAL_DRIVERS)
+   message(STATUS "Automatically enabling SQLite driver")
+   set(OGR_ENABLE_DRIVER_SQLITE ON CACHE BOOL "Set ON to build OGR SQLite driver")
+endif()
+
 # We need to forward declare a few OGR drivers because raster formats need them
 option(OGR_ENABLE_DRIVER_AVC "Set ON to build OGR AVC driver" ${OGR_BUILD_OPTIONAL_DRIVERS})
+option(OGR_ENABLE_DRIVER_GML "Set ON to build OGR GML driver" ${OGR_BUILD_OPTIONAL_DRIVERS})
 cmake_dependent_option(OGR_ENABLE_DRIVER_SQLITE "Set ON to build OGR SQLite driver" ${OGR_BUILD_OPTIONAL_DRIVERS}
                        "GDAL_USE_SQLITE3" OFF)
 cmake_dependent_option(OGR_ENABLE_DRIVER_GPKG "Set ON to build OGR GPKG driver" ${OGR_BUILD_OPTIONAL_DRIVERS}
                        "GDAL_USE_SQLITE3;OGR_ENABLE_DRIVER_SQLITE" OFF)
+cmake_dependent_option(OGR_ENABLE_DRIVER_MVT "Set ON to build OGR MVT driver" ${OGR_BUILD_OPTIONAL_DRIVERS}
+                       "GDAL_USE_SQLITE3" OFF)
 
 # Build frmts/iso8211 conditionally to drivers requiring it
 if ((GDAL_BUILD_OPTIONAL_DRIVERS AND NOT DEFINED GDAL_ENABLE_DRIVER_ADRG AND NOT DEFINED GDAL_ENABLE_DRIVER_SDTS) OR
@@ -580,7 +585,7 @@ get_property(GDAL_PRIVATE_LINK_LIBRARIES GLOBAL PROPERTY gdal_private_link_libra
 target_link_libraries(${GDAL_LIB_TARGET_NAME} PRIVATE ${GDAL_PRIVATE_LINK_LIBRARIES} ${GDAL_EXTRA_LINK_LIBRARIES})
 
 # Document/Manuals
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/doc" AND BUILD_DOCS)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/doc")
   add_subdirectory(doc)
 endif ()
 add_subdirectory(man)
@@ -642,156 +647,24 @@ set(GDAL_DATA_FILES
     data/GDALLogoBW.svg
     data/GDALLogoColor.svg
     data/GDALLogoGS.svg
-    data/bag_template.xml
-    data/cubewerx_extra.wkt
-    data/default.rsc
-    data/ecw_cs.wkt
-    data/eedaconf.json
-    data/epsg.wkt
-    data/esri_StatePlane_extra.wkt
     data/gdalicon.png
-    data/gdalinfo_output.schema.json
-    data/gdalmdiminfo_output.schema.json
-    data/gdalvrt.xsd
-    data/gml_registry.xml
-    data/gmlasconf.xml
-    data/gmlasconf.xsd
-    data/grib2_table_versions.csv
-    data/grib2_center.csv
-    data/grib2_process.csv
-    data/grib2_subcenter.csv
-    data/grib2_table_4_2_0_0.csv
-    data/grib2_table_4_2_0_13.csv
-    data/grib2_table_4_2_0_14.csv
-    data/grib2_table_4_2_0_15.csv
-    data/grib2_table_4_2_0_16.csv
-    data/grib2_table_4_2_0_17.csv
-    data/grib2_table_4_2_0_18.csv
-    data/grib2_table_4_2_0_190.csv
-    data/grib2_table_4_2_0_191.csv
-    data/grib2_table_4_2_0_19.csv
-    data/grib2_table_4_2_0_1.csv
-    data/grib2_table_4_2_0_20.csv
-    data/grib2_table_4_2_0_21.csv
-    data/grib2_table_4_2_0_2.csv
-    data/grib2_table_4_2_0_3.csv
-    data/grib2_table_4_2_0_4.csv
-    data/grib2_table_4_2_0_5.csv
-    data/grib2_table_4_2_0_6.csv
-    data/grib2_table_4_2_0_7.csv
-    data/grib2_table_4_2_10_0.csv
-    data/grib2_table_4_2_10_191.csv
-    data/grib2_table_4_2_10_1.csv
-    data/grib2_table_4_2_10_2.csv
-    data/grib2_table_4_2_10_3.csv
-    data/grib2_table_4_2_10_4.csv
-    data/grib2_table_4_2_1_0.csv
-    data/grib2_table_4_2_1_1.csv
-    data/grib2_table_4_2_1_2.csv
-    data/grib2_table_4_2_20_0.csv
-    data/grib2_table_4_2_20_1.csv
-    data/grib2_table_4_2_20_2.csv
-    data/grib2_table_4_2_2_0.csv
-    data/grib2_table_4_2_2_3.csv
-    data/grib2_table_4_2_2_4.csv
-    data/grib2_table_4_2_2_5.csv
-    data/grib2_table_4_2_2_6.csv
-    data/grib2_table_4_2_3_0.csv
-    data/grib2_table_4_2_3_1.csv
-    data/grib2_table_4_2_3_2.csv
-    data/grib2_table_4_2_3_3.csv
-    data/grib2_table_4_2_3_4.csv
-    data/grib2_table_4_2_3_5.csv
-    data/grib2_table_4_2_3_6.csv
-    data/grib2_table_4_2_4_0.csv
-    data/grib2_table_4_2_4_10.csv
-    data/grib2_table_4_2_4_1.csv
-    data/grib2_table_4_2_4_2.csv
-    data/grib2_table_4_2_4_3.csv
-    data/grib2_table_4_2_4_4.csv
-    data/grib2_table_4_2_4_5.csv
-    data/grib2_table_4_2_4_6.csv
-    data/grib2_table_4_2_4_7.csv
-    data/grib2_table_4_2_4_8.csv
-    data/grib2_table_4_2_4_9.csv
-    data/grib2_table_4_2_local_Canada.csv
-    data/grib2_table_4_2_local_HPC.csv
-    data/grib2_table_4_2_local_index.csv
-    data/grib2_table_4_2_local_MRMS.csv
-    data/grib2_table_4_2_local_NCEP.csv
-    data/grib2_table_4_2_local_NDFD.csv
-    data/grib2_table_4_5.csv
-    data/gt_datum.csv
-    data/gt_ellips.csv
-    data/header.dxf
-    data/inspire_cp_BasicPropertyUnit.gfs
-    data/inspire_cp_CadastralBoundary.gfs
-    data/inspire_cp_CadastralParcel.gfs
-    data/inspire_cp_CadastralZoning.gfs
-    data/jpfgdgml_AdmArea.gfs
-    data/jpfgdgml_AdmBdry.gfs
-    data/jpfgdgml_AdmPt.gfs
-    data/jpfgdgml_BldA.gfs
-    data/jpfgdgml_BldL.gfs
-    data/jpfgdgml_Cntr.gfs
-    data/jpfgdgml_CommBdry.gfs
-    data/jpfgdgml_CommPt.gfs
-    data/jpfgdgml_Cstline.gfs
-    data/jpfgdgml_ElevPt.gfs
-    data/jpfgdgml_GCP.gfs
-    data/jpfgdgml_LeveeEdge.gfs
-    data/jpfgdgml_RailCL.gfs
-    data/jpfgdgml_RdASL.gfs
-    data/jpfgdgml_RdArea.gfs
-    data/jpfgdgml_RdCompt.gfs
-    data/jpfgdgml_RdEdg.gfs
-    data/jpfgdgml_RdMgtBdry.gfs
-    data/jpfgdgml_RdSgmtA.gfs
-    data/jpfgdgml_RvrMgtBdry.gfs
-    data/jpfgdgml_SBAPt.gfs
-    data/jpfgdgml_SBArea.gfs
-    data/jpfgdgml_SBBdry.gfs
-    data/jpfgdgml_WA.gfs
-    data/jpfgdgml_WL.gfs
-    data/jpfgdgml_WStrA.gfs
-    data/jpfgdgml_WStrL.gfs
-    data/netcdf_config.xsd
-    data/nitf_spec.xml
-    data/nitf_spec.xsd
-    data/ogrvrt.xsd
-    data/osmconf.ini
-    data/ogrinfo_output.schema.json
-    data/ozi_datum.csv
-    data/ozi_ellips.csv
-    data/pci_datum.txt
-    data/pci_ellips.txt
-    data/pdfcomposition.xsd
-    data/pds4_template.xml
-    data/plscenesconf.json
-    data/ruian_vf_ob_v1.gfs
-    data/ruian_vf_st_uvoh_v1.gfs
-    data/ruian_vf_st_v1.gfs
-    data/ruian_vf_v1.gfs
-    data/s57agencies.csv
-    data/s57attributes.csv
-    data/s57expectedinput.csv
-    data/s57objectclasses.csv
-    data/seed_2d.dgn
-    data/seed_3d.dgn
-    data/stateplane.csv
-    data/template_tiles.mapml
-    data/tms_LINZAntarticaMapTileGrid.json
-    data/tms_MapML_APSTILE.json
-    data/tms_MapML_CBMTILE.json
-    data/tms_NZTM2000.json
-    data/trailer.dxf
-    data/vdv452.xml
-    data/vdv452.xsd
-    data/vicar.json)
+)
 set_property(
   TARGET ${GDAL_LIB_TARGET_NAME}
   APPEND
   PROPERTY RESOURCE "${GDAL_DATA_FILES}")
+
+# Copy all resource files from their source location to ${CMAKE_CURRENT_BINARY_DIR}/data
+# Note that this is not only the small list of files set a few lines above,
+# but also resource files attached to ${GDAL_LIB_TARGET_NAME} in other directories (drivers, etc.)
+get_property(
+  _data_files
+  TARGET ${GDAL_LIB_TARGET_NAME}
+  PROPERTY RESOURCE)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/data")
+foreach(_file IN LISTS _data_files)
+    configure_file("${_file}" "${CMAKE_CURRENT_BINARY_DIR}/data" COPYONLY)
+endforeach()
 
 if (GDAL_ENABLE_MACOSX_FRAMEWORK)
   # We need to add data files and public headers as sources of the library os they get installed through the framework
@@ -837,17 +710,11 @@ if (NOT GDAL_ENABLE_MACOSX_FRAMEWORK)
   endif ()
 
   include(CMakePackageConfigHelpers)
-  if(CMAKE_VERSION VERSION_LESS 3.11)
-      set(comptatibility_check ExactVersion)
-  else()
-      # SameMinorVersion compatibility are supported CMake >= 3.11
-      # Our C++ ABI remains stable only among major.minor.XXX patch releases
-      set(comptatibility_check SameMinorVersion)
-  endif()
+  # SameMinorVersion as our C++ ABI remains stable only among major.minor.XXX patch releases
   write_basic_package_version_file(
     GDALConfigVersion.cmake
     VERSION ${GDAL_VERSION}
-    COMPATIBILITY ${comptatibility_check})
+    COMPATIBILITY SameMinorVersion)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/GDALConfigVersion.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gdal/)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/template/GDALConfig.cmake.in
                  ${CMAKE_CURRENT_BINARY_DIR}/GDALConfig.cmake @ONLY)

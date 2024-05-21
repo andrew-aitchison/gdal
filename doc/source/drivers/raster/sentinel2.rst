@@ -121,13 +121,15 @@ When opening the main metadata .xml file, the driver will typically
 expose 4 sub-datasets:
 
 -  one for the 4 native 10m bands, and L2A specific bands (AOT and WVP)
--  one for the 6 native 20m bands, plus the 10m bands, except B8,
-   resampled to 20m, and L2A specific bands (AOT, WVP, SCL, CLD and
+-  one for the 6 native 20m bands, and L2A specific bands (AOT, WVP, SCL, CLD and
    SNW),
--  one for the 3 native 60m bands, plus the 10m&20m bands, except B8,
-   resampled to 60m, and L2A specific bands (AOT, WVP, SCL, CLD and
+-  one for the B01 and B09 native 60m bands, and L2A specific bands (AOT, WVP, SCL, CLD and
    SNW),
--  one for a preview of the R,G,B bands at a 320m resolution
+-  one for a true-color image (TCI) of the R,G,B bands at a 10m resolution,
+   for the "compact" L2A product formulation (or a preview of the R,G,B bands
+   at a 320m resolution for the older L2A product formulation). The TCI
+   products at resolution 20m and 60m are not exposed, as they are just
+   subsampled versions of the 10m product.
 
 All tiles of same resolution and projection are mosaiced together. If a
 product spans over several UTM zones, they will be exposed as separate
@@ -161,27 +163,32 @@ NONE resampling method ('-r none' as gdaladdo switch).
 
 When converting a subdataset to another format like tiled GeoTIFF, if
 using the JP2OpenJPEG driver, the recommended minimum value for the
-:decl_configoption:`GDAL_CACHEMAX` configuration option is (subdataset_width \* 2048 \* 2 ) /
+:config:`GDAL_CACHEMAX` configuration option is (subdataset_width \* 2048 \* 2 ) /
 10000000 if generating a INTERLEAVE=BAND GeoTIFF, or that value
 multiplied by the number of bands for the default INTERLEAVE=PIXEL
 configuration. The current versions of the OpenJPEG libraries can also
 consume a lot of memory to decode a JPEG2000 tile (up to 600MB), so you
-might want to specify the :decl_configoption:`GDAL_NUM_THREADS` configuration option to a
+might want to specify the :config:`GDAL_NUM_THREADS` configuration option to a
 reasonable number of threads if you are short of memory (the default
 value is the total number of virtual CPUs).
 
 Open options
 ------------
 
+|about-open-options|
 The driver can be passed the following open options:
 
--  **ALPHA**\ =YES/NO: whether to expose an alpha band. Defaults to NO.
-   If set, an extra band is added after the Sentinel2 bands with an
-   alpha channel. Its value are:
+-  .. oo:: ALPHA
+      :choices: YES, NO
+      :default: NO
 
-   -  0 on areas with no tiles, or when the tile data is set to the
-      NODATA or SATURATED special values,
-   -  4095 on areas with valid data.
+      Whether to expose an alpha band.
+      If set, an extra band is added after the Sentinel2 bands with an
+      alpha channel. Its value are:
+
+      -  0 on areas with no tiles, or when the tile data is set to the
+         NODATA or SATURATED special values,
+      -  4095 on areas with valid data.
 
 Note: above open options can also be specified as configuration options,
 by prefixing the open option name with SENTINEL2\_ (e.g.
@@ -346,7 +353,7 @@ Examples
 
    ::
 
-      $ python -c "import sys; from osgeo import gdal; ds = gdal.Open(sys.argv[1]); open(sys.argv[2], 'wb').write(ds.GetMetadata('xml:VRT')[0].encode('utf-8'))" \
+      $ python3 -c "import sys; from osgeo import gdal; ds = gdal.Open(sys.argv[1]); open(sys.argv[2], 'wb').write(ds.GetMetadata('xml:VRT')[0].encode('utf-8'))" \
                SENTINEL2_L1C:S2A_OPER_MTD_SAFL1C_PDMC_20150818T101440_R022_V20150813T102406_20150813T102406.xml:10m:EPSG_32632 10m.vrt
 
 -  Opening the 10 meters resolution bands of a L1B subdataset:

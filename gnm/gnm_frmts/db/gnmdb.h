@@ -29,6 +29,9 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
+#ifndef GNMDB_H_INCLUDED
+#define GNMDB_H_INCLUDED
+
 #include "gnm.h"
 
 class GNMDatabaseNetwork : public GNMGenericNetwork
@@ -42,10 +45,10 @@ class GNMDatabaseNetwork : public GNMGenericNetwork
                           char **papszOptions) override;
 
   protected:
-    virtual OGRLayer *ICreateLayer(const char *pszName,
-                                   OGRSpatialReference *poSpatialRef = nullptr,
-                                   OGRwkbGeometryType eGType = wkbUnknown,
-                                   char **papszOptions = nullptr) override;
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
+
     virtual int CheckNetworkExist(const char *pszFilename,
                                   char **papszOptions) override;
 
@@ -65,3 +68,5 @@ class GNMDatabaseNetwork : public GNMGenericNetwork
     GDALDataset *m_poDS;
     CPLString m_soNetworkFullName;
 };
+
+#endif  // GNMDB_H_INCLUDED

@@ -57,8 +57,6 @@
 #include "ogr_spatialref.h"
 #include "ogr_srs_api.h"
 
-CPL_CVSID("$Id$")
-
 CPL_C_START
 void *GDALDeserializeGCPTransformer(CPLXMLNode *psTree);
 void *GDALDeserializeTPSTransformer(CPLXMLNode *psTree);
@@ -78,63 +76,20 @@ static void *GDALCreateApproxTransformer2(GDALTransformerFunc pfnRawTransformer,
                                           double dfMaxErrorReverse);
 
 /************************************************************************/
-/* ==================================================================== */
-/*                       GDALGenImgProjTransformer                      */
-/* ==================================================================== */
+/*                            GDALIsTransformer()                       */
 /************************************************************************/
 
-typedef struct
+bool GDALIsTransformer(void *hTransformerArg, const char *pszClassName)
 {
-
-    GDALTransformerInfo sTI;
-
-    double adfSrcGeoTransform[6];
-    double adfSrcInvGeoTransform[6];
-
-    void *pSrcTransformArg;
-    GDALTransformerFunc pSrcTransformer;
-
-    void *pReprojectArg;
-    GDALTransformerFunc pReproject;
-
-    double adfDstGeoTransform[6];
-    double adfDstInvGeoTransform[6];
-
-    void *pDstTransformArg;
-    GDALTransformerFunc pDstTransformer;
-
-    // Memorize the value of the CHECK_WITH_INVERT_PROJ at the time we
-    // instantiated the object, to be able to decide if
-    // GDALRefreshGenImgProjTransformer() must do something or not.
-    bool bCheckWithInvertPROJ;
-
-} GDALGenImgProjTransformInfo;
-
-/************************************************************************/
-/* ==================================================================== */
-/*                       GDALReprojectionTransformer                    */
-/* ==================================================================== */
-/************************************************************************/
-
-struct GDALReprojectionTransformInfo
-{
-    GDALTransformerInfo sTI;
-    char **papszOptions = nullptr;
-    double dfTime = 0.0;
-
-    OGRCoordinateTransformation *poForwardTransform = nullptr;
-    OGRCoordinateTransformation *poReverseTransform = nullptr;
-
-    GDALReprojectionTransformInfo() : sTI()
-    {
-        memset(&sTI, 0, sizeof(sTI));
-    }
-
-    GDALReprojectionTransformInfo(const GDALReprojectionTransformInfo &) =
-        delete;
-    GDALReprojectionTransformInfo &
-    operator=(const GDALReprojectionTransformInfo &) = delete;
-};
+    if (!hTransformerArg)
+        return false;
+    // All transformers should have a GDALTransformerInfo member as their first members
+    GDALTransformerInfo *psInfo =
+        static_cast<GDALTransformerInfo *>(hTransformerArg);
+    return memcmp(psInfo->abySignature, GDAL_GTI2_SIGNATURE,
+                  strlen(GDAL_GTI2_SIGNATURE)) == 0 &&
+           strcmp(psInfo->pszClassName, pszClassName) == 0;
+}
 
 /************************************************************************/
 /*                          GDALTransformFunc                           */
@@ -218,7 +173,7 @@ points may have failed) or FALSE if the overall transformation fails.
  * output file georeferenced coordinates.  This can be accomplished with
  * GDALCreateGenImgProjTransformer() by passing a NULL for the hDstDS.
  *
- * @param hSrcDS the input image (it is assumed the whole input images is
+ * @param hSrcDS the input image (it is assumed the whole input image is
  * being transformed).
  * @param pfnTransformer the transformer function.
  * @param pTransformArg the callback data for the transformer function.
@@ -388,7 +343,7 @@ static int GDALSuggestedWarpOutput2_MustAdjustForBottomBorder(
  * output file georeferenced coordinates.  This can be accomplished with
  * GDALCreateGenImgProjTransformer() by passing a NULL for the hDstDS.
  *
- * @param hSrcDS the input image (it is assumed the whole input images is
+ * @param hSrcDS the input image (it is assumed the whole input image is
  * being transformed).
  * @param pfnTransformer the transformer function.
  * @param pTransformArg the callback data for the transformer function.
@@ -398,8 +353,9 @@ static int GDALSuggestedWarpOutput2_MustAdjustForBottomBorder(
  * @param pnLines int in which the suggest pixel height of output is returned.
  * @param padfExtent Four entry array to return extents as (xmin, ymin, xmax,
  * ymax).
- * @param nOptions Options. Zero or GDAL_SWO_ROUND_UP_SIZE to ask *pnPixels
- * and *pnLines to be rounded up instead of being rounded to the closes integer.
+ * @param nOptions Options flags. Zero or GDAL_SWO_ROUND_UP_SIZE  to ask *pnPixels
+ * and *pnLines to be rounded up instead of being rounded to the closes integer, or
+ * GDAL_SWO_FORCE_SQUARE_PIXEL to indicate that the generated pixel size is a square.
  *
  * @return CE_None if successful or CE_Failure otherwise.
  */
@@ -413,15 +369,20 @@ CPLErr CPL_STDCALL GDALSuggestedWarpOutput2(GDALDatasetH hSrcDS,
 {
     VALIDATE_POINTER1(hSrcDS, "GDALSuggestedWarpOutput2", CE_Failure);
 
+    const bool bIsGDALGenImgProjTransform{
+        pTransformArg &&
+        GDALIsTransformer(pTransformArg, GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME)};
+
     /* -------------------------------------------------------------------- */
     /*      Setup sample points all around the edge of the input raster.    */
     /* -------------------------------------------------------------------- */
-    if (pfnTransformer == GDALGenImgProjTransform)
+    if (bIsGDALGenImgProjTransform)
     {
         // In case CHECK_WITH_INVERT_PROJ has been modified.
         GDALRefreshGenImgProjTransformer(pTransformArg);
     }
-    else if (pfnTransformer == GDALApproxTransform)
+    else if (GDALIsTransformer(pTransformArg,
+                               GDAL_APPROX_TRANSFORMER_CLASS_NAME))
     {
         // In case CHECK_WITH_INVERT_PROJ has been modified.
         GDALRefreshApproxTransformer(pTransformArg);
@@ -429,6 +390,77 @@ CPLErr CPL_STDCALL GDALSuggestedWarpOutput2(GDALDatasetH hSrcDS,
 
     const int nInXSize = GDALGetRasterXSize(hSrcDS);
     const int nInYSize = GDALGetRasterYSize(hSrcDS);
+
+    /* ------------------------------------------------------------- */
+    /* Special case for warping on the same (or null) CRS.           */
+    /* ------------------------------------------------------------- */
+    if ((!nOptions || (nOptions & GDAL_SWO_FORCE_SQUARE_PIXEL) == 0) &&
+        pTransformArg && bIsGDALGenImgProjTransform)
+    {
+        const GDALGenImgProjTransformInfo *psInfo =
+            static_cast<const GDALGenImgProjTransformInfo *>(pTransformArg);
+
+        if (!psInfo->pSrcTransformer &&
+            !psInfo->bHasCustomTransformationPipeline &&
+            !psInfo->pDstTransformer && psInfo->adfSrcGeoTransform[2] == 0 &&
+            psInfo->adfSrcGeoTransform[4] == 0 &&
+            psInfo->adfDstGeoTransform[0] == 0 &&
+            psInfo->adfDstGeoTransform[1] == 1 &&
+            psInfo->adfDstGeoTransform[2] == 0 &&
+            psInfo->adfDstGeoTransform[3] == 0 &&
+            psInfo->adfDstGeoTransform[4] == 0 &&
+            psInfo->adfDstGeoTransform[5] == 1)
+        {
+            const OGRSpatialReference *poSourceCRS = nullptr;
+            const OGRSpatialReference *poTargetCRS = nullptr;
+
+            if (psInfo->pReprojectArg)
+            {
+                const GDALReprojectionTransformInfo *psRTI =
+                    static_cast<const GDALReprojectionTransformInfo *>(
+                        psInfo->pReprojectArg);
+                poSourceCRS = psRTI->poForwardTransform->GetSourceCS();
+                poTargetCRS = psRTI->poForwardTransform->GetTargetCS();
+            }
+
+            if ((!poSourceCRS && !poTargetCRS) ||
+                (poSourceCRS && poTargetCRS &&
+                 poSourceCRS->IsSame(poTargetCRS)))
+            {
+
+                const bool bNorthUp{psInfo->adfSrcGeoTransform[5] < 0.0};
+
+                memcpy(padfGeoTransformOut, psInfo->adfSrcGeoTransform,
+                       sizeof(double) * 6);
+
+                if (!bNorthUp)
+                {
+                    padfGeoTransformOut[3] = padfGeoTransformOut[3] +
+                                             nInYSize * padfGeoTransformOut[5];
+                    padfGeoTransformOut[5] = -padfGeoTransformOut[5];
+                }
+
+                *pnPixels = nInXSize;
+                *pnLines = nInYSize;
+
+                // Calculate extent from hSrcDS
+                if (padfExtent)
+                {
+                    padfExtent[0] = psInfo->adfSrcGeoTransform[0];
+                    padfExtent[1] = psInfo->adfSrcGeoTransform[3] +
+                                    nInYSize * psInfo->adfSrcGeoTransform[5];
+                    padfExtent[2] = psInfo->adfSrcGeoTransform[0] +
+                                    nInXSize * psInfo->adfSrcGeoTransform[1];
+                    padfExtent[3] = psInfo->adfSrcGeoTransform[3];
+                    if (!bNorthUp)
+                    {
+                        std::swap(padfExtent[1], padfExtent[3]);
+                    }
+                }
+                return CE_None;
+            }
+        }
+    }
 
     const int N_PIXELSTEP = 50;
     int nSteps = static_cast<int>(
@@ -854,7 +886,7 @@ retry:
                  nFailedCount, nSamplePoints);
 
     bool bIsGeographicCoords = false;
-    if (pfnTransformer == GDALGenImgProjTransform)
+    if (bIsGDALGenImgProjTransform)
     {
         const GDALGenImgProjTransformInfo *pGIPTI =
             static_cast<const GDALGenImgProjTransformInfo *>(pTransformArg);
@@ -933,23 +965,23 @@ retry:
                  pGIPTI->adfDstGeoTransform[4] == 0 &&
                  pGIPTI->adfDstGeoTransform[5] == 1)
         {
-            /* --------------------------------------------------------------------
-             */
-            /*  Special case for warping using source geotransform and
-             * reprojection */
-            /*  to deal with the poles. */
-            /* --------------------------------------------------------------------
-             */
+            /* ------------------------------------------------------------- */
+            /* Special case for warping using source geotransform and        */
+            /* reprojection to deal with the poles.                          */
+            /* ------------------------------------------------------------- */
             const GDALReprojectionTransformInfo *psRTI =
                 static_cast<const GDALReprojectionTransformInfo *>(
                     pGIPTI->pReprojectArg);
+            const OGRSpatialReference *poSourceCRS =
+                psRTI->poForwardTransform->GetSourceCS();
             const OGRSpatialReference *poTargetCRS =
                 psRTI->poForwardTransform->GetTargetCS();
             if (poTargetCRS != nullptr &&
                 psRTI->poReverseTransform != nullptr &&
                 poTargetCRS->IsGeographic() &&
                 fabs(poTargetCRS->GetAngularUnits() -
-                     CPLAtof(SRS_UA_DEGREE_CONV)) < 1e-9)
+                     CPLAtof(SRS_UA_DEGREE_CONV)) < 1e-9 &&
+                (!poSourceCRS || !poSourceCRS->IsGeographic()))
             {
                 bIsGeographicCoords = true;
 
@@ -958,7 +990,7 @@ retry:
                 {
                     // CHECK_WITH_INVERT_PROJ=YES prevent reliable
                     // transformation of poles.
-                    poSetter = cpl::make_unique<CPLConfigOptionSetter>(
+                    poSetter = std::make_unique<CPLConfigOptionSetter>(
                         "CHECK_WITH_INVERT_PROJ", "NO", false);
                     GDALRefreshGenImgProjTransformer(pTransformArg);
                     // GDALRefreshGenImgProjTransformer() has invalidated psRTI
@@ -976,14 +1008,36 @@ retry:
                         const auto invGT = pGIPTI->adfSrcInvGeoTransform;
                         const double x = invGT[0] + X * invGT[1] + Y * invGT[2];
                         const double y = invGT[3] + X * invGT[4] + Y * invGT[5];
-                        if (x >= 0 && x <= nInXSize && y >= 0 && y <= nInYSize)
+                        constexpr double EPSILON = 1e-5;
+                        if (x >= -EPSILON && x <= nInXSize + EPSILON &&
+                            y >= -EPSILON && y <= nInYSize + EPSILON)
                         {
                             if (psRTI->poForwardTransform->Transform(1, &X,
                                                                      &Y) &&
                                 fabs(Y - Yinit) <= 1e-6)
                             {
-                                dfMinXOut = -180;
-                                dfMaxXOut = 180;
+                                bool bMinXMaxXSet = false;
+                                if (poSourceCRS)
+                                {
+                                    const char *pszProjection =
+                                        poSourceCRS->GetAttrValue("PROJECTION");
+                                    if (pszProjection &&
+                                        EQUAL(pszProjection,
+                                              SRS_PT_ORTHOGRAPHIC))
+                                    {
+                                        const double dfLon0 =
+                                            poSourceCRS->GetNormProjParm(
+                                                SRS_PP_CENTRAL_MERIDIAN, 0.0);
+                                        dfMinXOut = dfLon0 - 90;
+                                        dfMaxXOut = dfLon0 + 90;
+                                        bMinXMaxXSet = true;
+                                    }
+                                }
+                                if (!bMinXMaxXSet)
+                                {
+                                    dfMinXOut = -180;
+                                    dfMaxXOut = 180;
+                                }
                                 if (sign < 0)
                                     dfMinYOut = Yinit;
                                 else
@@ -1001,12 +1055,12 @@ retry:
                         pTransformArg);
                     psRTI = static_cast<const GDALReprojectionTransformInfo *>(
                         pGIPTI->pReprojectArg);
+                    poSourceCRS = psRTI->poForwardTransform->GetSourceCS();
                     poTargetCRS = psRTI->poForwardTransform->GetTargetCS();
                 }
             }
 
             // Use TransformBounds() to handle more particular cases
-            const auto poSourceCRS = psRTI->poForwardTransform->GetSourceCS();
             if (poSourceCRS != nullptr && poTargetCRS != nullptr &&
                 pGIPTI->adfSrcGeoTransform[1] != 0 &&
                 pGIPTI->adfSrcGeoTransform[2] == 0 &&
@@ -1231,13 +1285,14 @@ static GDALGenImgProjTransformInfo *GDALCreateGenImgProjTransformerInternal()
 
     memcpy(psInfo->sTI.abySignature, GDAL_GTI2_SIGNATURE,
            strlen(GDAL_GTI2_SIGNATURE));
-    psInfo->sTI.pszClassName = "GDALGenImgProjTransformer";
+    psInfo->sTI.pszClassName = GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME;
     psInfo->sTI.pfnTransform = GDALGenImgProjTransform;
     psInfo->sTI.pfnCleanup = GDALDestroyGenImgProjTransformer;
     psInfo->sTI.pfnSerialize = GDALSerializeGenImgProjTransformer;
     psInfo->sTI.pfnCreateSimilar = GDALCreateSimilarGenImgProjTransformer;
 
     psInfo->bCheckWithInvertPROJ = GetCurrentCheckWithInvertPROJ();
+    psInfo->bHasCustomTransformationPipeline = false;
 
     return psInfo;
 }
@@ -1608,9 +1663,62 @@ bool GDALComputeAreaOfInterest(OGRSpatialReference *poSRS, double dfX1,
 }
 
 /************************************************************************/
+/*                    GDALGCPAntimeridianUnwrap()                       */
+/************************************************************************/
+
+/* Deal with discontinuties of dfGCPX longitudes around the anti-meridian.
+ * Cf https://github.com/OSGeo/gdal/issues/8371
+ */
+static void GDALGCPAntimeridianUnwrap(int nGCPCount, GDAL_GCP *pasGCPList,
+                                      const OGRSpatialReference &oSRS,
+                                      CSLConstList papszOptions)
+{
+    const char *pszGCPAntimeridianUnwrap =
+        CSLFetchNameValueDef(papszOptions, "GCP_ANTIMERIDIAN_UNWRAP", "AUTO");
+    const bool bForced = EQUAL(pszGCPAntimeridianUnwrap, "YES") ||
+                         EQUAL(pszGCPAntimeridianUnwrap, "ON") ||
+                         EQUAL(pszGCPAntimeridianUnwrap, "TRUE") ||
+                         EQUAL(pszGCPAntimeridianUnwrap, "1");
+    if (bForced || (!oSRS.IsEmpty() && oSRS.IsGeographic() &&
+                    fabs(oSRS.GetAngularUnits(nullptr) -
+                         CPLAtof(SRS_UA_DEGREE_CONV)) < 1e-8 &&
+                    EQUAL(pszGCPAntimeridianUnwrap, "AUTO")))
+    {
+        if (!bForced)
+        {
+            // Proceed to unwrapping only if the longitudes are within
+            // [-180, -170] or [170, 180]
+            for (int i = 0; i < nGCPCount; ++i)
+            {
+                const double dfLongAbs = fabs(pasGCPList[i].dfGCPX);
+                if (dfLongAbs > 180 || dfLongAbs < 170)
+                {
+                    return;
+                }
+            }
+        }
+
+        bool bDone = false;
+        for (int i = 0; i < nGCPCount; ++i)
+        {
+            if (pasGCPList[i].dfGCPX < 0)
+            {
+                if (!bDone)
+                {
+                    bDone = true;
+                    CPLDebug("WARP", "GCP longitude unwrapping");
+                }
+                pasGCPList[i].dfGCPX += 360;
+            }
+        }
+    }
+}
+
+/************************************************************************/
 /*                  GDALCreateGenImgProjTransformer2()                  */
 /************************************************************************/
 
+/* clang-format off */
 /**
  * Create image to image transformer.
  *
@@ -1643,71 +1751,117 @@ bool GDALComputeAreaOfInterest(OGRSpatialReference *poSRS, double dfX1,
  * <ul>
  * <li> SRC_SRS: WKT SRS, or any string recognized by
  * OGRSpatialReference::SetFromUserInput(), to be used as an override for
- * hSrcDS. <li> DST_SRS: WKT SRS, or any string recognized by
+ * hSrcDS.</li>
+ * <li> DST_SRS: WKT SRS, or any string recognized by
  * OGRSpatialReference::SetFromUserInput(),  to be used as an override for
- * hDstDS. <li> COORDINATE_OPERATION: (GDAL &gt;= 3.0) Coordinate operation, as
+ * hDstDS.
+ * </li>
+ * <li> COORDINATE_OPERATION: (GDAL &gt;= 3.0) Coordinate operation, as
  * a PROJ or WKT string, used as an override over the normally computed
  * pipeline. The pipeline must take into account the axis order of the source
  * and target SRS. <li> COORDINATE_EPOCH: (GDAL &gt;= 3.0) Coordinate epoch,
  * expressed as a decimal year. Useful for time-dependant coordinate operations.
+ * </li>
  * <li> SRC_COORDINATE_EPOCH: (GDAL &gt;= 3.4) Coordinate epoch of source CRS,
  * expressed as a decimal year. Useful for time-dependant coordinate operations.
+ * </li>
  * <li> DST_COORDINATE_EPOCH: (GDAL &gt;= 3.4) Coordinate epoch of target CRS,
  * expressed as a decimal year. Useful for time-dependant coordinate operations.
+ * </li>
  * <li> GCPS_OK: If false, GCPs will not be used, default is TRUE.
+ * </li>
  * <li> REFINE_MINIMUM_GCPS: The minimum amount of GCPs that should be available
  * after the refinement.
+ * </li>
  * <li> REFINE_TOLERANCE: The tolerance that specifies when a GCP will be
  * eliminated.
+ * </li>
  * <li> MAX_GCP_ORDER: the maximum order to use for GCP derived polynomials if
  * possible.  The default is to autoselect based on the number of GCPs.
  * A value of -1 triggers use of Thin Plate Spline instead of polynomials.
+ * </li>
+ * <li>GCP_ANTIMERIDIAN_UNWRAP=AUTO/YES/NO. (GDAL &gt;= 3.8) Whether to
+ * "unwrap" longitudes of ground control points that span the antimeridian.
+ * For datasets with GCPs in longitude/latitude coordinate space spanning the
+ * antimeridian, longitudes will have a discontinuity on +/- 180 deg, and
+ * will result in a subset of the GCPs with longitude in the [-180,-170] range
+ * and another subset in [170, 180]. By default (AUTO), that situation will be
+ * detected and longitudes in [-180,-170] will be shifted to [180, 190] to get
+ * a continuous set. This option can be set to YES to force that behavior
+ * (useful if no SRS information is available), or to NO to disable it.
+ * </li>
  * <li> SRC_METHOD: may have a value which is one of GEOTRANSFORM,
  * GCP_POLYNOMIAL, GCP_TPS, GEOLOC_ARRAY, RPC to force only one geolocation
  * method to be considered on the source dataset. Will be used for pixel/line
  * to georef transformation on the source dataset. NO_GEOTRANSFORM can be
  * used to specify the identity geotransform (ungeoreference image)
+ * </li>
  * <li> DST_METHOD: may have a value which is one of GEOTRANSFORM,
  * GCP_POLYNOMIAL, GCP_TPS, GEOLOC_ARRAY (added in 3.5), RPC to force only one
  * geolocation method to be considered on the target dataset.  Will be used for
  * pixel/line to georef transformation on the destination dataset.
  * NO_GEOTRANSFORM can be used to specify the identity geotransform
- * (ungeoreference image) <li> RPC_HEIGHT: A fixed height to be used with RPC
- * calculations. <li> RPC_DEM: The name of a DEM file to be used with RPC
- * calculations. See GDALCreateRPCTransformerV2() for more details. <li> Other
- * RPC related options. See GDALCreateRPCTransformerV2() <li>
+ * (ungeoreference image)
+ * </li>
+ * <li> RPC_HEIGHT: A fixed height to be used with RPC
+ * calculations.
+ * </li>
+ * <li> RPC_DEM: The name of a DEM file to be used with RPC
+ * calculations. See GDALCreateRPCTransformerV2() for more details.
+ * </li>
+ * <li> Other RPC related options. See GDALCreateRPCTransformerV2()
+ * </li>
+ * <li>
  * INSERT_CENTER_LONG: May be set to FALSE to disable setting up a CENTER_LONG
  * value on the coordinate system to rewrap things around the center of the
- * image. <li> SRC_APPROX_ERROR_IN_SRS_UNIT=err_threshold_in_SRS_units. (GDAL
+ * image.
+ * </li>
+ * <li> SRC_APPROX_ERROR_IN_SRS_UNIT=err_threshold_in_SRS_units. (GDAL
  * &gt;= 2.2) Use an approximate transformer for the source transformer. Must be
  * defined together with SRC_APPROX_ERROR_IN_PIXEL to be taken into account.
+ * </li>
  * <li> SRC_APPROX_ERROR_IN_PIXEL=err_threshold_in_pixel. (GDAL &gt;= 2.2) Use
  * an approximate transformer for the source transformer.. Must be defined
- * together with SRC_APPROX_ERROR_IN_SRS_UNIT to be taken into account. <li>
+ * together with SRC_APPROX_ERROR_IN_SRS_UNIT to be taken into account.
+ * </li>
+ * <li>
  * DST_APPROX_ERROR_IN_SRS_UNIT=err_threshold_in_SRS_units. (GDAL &gt;= 2.2) Use
  * an approximate transformer for the destination transformer. Must be defined
- * together with DST_APPROX_ERROR_IN_PIXEL to be taken into account. <li>
+ * together with DST_APPROX_ERROR_IN_PIXEL to be taken into account.
+ * </li>
+ * <li>
  * DST_APPROX_ERROR_IN_PIXEL=err_threshold_in_pixel. (GDAL &gt;= 2.2) Use an
  * approximate transformer for the destination transformer. Must be defined
- * together with DST_APPROX_ERROR_IN_SRS_UNIT to be taken into account. <li>
+ * together with DST_APPROX_ERROR_IN_SRS_UNIT to be taken into account.
+ * </li>
+ * <li>
  * REPROJECTION_APPROX_ERROR_IN_SRC_SRS_UNIT=err_threshold_in_src_SRS_units.
  * (GDAL &gt;= 2.2) Use an approximate transformer for the coordinate
  * reprojection. Must be used together with
- * REPROJECTION_APPROX_ERROR_IN_DST_SRS_UNIT to be taken into account. <li>
+ * REPROJECTION_APPROX_ERROR_IN_DST_SRS_UNIT to be taken into account.
+ * </li>
+ * <li>
  * REPROJECTION_APPROX_ERROR_IN_DST_SRS_UNIT=err_threshold_in_dst_SRS_units.
  * (GDAL &gt;= 2.2) Use an approximate transformer for the coordinate
  * reprojection. Must be used together with
- * REPROJECTION_APPROX_ERROR_IN_SRC_SRS_UNIT to be taken into account. <li>
+ * REPROJECTION_APPROX_ERROR_IN_SRC_SRS_UNIT to be taken into account.
+ * </li>
+ * <li>
  * AREA_OF_INTEREST=west_lon_deg,south_lat_deg,east_lon_deg,north_lat_deg. (GDAL
  * &gt;= 3.0) Area of interest, used to compute the best coordinate operation
  * between the source and target SRS. If not specified, the bounding box of the
  * source raster will be used.
+ * </li>
  * <li> GEOLOC_BACKMAP_OVERSAMPLE_FACTOR=[0.1,2]. (GDAL &gt;= 3.5) Oversample
  * factor used to derive the size of the "backmap" used for geolocation array
- * transformers. Default value is 1.3. <li> GEOLOC_USE_TEMP_DATASETS=YES/NO.
+ * transformers. Default value is 1.3.
+ * </li>
+ * <li> GEOLOC_USE_TEMP_DATASETS=YES/NO.
  * (GDAL &gt;= 3.5) Whether temporary GeoTIFF datasets should be used to store
  * the backmap. The default is NO, that is to use in-memory arrays, unless the
- * number of pixels of the geolocation array is greater than 16 megapixels. <li>
+ * number of pixels of the geolocation array is greater than 16 megapixels.
+ * </li>
+ * <li>
  * GEOLOC_ARRAY/SRC_GEOLOC_ARRAY=filename. (GDAL &gt;= 3.5.2) Name of a GDAL
  * dataset containing a geolocation array and associated metadata. This is an
  * alternative to having geolocation information described in the GEOLOCATION
@@ -1724,12 +1878,14 @@ bool GDALComputeAreaOfInterest(OGRSpatialReference *poSRS, double dfX1,
  * TOP_LEFT_CORNER is assigned as a default.
  * If GEOLOC_ARRAY is set SRC_METHOD
  * defaults to GEOLOC_ARRAY.
+ * </li>
  * <li>DST_GEOLOC_ARRAY=filename. (GDAL &gt;= 3.5.2) Name of a
  * GDAL dataset that contains at least 2 bands with the X and Y geolocation
  * bands. This is an alternative to having geolocation information described in
  * the GEOLOCATION metadata domain of the destination dataset. See
  * SRC_GEOLOC_ARRAY description for details, assumptions, and defaults. If this
  * option is set, DST_METHOD=GEOLOC_ARRAY will be assumed if not set.
+ * </li>
  * </ul>
  *
  * The use case for the *_APPROX_ERROR_* options is when defining an approximate
@@ -1752,6 +1908,7 @@ bool GDALComputeAreaOfInterest(OGRSpatialReference *poSRS, double dfX1,
  * @return handle suitable for use GDALGenImgProjTransform(), and to be
  * deallocated with GDALDestroyGenImgProjTransformer() or NULL on failure.
  */
+/* clang-format on */
 
 void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
                                        char **papszOptions)
@@ -1885,17 +2042,31 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
              (pszMethod == nullptr || EQUAL(pszMethod, "GCP_POLYNOMIAL")) &&
              GDALGetGCPCount(hSrcDS) > 0 && nOrder >= 0)
     {
+        if (pszSrcSRS == nullptr)
+        {
+            auto hSRS = GDALGetGCPSpatialRef(hSrcDS);
+            if (hSRS)
+                oSrcSRS = *(OGRSpatialReference::FromHandle(hSRS));
+        }
+
+        const auto nGCPCount = GDALGetGCPCount(hSrcDS);
+        auto pasGCPList = GDALDuplicateGCPs(nGCPCount, GDALGetGCPs(hSrcDS));
+        GDALGCPAntimeridianUnwrap(nGCPCount, pasGCPList, oSrcSRS, papszOptions);
+
         if (bRefine)
         {
             psInfo->pSrcTransformArg = GDALCreateGCPRefineTransformer(
-                GDALGetGCPCount(hSrcDS), GDALGetGCPs(hSrcDS), nOrder, FALSE,
-                dfTolerance, nMinimumGcps);
+                nGCPCount, pasGCPList, nOrder, FALSE, dfTolerance,
+                nMinimumGcps);
         }
         else
         {
-            psInfo->pSrcTransformArg = GDALCreateGCPTransformer(
-                GDALGetGCPCount(hSrcDS), GDALGetGCPs(hSrcDS), nOrder, FALSE);
+            psInfo->pSrcTransformArg =
+                GDALCreateGCPTransformer(nGCPCount, pasGCPList, nOrder, FALSE);
         }
+
+        GDALDeinitGCPs(nGCPCount, pasGCPList);
+        CPLFree(pasGCPList);
 
         if (psInfo->pSrcTransformArg == nullptr)
         {
@@ -1903,33 +2074,34 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
             return nullptr;
         }
         psInfo->pSrcTransformer = GDALGCPTransform;
+    }
 
+    else if (bGCPUseOK && GDALGetGCPCount(hSrcDS) > 0 && nOrder <= 0 &&
+             (pszMethod == nullptr || EQUAL(pszMethod, "GCP_TPS")))
+    {
         if (pszSrcSRS == nullptr)
         {
             auto hSRS = GDALGetGCPSpatialRef(hSrcDS);
             if (hSRS)
                 oSrcSRS = *(OGRSpatialReference::FromHandle(hSRS));
         }
-    }
 
-    else if (bGCPUseOK && GDALGetGCPCount(hSrcDS) > 0 && nOrder <= 0 &&
-             (pszMethod == nullptr || EQUAL(pszMethod, "GCP_TPS")))
-    {
+        const auto nGCPCount = GDALGetGCPCount(hSrcDS);
+        auto pasGCPList = GDALDuplicateGCPs(nGCPCount, GDALGetGCPs(hSrcDS));
+        GDALGCPAntimeridianUnwrap(nGCPCount, pasGCPList, oSrcSRS, papszOptions);
+
         psInfo->pSrcTransformArg = GDALCreateTPSTransformerInt(
-            GDALGetGCPCount(hSrcDS), GDALGetGCPs(hSrcDS), FALSE, papszOptions);
+            nGCPCount, pasGCPList, FALSE, papszOptions);
+
+        GDALDeinitGCPs(nGCPCount, pasGCPList);
+        CPLFree(pasGCPList);
+
         if (psInfo->pSrcTransformArg == nullptr)
         {
             GDALDestroyGenImgProjTransformer(psInfo);
             return nullptr;
         }
         psInfo->pSrcTransformer = GDALTPSTransform;
-
-        if (pszSrcSRS == nullptr)
-        {
-            auto hSRS = GDALGetGCPSpatialRef(hSrcDS);
-            if (hSRS)
-                oSrcSRS = *(OGRSpatialReference::FromHandle(hSRS));
-        }
     }
 
     else if ((pszMethod == nullptr || EQUAL(pszMethod, "RPC")) &&
@@ -2092,17 +2264,31 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
               EQUAL(pszDstMethod, "GCP_POLYNOMIAL")) &&
              GDALGetGCPCount(hDstDS) > 0 && nOrder >= 0)
     {
+        if (pszDstSRS == nullptr)
+        {
+            auto hSRS = GDALGetGCPSpatialRef(hDstDS);
+            if (hSRS)
+                oDstSRS = *(OGRSpatialReference::FromHandle(hSRS));
+        }
+
+        const auto nGCPCount = GDALGetGCPCount(hDstDS);
+        auto pasGCPList = GDALDuplicateGCPs(nGCPCount, GDALGetGCPs(hDstDS));
+        GDALGCPAntimeridianUnwrap(nGCPCount, pasGCPList, oDstSRS, papszOptions);
+
         if (bRefine)
         {
             psInfo->pDstTransformArg = GDALCreateGCPRefineTransformer(
-                GDALGetGCPCount(hDstDS), GDALGetGCPs(hDstDS), nOrder, FALSE,
-                dfTolerance, nMinimumGcps);
+                nGCPCount, pasGCPList, nOrder, FALSE, dfTolerance,
+                nMinimumGcps);
         }
         else
         {
-            psInfo->pDstTransformArg = GDALCreateGCPTransformer(
-                GDALGetGCPCount(hDstDS), GDALGetGCPs(hDstDS), nOrder, FALSE);
+            psInfo->pDstTransformArg =
+                GDALCreateGCPTransformer(nGCPCount, pasGCPList, nOrder, FALSE);
         }
+
+        GDALDeinitGCPs(nGCPCount, pasGCPList);
+        CPLFree(pasGCPList);
 
         if (psInfo->pDstTransformArg == nullptr)
         {
@@ -2110,32 +2296,33 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
             return nullptr;
         }
         psInfo->pDstTransformer = GDALGCPTransform;
-
+    }
+    else if (bGCPUseOK && GDALGetGCPCount(hDstDS) > 0 && nOrder <= 0 &&
+             (pszDstMethod == nullptr || EQUAL(pszDstMethod, "GCP_TPS")))
+    {
         if (pszDstSRS == nullptr)
         {
             auto hSRS = GDALGetGCPSpatialRef(hDstDS);
             if (hSRS)
                 oDstSRS = *(OGRSpatialReference::FromHandle(hSRS));
         }
-    }
-    else if (bGCPUseOK && GDALGetGCPCount(hDstDS) > 0 && nOrder <= 0 &&
-             (pszDstMethod == nullptr || EQUAL(pszDstMethod, "GCP_TPS")))
-    {
+
+        const auto nGCPCount = GDALGetGCPCount(hDstDS);
+        auto pasGCPList = GDALDuplicateGCPs(nGCPCount, GDALGetGCPs(hDstDS));
+        GDALGCPAntimeridianUnwrap(nGCPCount, pasGCPList, oDstSRS, papszOptions);
+
         psInfo->pDstTransformArg = GDALCreateTPSTransformerInt(
-            GDALGetGCPCount(hDstDS), GDALGetGCPs(hDstDS), FALSE, papszOptions);
+            nGCPCount, pasGCPList, FALSE, papszOptions);
+
+        GDALDeinitGCPs(nGCPCount, pasGCPList);
+        CPLFree(pasGCPList);
+
         if (psInfo->pDstTransformArg == nullptr)
         {
             GDALDestroyGenImgProjTransformer(psInfo);
             return nullptr;
         }
         psInfo->pDstTransformer = GDALTPSTransform;
-
-        if (pszDstSRS == nullptr)
-        {
-            auto hSRS = GDALGetGCPSpatialRef(hDstDS);
-            if (hSRS)
-                oDstSRS = *(OGRSpatialReference::FromHandle(hSRS));
-        }
     }
     else if ((pszDstMethod == nullptr || EQUAL(pszDstMethod, "RPC")) &&
              (papszMD = GDALGetMetadata(hDstDS, "RPC")) != nullptr &&
@@ -2259,8 +2446,12 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
     const bool bMayInsertCenterLong =
         (bCanUseSrcGeoTransform && !oSrcSRS.IsEmpty() && hSrcDS &&
          CPLFetchBool(papszOptions, "INSERT_CENTER_LONG", true));
+    const char *pszSrcCoordEpoch =
+        CSLFetchNameValue(papszOptions, "SRC_COORDINATE_EPOCH");
+    const char *pszDstCoordEpoch =
+        CSLFetchNameValue(papszOptions, "DST_COORDINATE_EPOCH");
     if ((!oSrcSRS.IsEmpty() && !oDstSRS.IsEmpty() &&
-         (!oSrcSRS.IsSame(&oDstSRS) ||
+         (pszSrcCoordEpoch || pszDstCoordEpoch || !oSrcSRS.IsSame(&oDstSRS) ||
           (oSrcSRS.IsGeographic() && bMayInsertCenterLong))) ||
         pszCO)
     {
@@ -2298,16 +2489,12 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
             aosOptions.SetNameValue("COORDINATE_EPOCH", pszCoordEpoch);
         }
 
-        const char *pszSrcCoordEpoch =
-            CSLFetchNameValue(papszOptions, "SRC_COORDINATE_EPOCH");
         if (pszSrcCoordEpoch)
         {
             aosOptions.SetNameValue("SRC_COORDINATE_EPOCH", pszSrcCoordEpoch);
             oSrcSRS.SetCoordinateEpoch(CPLAtof(pszSrcCoordEpoch));
         }
 
-        const char *pszDstCoordEpoch =
-            CSLFetchNameValue(papszOptions, "DST_COORDINATE_EPOCH");
         if (pszDstCoordEpoch)
         {
             aosOptions.SetNameValue("DST_COORDINATE_EPOCH", pszDstCoordEpoch);
@@ -2320,6 +2507,11 @@ void *GDALCreateGenImgProjTransformer2(GDALDatasetH hSrcDS, GDALDatasetH hDstDS,
             !oDstSRS.IsEmpty() ? OGRSpatialReference::ToHandle(&oDstSRS)
                                : nullptr,
             aosOptions.List());
+
+        if (pszCO)
+        {
+            psInfo->bHasCustomTransformationPipeline = true;
+        }
 
         if (psInfo->pReprojectArg == nullptr)
         {
@@ -3372,14 +3564,40 @@ static CPLXMLNode *GDALSerializeReprojectionTransformer(void *pTransformArg)
     /* -------------------------------------------------------------------- */
     /*      Handle SourceCS.                                                */
     /* -------------------------------------------------------------------- */
-    char *pszWKT = nullptr;
+    const auto ExportToWkt = [](const OGRSpatialReference *poSRS)
+    {
+        // Try first in WKT1 for backward compat
+        {
+            char *pszWKT = nullptr;
+            const char *const apszOptions[] = {"FORMAT=WKT1", nullptr};
+            CPLErrorHandlerPusher oHandler(CPLQuietErrorHandler);
+            CPLErrorStateBackuper oBackuper;
+            if (poSRS->exportToWkt(&pszWKT, apszOptions) == OGRERR_NONE)
+            {
+                std::string osRet(pszWKT);
+                CPLFree(pszWKT);
+                return osRet;
+            }
+            CPLFree(pszWKT);
+        }
+
+        char *pszWKT = nullptr;
+        const char *const apszOptions[] = {"FORMAT=WKT2_2019", nullptr};
+        if (poSRS->exportToWkt(&pszWKT, apszOptions) == OGRERR_NONE)
+        {
+            std::string osRet(pszWKT);
+            CPLFree(pszWKT);
+            return osRet;
+        }
+        CPLFree(pszWKT);
+        return std::string();
+    };
 
     auto poSRS = psInfo->poForwardTransform->GetSourceCS();
     if (poSRS)
     {
-        poSRS->exportToWkt(&pszWKT);
-        CPLCreateXMLElementAndValue(psTree, "SourceSRS", pszWKT);
-        CPLFree(pszWKT);
+        const auto osWKT = ExportToWkt(poSRS);
+        CPLCreateXMLElementAndValue(psTree, "SourceSRS", osWKT.c_str());
     }
 
     /* -------------------------------------------------------------------- */
@@ -3388,9 +3606,8 @@ static CPLXMLNode *GDALSerializeReprojectionTransformer(void *pTransformArg)
     poSRS = psInfo->poForwardTransform->GetTargetCS();
     if (poSRS)
     {
-        poSRS->exportToWkt(&pszWKT);
-        CPLCreateXMLElementAndValue(psTree, "TargetSRS", pszWKT);
-        CPLFree(pszWKT);
+        const auto osWKT = ExportToWkt(poSRS);
+        CPLCreateXMLElementAndValue(psTree, "TargetSRS", osWKT.c_str());
     }
 
     /* -------------------------------------------------------------------- */
@@ -3584,22 +3801,21 @@ static CPLXMLNode *GDALSerializeApproxTransformer(void *pTransformArg)
  * precision.
  *
  * The approximation is actually done at the point where GDALApproxTransform()
- * calls are made, and depend on the assumption that the roughly linear.  The
- * first and last point passed in must be the extreme values and the
+ * calls are made, and depend on the assumption that they are roughly linear.
+ * The first and last point passed in must be the extreme values and the
  * intermediate values should describe a curve between the end points.  The
- * approximator transforms and center using the approximate transformer, and
+ * approximator transforms and centers using the approximate transformer, and
  * then compares the true middle transformed value to a linear approximation
- * based on the end points.  If the error is within the supplied threshold
- * then the end points are used to linearly approximate all the values
- * otherwise the inputs points are split into two smaller sets, and the
- * function recursively called till a sufficiently small set of points if found
- * that the linear approximation is OK, or that all the points are exactly
- * computed.
+ * based on the end points.  If the error is within the supplied threshold then
+ * the end points are used to linearly approximate all the values otherwise the
+ * input points are split into two smaller sets, and the function is recursively
+ * called until a sufficiently small set of points is found that the linear
+ * approximation is OK, or that all the points are exactly computed.
  *
  * This function is very suitable for approximating transformation results
  * from output pixel/line space to input coordinates for warpers that operate
  * on one input scanline at a time.  Care should be taken using it in other
- * circumstances as little internal validation is done, in order to keep things
+ * circumstances as little internal validation is done in order to keep things
  * fast.
  *
  * @param pfnBaseTransformer the high precision transformer which should be
@@ -3637,7 +3853,7 @@ GDALCreateApproxTransformer2(GDALTransformerFunc pfnBaseTransformer,
 
     memcpy(psATInfo->sTI.abySignature, GDAL_GTI2_SIGNATURE,
            strlen(GDAL_GTI2_SIGNATURE));
-    psATInfo->sTI.pszClassName = "GDALApproxTransformer";
+    psATInfo->sTI.pszClassName = GDAL_APPROX_TRANSFORMER_CLASS_NAME;
     psATInfo->sTI.pfnTransform = GDALApproxTransform;
     psATInfo->sTI.pfnCleanup = GDALDestroyApproxTransformer;
     psATInfo->sTI.pfnSerialize = GDALSerializeApproxTransformer;
@@ -3695,7 +3911,8 @@ void GDALRefreshApproxTransformer(void *hTransformArg)
     ApproxTransformInfo *psInfo =
         static_cast<ApproxTransformInfo *>(hTransformArg);
 
-    if (psInfo->pfnBaseTransformer == GDALGenImgProjTransform)
+    if (GDALIsTransformer(psInfo->pBaseCBData,
+                          GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME))
     {
         GDALRefreshGenImgProjTransformer(psInfo->pBaseCBData);
     }
@@ -4092,7 +4309,8 @@ int GDALTransformLonLatToDestApproxTransformer(void *hTransformArg,
     ApproxTransformInfo *psInfo =
         static_cast<ApproxTransformInfo *>(hTransformArg);
 
-    if (psInfo->pfnBaseTransformer == GDALGenImgProjTransform)
+    if (GDALIsTransformer(psInfo->pBaseCBData,
+                          GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME))
     {
         return GDALTransformLonLatToDestGenImgProjTransformer(
             psInfo->pBaseCBData, pdfX, pdfY);
@@ -4125,9 +4343,9 @@ int GDALTransformLonLatToDestApproxTransformer(void *hTransformArg,
  * location is placed.
  */
 
-void CPL_STDCALL GDALApplyGeoTransform(double *padfGeoTransform, double dfPixel,
-                                       double dfLine, double *pdfGeoX,
-                                       double *pdfGeoY)
+void CPL_STDCALL GDALApplyGeoTransform(const double *padfGeoTransform,
+                                       double dfPixel, double dfLine,
+                                       double *pdfGeoX, double *pdfGeoY)
 {
     *pdfGeoX = padfGeoTransform[0] + dfPixel * padfGeoTransform[1] +
                dfLine * padfGeoTransform[2];
@@ -4151,7 +4369,7 @@ void CPL_STDCALL GDALApplyGeoTransform(double *padfGeoTransform, double dfPixel,
  * @return TRUE on success or FALSE if the equation is uninvertable.
  */
 
-int CPL_STDCALL GDALInvGeoTransform(double *gt_in, double *gt_out)
+int CPL_STDCALL GDALInvGeoTransform(const double *gt_in, double *gt_out)
 
 {
     // Special case - no rotation - to avoid computing determinate
@@ -4530,7 +4748,7 @@ static GDALTransformerInfo *GetGenImgProjTransformInfo(const char *pszFunc,
         return nullptr;
     }
 
-    if (EQUAL(psInfo->pszClassName, "GDALApproxTransformer"))
+    if (EQUAL(psInfo->pszClassName, GDAL_APPROX_TRANSFORMER_CLASS_NAME))
     {
         ApproxTransformInfo *psATInfo =
             static_cast<ApproxTransformInfo *>(pTransformArg);
@@ -4548,7 +4766,7 @@ static GDALTransformerInfo *GetGenImgProjTransformInfo(const char *pszFunc,
         }
     }
 
-    if (EQUAL(psInfo->pszClassName, "GDALGenImgProjTransformer"))
+    if (EQUAL(psInfo->pszClassName, GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME))
     {
         return psInfo;
     }
@@ -4625,17 +4843,16 @@ void GDALGetTransformerDstGeoTransform(void *pTransformArg,
 /*            GDALTransformIsTranslationOnPixelBoundaries()             */
 /************************************************************************/
 
-bool GDALTransformIsTranslationOnPixelBoundaries(
-    GDALTransformerFunc pfnTransformer, void *pTransformerArg)
+bool GDALTransformIsTranslationOnPixelBoundaries(GDALTransformerFunc,
+                                                 void *pTransformerArg)
 {
-    if (pfnTransformer == GDALApproxTransform)
+    if (GDALIsTransformer(pTransformerArg, GDAL_APPROX_TRANSFORMER_CLASS_NAME))
     {
         const auto *pApproxInfo =
             static_cast<const ApproxTransformInfo *>(pTransformerArg);
-        pfnTransformer = pApproxInfo->pfnBaseTransformer;
         pTransformerArg = pApproxInfo->pBaseCBData;
     }
-    if (pfnTransformer == GDALGenImgProjTransform)
+    if (GDALIsTransformer(pTransformerArg, GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME))
     {
         const auto *pGenImgpProjInfo =
             static_cast<GDALGenImgProjTransformInfo *>(pTransformerArg);
@@ -4674,17 +4891,15 @@ bool GDALTransformIsTranslationOnPixelBoundaries(
 /*                   GDALTransformIsAffineNoRotation()                  */
 /************************************************************************/
 
-bool GDALTransformIsAffineNoRotation(GDALTransformerFunc pfnTransformer,
-                                     void *pTransformerArg)
+bool GDALTransformIsAffineNoRotation(GDALTransformerFunc, void *pTransformerArg)
 {
-    if (pfnTransformer == GDALApproxTransform)
+    if (GDALIsTransformer(pTransformerArg, GDAL_APPROX_TRANSFORMER_CLASS_NAME))
     {
         const auto *pApproxInfo =
             static_cast<const ApproxTransformInfo *>(pTransformerArg);
-        pfnTransformer = pApproxInfo->pfnBaseTransformer;
         pTransformerArg = pApproxInfo->pBaseCBData;
     }
-    if (pfnTransformer == GDALGenImgProjTransform)
+    if (GDALIsTransformer(pTransformerArg, GDAL_GEN_IMG_TRANSFORMER_CLASS_NAME))
     {
         const auto *pGenImgpProjInfo =
             static_cast<GDALGenImgProjTransformInfo *>(pTransformerArg);

@@ -132,7 +132,7 @@ bool OGRHasZandSupported(OGRwkbGeometryType type)
 
 }  // namespace nccfdriver
 
-CPLErr netCDFDataset::DetectAndFillSGLayers(int ncid)
+bool netCDFDataset::DetectAndFillSGLayers(int ncid)
 {
     // Discover simple geometry variables
     int var_count;
@@ -160,7 +160,7 @@ CPLErr netCDFDataset::DetectAndFillSGLayers(int ncid)
         }
     }
 
-    return CE_None;
+    return !vidList.empty();
 }
 
 CPLErr netCDFDataset::LoadSGVarIntoLayer(int ncid, int nc_basevarId)
@@ -177,7 +177,7 @@ CPLErr netCDFDataset::LoadSGVarIntoLayer(int ncid, int nc_basevarId)
     if (sg->getGridMappingVarID() != nccfdriver::INVALID_VAR_ID)
         SetProjectionFromVar(ncid, nc_basevarId, true,
                              sg->getGridMappingName().c_str(), &return_gm,
-                             sg.get());
+                             sg.get(), /*paosRemovedMDItems=*/nullptr);
 
     // Geometry Type invalid, avoid further processing
     if (owgt == wkbNone)
@@ -232,7 +232,7 @@ CPLErr netCDFDataset::LoadSGVarIntoLayer(int ncid, int nc_basevarId)
 
 /* Creates and fills any needed variables that haven't already been created
  */
-void netCDFDataset::SGCommitPendingTransaction()
+bool netCDFDataset::SGCommitPendingTransaction()
 {
     try
     {
@@ -348,7 +348,9 @@ void netCDFDataset::SGCommitPendingTransaction()
                  "An error occurred while writing the target netCDF File. "
                  "Translation will be terminated.\n%s",
                  sge.get_err_msg());
+        return false;
     }
+    return true;
 }
 
 void netCDFDataset::SGLogPendingTransaction()

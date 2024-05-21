@@ -105,11 +105,10 @@ def test_hdf4_more_than_32_files():
     ):
         pytest.skip("HDF4_HAS_MAXOPENFILES not set")
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "https://gamma.hdfgroup.org/ftp/pub/outgoing/NASAHDFfiles2/eosweb/hdf4/hdfeos2-swath-wo-dimmaps/AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
         "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
-    ):
-        pytest.skip()
+    )
 
     tab = []
     for i in range(33):
@@ -131,11 +130,10 @@ def test_hdf4_read_online_1():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/A2004259075000.L2_LAC_SST.hdf",
         "A2004259075000.L2_LAC_SST.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -145,7 +143,7 @@ def test_hdf4_read_online_1():
         filename_absolute=1,
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -157,11 +155,10 @@ def test_hdf4_read_online_2():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/A2006005182000.L2_LAC_SST.x.hdf",
         "A2006005182000.L2_LAC_SST.x.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -192,11 +189,10 @@ def test_hdf4_read_online_3():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/MO36MW14.chlor_MODIS.ADD2001089.004.2002186190207.hdf",
         "MO36MW14.chlor_MODIS.ADD2001089.004.2002186190207.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -231,11 +227,10 @@ def test_hdf4_read_online_4():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/S2002196124536.L1A_HDUN.BartonBendish.extract.hdf",
         "S2002196124536.L1A_HDUN.BartonBendish.extract.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -263,11 +258,10 @@ def test_hdf4_read_online_5():
         pytest.skip()
 
     # 13 MB
-    if not gdaltest.download_file(
-        "ftp://data.nodc.noaa.gov/pub/data.nodc/pathfinder/Version5.0/Monthly/1991/199101.s04m1pfv50-sst-16b.hdf",
+    gdaltest.download_or_skip(
+        "https://www.ncei.noaa.gov/data/oceans/pathfinder/Version5.0/Monthly/1991/199101.s04m1pfv50-sst-16b.hdf",
         "199101.s04m1pfv50-sst-16b.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -290,11 +284,10 @@ def test_hdf4_read_online_6():
         pytest.skip()
 
     # 1 MB
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/MOD09Q1G_EVI.A2006233.h07v03.005.2008338190308.hdf",
         "MOD09Q1G_EVI.A2006233.h07v03.005.2008338190308.hdf",
-    ):
-        pytest.skip()
+    )
 
     # Test with quoting of components
     tst = gdaltest.GDALTest(
@@ -331,11 +324,10 @@ def test_hdf4_read_online_7():
         pytest.skip()
 
     # 4 MB
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/MOD09A1.A2010041.h06v03.005.2010051001103.hdf",
         "MOD09A1.A2010041.h06v03.005.2010051001103.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -372,11 +364,10 @@ def test_hdf4_read_online_8():
         pytest.skip()
 
     # 5 MB
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "https://e4ftl01.cr.usgs.gov/MOLT/MOD13Q1.006/2006.06.10/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf",
         "MOD13Q1.A2006161.h34v09.006.2015161173716.hdf",
-    ):
-        pytest.skip()
+    )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
@@ -413,17 +404,15 @@ def test_hdf4_read_online_9():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "ftp://ftp.maps.canada.ca/pub/nrcan_rncan/archive/image/landsat_7/geobase_hdf/L71002025_02520010722/L71002025_02520010722_MTL.L1G",
         "L71002025_02520010722_MTL.L1G",
-    ):
-        pytest.skip()
+    )
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "ftp://ftp.maps.canada.ca/pub/nrcan_rncan/archive/image/landsat_7/geobase_hdf/L71002025_02520010722/L71002025_02520010722_HDF.L1G",
         "L71002025_02520010722_HDF.L1G",
-    ):
-        pytest.skip()
+    )
 
     f = open("tmp/cache/L71002025_02520010722_B10.L1G", "wb")
     f.close()
@@ -444,11 +433,10 @@ def test_hdf4_read_online_10():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://trac.osgeo.org/gdal/raw-attachment/ticket/4672/MOD16A2.A2000M01.h14v02.105.2010357183410.hdf",
         "MOD16A2.A2000M01.h14v02.105.2010357183410.hdf",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.Open(
         'HDF4_EOS:EOS_GRID:"tmp/cache/MOD16A2.A2000M01.h14v02.105.2010357183410.hdf":MOD_Grid_MOD16A2:ET_1km'
@@ -473,11 +461,10 @@ def test_hdf4_read_online_11():
     if gdaltest.hdf4_drv is None:
         pytest.skip()
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "https://gamma.hdfgroup.org/ftp/pub/outgoing/NASAHDFfiles2/eosweb/hdf4/hdfeos2-swath-wo-dimmaps/AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
         "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.Open(
         'HDF4_EOS:EOS_SWATH:"tmp/cache/AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Ocean_products_quality_flag'
@@ -494,3 +481,90 @@ def test_hdf4_read_online_11():
         open_options=["LIST_SDS=YES"],
     )
     assert len(ds.GetSubDatasets()) == 16
+
+
+###############################################################################
+# Test gdal subdataset informational functions
+
+
+@pytest.mark.parametrize(
+    "filename,path_component",
+    (
+        (
+            'HDF4_EOS:EOS_SWATH:"AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+            "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r'HDF4_EOS:EOS_SWATH:"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+            r"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            "HDF4_EOS:EOS_SWATH:AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+            "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r"HDF4_EOS:EOS_SWATH:C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+            r"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r"HDF4_EOS:EOS_SWATH:C:/AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+            r"C:/AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r'HDF4_EOS:EOS_SWATH:"/vsicurl/http://www.my.com/OMI-Aura_L2-OMTO3_2005m0113t0224-o02648_v002-2005m0625t035355.he5":Swath1:Low_res_sst',
+            r"/vsicurl/http://www.my.com/OMI-Aura_L2-OMTO3_2005m0113t0224-o02648_v002-2005m0625t035355.he5",
+        ),
+        (
+            r"HDF4_EOS:EOS_SWATH:a:Swath1:Low_res_sst",
+            r"a",
+        ),
+        ("", ""),
+    ),
+)
+def test_gdal_subdataset_get_filename(filename, path_component):
+
+    info = gdal.GetSubdatasetInfo(filename)
+    if filename == "":
+        assert info is None
+    else:
+        assert info.GetPathComponent() == path_component
+        assert info.GetSubdatasetComponent() == "Swath1:Low_res_sst"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    (
+        'HDF4_EOS:EOS_SWATH:"AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+        r'HDF4_EOS:EOS_SWATH:"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+        "HDF4_EOS:EOS_SWATH:AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+        r"HDF4_EOS:EOS_SWATH:C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+        "",
+    ),
+)
+def test_gdal_subdataset_modify_filename(filename):
+
+    info = gdal.GetSubdatasetInfo(filename)
+    if filename == "":
+        assert info is None
+    else:
+        assert (
+            info.ModifyPathComponent('"/path/to.hdf"')
+            == 'HDF4_EOS:EOS_SWATH:"/path/to.hdf":Swath1:Low_res_sst'
+        )
+
+
+@pytest.mark.parametrize(
+    "bogus",
+    (
+        "HDF4_EOS:a:c",
+        "HDF4_EOS:a",
+        "HDF4_EOS:",
+        "HDF4_EOS:EOS_SWATH:a:c",
+        "HDF4_EOS:EOS_SWATH:a",
+        "HDF4_EOS:EOS_SWATH",
+    ),
+)
+def test_gdal_subdataset_bogus(bogus):
+    """Test it doesn't crash"""
+
+    gdal.GetSubdatasetInfo(bogus)

@@ -55,6 +55,20 @@ the most out of it.
       to providing to its clients the best of its expertise around Open Source
       geospatial software - such as GDAL/OGR, PROJ, MapServer, and QGIS - and Open standards.
 
+.. container:: service-provider
+
+  |logo_hobu|
+
+  .. container:: service-provider-description
+
+      `Hobu, Inc.`_ (United States) is a `sam.gov
+      <https://sam.gov>`__-registered company founded by Howard Butler with
+      more than twenty years experience supporting the creation, enhancement,
+      and management of geospatial open source geospatial software such as
+      `PDAL <https://pdal.io>`__, GDAL/OGR, PROJ, and open standards such as
+      `GeoJSON <https://datatracker.ietf.org/doc/html/rfc7946>`__, `PROJJSON
+      <https://proj.org/en/latest/specifications/projjson.html>`__, and `Cloud
+      Optimized Point Cloud <https://copc.io/>`__.
 
 Contributors
 ------------
@@ -83,6 +97,13 @@ and related Open Source technologies.
 
       `Faunalia`_ (Italy) is a company that operates since more than 15 years in the field of Geographic Information Systems (GIS) based on free and open source software (chiefly QGIS, PostGIS, and more). Our main customers are public administrations, private companies, associations. Faunalia has its main branch in Italy, and operates worldwide. Faunalia provides training services on GDAL.
 
+.. container:: service-provider
+
+  |logo_kartoza|
+
+  .. container:: service-provider-description
+
+      `Kartoza`_ (South Africa) is a South Africa-based Free and Open Source GIS (FOSSGIS) service provider. We use GIS software to solve complex location-related problems for individuals, businesses and governments around the world. Kartoza provides training services on GDAL.
 
 .. container:: service-provider
 
@@ -163,8 +184,21 @@ The steps to add a company to the service providers list are outlined in the :re
    :width: 100 px
    :target: `Faunalia`_
 
+.. _`Kartoza`: https://kartoza.erpnext.com/
+.. |logo_kartoza| image:: ../../images/logo-kartoza.png
+   :class: img-logos
+   :width: 100 px
+   :target: `Kartoza`_
+
 .. _`mundialis`: https://www.mundialis.de/
 .. |logo_mundialis| image:: ../../images/logo-mundialis.png
    :class: img-logos
    :width: 100 px
    :target: `mundialis`_
+
+
+.. _`Hobu, Inc.`: https://hobu.co/
+.. |logo_hobu| image:: ../../images/logo-hobu.png
+   :class: img-logos
+   :width: 100 px
+   :target: `Hobu, Inc.`_

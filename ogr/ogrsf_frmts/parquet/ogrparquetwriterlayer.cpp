@@ -33,26 +33,262 @@
 
 #include "../arrow_common/ograrrowwriterlayer.hpp"
 
+#include "ogr_wkb.h"
+
+#include <utility>
+
 /************************************************************************/
 /*                      OGRParquetWriterLayer()                         */
 /************************************************************************/
 
 OGRParquetWriterLayer::OGRParquetWriterLayer(
-    arrow::MemoryPool *poMemoryPool,
+    OGRParquetWriterDataset *poDataset, arrow::MemoryPool *poMemoryPool,
     const std::shared_ptr<arrow::io::OutputStream> &poOutputStream,
     const char *pszLayerName)
-    : OGRArrowWriterLayer(poMemoryPool, poOutputStream, pszLayerName)
+    : OGRArrowWriterLayer(poMemoryPool, poOutputStream, pszLayerName),
+      m_poDataset(poDataset)
 {
+    m_bWriteFieldArrowExtensionName = CPLTestBool(
+        CPLGetConfigOption("OGR_PARQUET_WRITE_ARROW_EXTENSION_NAME", "NO"));
 }
 
 /************************************************************************/
-/*                     ~OGRParquetWriterLayer()                         */
+/*                                Close()                               */
 /************************************************************************/
 
-OGRParquetWriterLayer::~OGRParquetWriterLayer()
+bool OGRParquetWriterLayer::Close()
 {
+    if (m_poTmpGPKGLayer)
+    {
+        if (!CopyTmpGpkgLayerToFinalFile())
+            return false;
+    }
+
     if (m_bInitializationOK)
-        FinalizeWriting();
+    {
+        if (!FinalizeWriting())
+            return false;
+    }
+
+    return true;
+}
+
+/************************************************************************/
+/*                     CopyTmpGpkgLayerToFinalFile()                    */
+/************************************************************************/
+
+bool OGRParquetWriterLayer::CopyTmpGpkgLayerToFinalFile()
+{
+    if (!m_poTmpGPKGLayer)
+    {
+        return true;
+    }
+
+    CPLDebug("PARQUET", "CopyTmpGpkgLayerToFinalFile(): start...");
+
+    VSIUnlink(m_poTmpGPKG->GetDescription());
+
+    OGRFeature oFeat(m_poFeatureDefn);
+
+    // Interval in terms of features between 2 debug progress report messages
+    constexpr int PROGRESS_FC_INTERVAL = 100 * 1000;
+
+    // First, write features without geometries
+    {
+        auto poTmpLayer = std::unique_ptr<OGRLayer>(m_poTmpGPKG->ExecuteSQL(
+            "SELECT serialized_feature FROM tmp WHERE fid NOT IN (SELECT id "
+            "FROM rtree_tmp_geom)",
+            nullptr, nullptr));
+        if (!poTmpLayer)
+            return false;
+        for (const auto &poSrcFeature : poTmpLayer.get())
+        {
+            int nBytesFeature = 0;
+            const GByte *pabyFeatureData =
+                poSrcFeature->GetFieldAsBinary(0, &nBytesFeature);
+            if (!oFeat.DeserializeFromBinary(pabyFeatureData, nBytesFeature))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Cannot deserialize feature");
+                return false;
+            }
+            if (OGRArrowWriterLayer::ICreateFeature(&oFeat) != OGRERR_NONE)
+            {
+                return false;
+            }
+
+            if ((m_nFeatureCount % PROGRESS_FC_INTERVAL) == 0)
+            {
+                CPLDebugProgress(
+                    "PARQUET",
+                    "CopyTmpGpkgLayerToFinalFile(): %.02f%% progress",
+                    100.0 * double(m_nFeatureCount) /
+                        double(m_nTmpFeatureCount));
+            }
+        }
+
+        if (!FlushFeatures())
+        {
+            return false;
+        }
+    }
+
+    // Now walk through the GPKG RTree for features with geometries
+    // Cf https://github.com/sqlite/sqlite/blob/master/ext/rtree/rtree.c
+    // for the description of the content of the rtree _node table
+    std::vector<std::pair<int64_t, int>> aNodeNoDepthPair;
+    int nTreeDepth = 0;
+    // Queue the root node
+    aNodeNoDepthPair.emplace_back(
+        std::make_pair(/* nodeNo = */ 1, /* depth = */ 0));
+    int nCountWrittenFeaturesSinceLastFlush = 0;
+    while (!aNodeNoDepthPair.empty())
+    {
+        const auto &oLastPair = aNodeNoDepthPair.back();
+        const int64_t nNodeNo = oLastPair.first;
+        const int nCurDepth = oLastPair.second;
+        //CPLDebug("PARQUET", "Reading nodeNode=%d, curDepth=%d", int(nNodeNo), nCurDepth);
+        aNodeNoDepthPair.pop_back();
+
+        auto poRTreeLayer = std::unique_ptr<OGRLayer>(m_poTmpGPKG->ExecuteSQL(
+            CPLSPrintf("SELECT data FROM rtree_tmp_geom_node WHERE nodeno "
+                       "= " CPL_FRMT_GIB,
+                       static_cast<GIntBig>(nNodeNo)),
+            nullptr, nullptr));
+        if (!poRTreeLayer)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot read node " CPL_FRMT_GIB,
+                     static_cast<GIntBig>(nNodeNo));
+            return false;
+        }
+        const auto poRTreeFeature =
+            std::unique_ptr<const OGRFeature>(poRTreeLayer->GetNextFeature());
+        if (!poRTreeFeature)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot read node " CPL_FRMT_GIB,
+                     static_cast<GIntBig>(nNodeNo));
+            return false;
+        }
+
+        int nNodeBytes = 0;
+        const GByte *pabyNodeData =
+            poRTreeFeature->GetFieldAsBinary(0, &nNodeBytes);
+        constexpr int BLOB_HEADER_SIZE = 4;
+        if (nNodeBytes < BLOB_HEADER_SIZE)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Not enough bytes when reading node " CPL_FRMT_GIB,
+                     static_cast<GIntBig>(nNodeNo));
+            return false;
+        }
+        if (nNodeNo == 1)
+        {
+            // Get the RTree depth from the root node
+            nTreeDepth = (pabyNodeData[0] << 8) | pabyNodeData[1];
+            //CPLDebug("PARQUET", "nTreeDepth = %d", nTreeDepth);
+        }
+
+        const int nCellCount = (pabyNodeData[2] << 8) | pabyNodeData[3];
+        constexpr int SIZEOF_CELL = 24;  // int64_t + 4 float
+        if (nNodeBytes < BLOB_HEADER_SIZE + SIZEOF_CELL * nCellCount)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Not enough bytes when reading node " CPL_FRMT_GIB,
+                     static_cast<GIntBig>(nNodeNo));
+            return false;
+        }
+
+        size_t nOffset = BLOB_HEADER_SIZE;
+        if (nCurDepth == nTreeDepth)
+        {
+            // Leaf node: it references feature IDs.
+
+            // If we are about to go above m_nRowGroupSize, flush past
+            // features now, to improve the spatial compacity of the row group.
+            if (m_nRowGroupSize > nCellCount &&
+                nCountWrittenFeaturesSinceLastFlush + nCellCount >
+                    m_nRowGroupSize)
+            {
+                nCountWrittenFeaturesSinceLastFlush = 0;
+                if (!FlushFeatures())
+                {
+                    return false;
+                }
+            }
+
+            // nCellCount shouldn't be over 51 normally, but even 65535
+            // would be fine...
+            // coverity[tainted_data]
+            for (int i = 0; i < nCellCount; ++i)
+            {
+                int64_t nFID;
+                memcpy(&nFID, pabyNodeData + nOffset, sizeof(int64_t));
+                CPL_MSBPTR64(&nFID);
+
+                const auto poSrcFeature = std::unique_ptr<const OGRFeature>(
+                    m_poTmpGPKGLayer->GetFeature(nFID));
+                if (!poSrcFeature)
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Cannot get feature " CPL_FRMT_GIB,
+                             static_cast<GIntBig>(nFID));
+                    return false;
+                }
+
+                int nBytesFeature = 0;
+                const GByte *pabyFeatureData =
+                    poSrcFeature->GetFieldAsBinary(0, &nBytesFeature);
+                if (!oFeat.DeserializeFromBinary(pabyFeatureData,
+                                                 nBytesFeature))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Cannot deserialize feature");
+                    return false;
+                }
+                if (OGRArrowWriterLayer::ICreateFeature(&oFeat) != OGRERR_NONE)
+                {
+                    return false;
+                }
+
+                nOffset += SIZEOF_CELL;
+
+                ++nCountWrittenFeaturesSinceLastFlush;
+
+                if ((m_nFeatureCount % PROGRESS_FC_INTERVAL) == 0 ||
+                    m_nFeatureCount == m_nTmpFeatureCount / 2)
+                {
+                    CPLDebugProgress(
+                        "PARQUET",
+                        "CopyTmpGpkgLayerToFinalFile(): %.02f%% progress",
+                        100.0 * double(m_nFeatureCount) /
+                            double(m_nTmpFeatureCount));
+                }
+            }
+        }
+        else
+        {
+            // Non-leaf node: it references child nodes.
+
+            // nCellCount shouldn't be over 51 normally, but even 65535
+            // would be fine...
+            // coverity[tainted_data]
+            for (int i = 0; i < nCellCount; ++i)
+            {
+                int64_t nNode;
+                memcpy(&nNode, pabyNodeData + nOffset, sizeof(int64_t));
+                CPL_MSBPTR64(&nNode);
+                aNodeNoDepthPair.emplace_back(
+                    std::make_pair(nNode, nCurDepth + 1));
+                nOffset += SIZEOF_CELL;
+            }
+        }
+    }
+
+    CPLDebug("PARQUET",
+             "CopyTmpGpkgLayerToFinalFile(): 100%%, successfully finished");
+    return true;
 }
 
 /************************************************************************/
@@ -87,9 +323,40 @@ bool OGRParquetWriterLayer::IsSupportedGeometryType(
 /************************************************************************/
 
 bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
-                                       OGRSpatialReference *poSpatialRef,
+                                       const OGRSpatialReference *poSpatialRef,
                                        OGRwkbGeometryType eGType)
 {
+    m_bWriteBBoxStruct = CPLTestBool(CSLFetchNameValueDef(
+        papszOptions, "WRITE_COVERING_BBOX",
+        CPLGetConfigOption("OGR_PARQUET_WRITE_COVERING_BBOX", "YES")));
+
+    if (CPLTestBool(CSLFetchNameValueDef(papszOptions, "SORT_BY_BBOX", "NO")))
+    {
+        const std::string osTmpGPKG(std::string(m_poDataset->GetDescription()) +
+                                    ".tmp.gpkg");
+        auto poGPKGDrv = GetGDALDriverManager()->GetDriverByName("GPKG");
+        if (!poGPKGDrv)
+        {
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                "Driver GPKG required for SORT_BY_BBOX layer creation option");
+            return false;
+        }
+        m_poTmpGPKG.reset(poGPKGDrv->Create(osTmpGPKG.c_str(), 0, 0, 0,
+                                            GDT_Unknown, nullptr));
+        if (!m_poTmpGPKG)
+            return false;
+        m_poTmpGPKG->MarkSuppressOnClose();
+        m_poTmpGPKGLayer = m_poTmpGPKG->CreateLayer("tmp");
+        if (!m_poTmpGPKGLayer)
+            return false;
+        // Serialized feature
+        m_poTmpGPKGLayer->CreateField(
+            std::make_unique<OGRFieldDefn>("serialized_feature", OFTBinary)
+                .get());
+        CPL_IGNORE_RET_VAL(m_poTmpGPKGLayer->StartTransaction());
+    }
+
     const char *pszGeomEncoding =
         CSLFetchNameValue(papszOptions, "GEOMETRY_ENCODING");
     m_eGeomEncoding = OGRArrowGeomEncoding::WKB;
@@ -99,8 +366,24 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
             m_eGeomEncoding = OGRArrowGeomEncoding::WKB;
         else if (EQUAL(pszGeomEncoding, "WKT"))
             m_eGeomEncoding = OGRArrowGeomEncoding::WKT;
-        else if (EQUAL(pszGeomEncoding, "GEOARROW"))
-            m_eGeomEncoding = OGRArrowGeomEncoding::GEOARROW_GENERIC;
+        else if (EQUAL(pszGeomEncoding, "GEOARROW_INTERLEAVED"))
+        {
+            static bool bHasWarned = false;
+            if (!bHasWarned)
+            {
+                bHasWarned = true;
+                CPLError(
+                    CE_Warning, CPLE_AppDefined,
+                    "Use of GEOMETRY_ENCODING=GEOARROW_INTERLEAVED is not "
+                    "recommended. "
+                    "GeoParquet 1.1 uses GEOMETRY_ENCODING=GEOARROW (struct) "
+                    "instead.");
+            }
+            m_eGeomEncoding = OGRArrowGeomEncoding::GEOARROW_FSL_GENERIC;
+        }
+        else if (EQUAL(pszGeomEncoding, "GEOARROW") ||
+                 EQUAL(pszGeomEncoding, "GEOARROW_STRUCT"))
+            m_eGeomEncoding = OGRArrowGeomEncoding::GEOARROW_STRUCT_GENERIC;
         else
         {
             CPLError(CE_Failure, CPLE_NotSupported,
@@ -108,6 +391,11 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
             return false;
         }
     }
+
+    const char *pszCoordPrecision =
+        CSLFetchNameValue(papszOptions, "COORDINATE_PRECISION");
+    if (pszCoordPrecision)
+        m_nWKTCoordinatePrecision = atoi(pszCoordPrecision);
 
     m_bForceCounterClockwiseOrientation =
         EQUAL(CSLFetchNameValueDef(papszOptions, "POLYGON_ORIENTATION",
@@ -123,10 +411,12 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
 
         m_poFeatureDefn->SetGeomType(eGType);
         auto eGeomEncoding = m_eGeomEncoding;
-        if (eGeomEncoding == OGRArrowGeomEncoding::GEOARROW_GENERIC)
+        if (eGeomEncoding == OGRArrowGeomEncoding::GEOARROW_FSL_GENERIC ||
+            eGeomEncoding == OGRArrowGeomEncoding::GEOARROW_STRUCT_GENERIC)
         {
-            eGeomEncoding = GetPreciseArrowGeomEncoding(eGType);
-            if (eGeomEncoding == OGRArrowGeomEncoding::GEOARROW_GENERIC)
+            const auto eEncodingType = eGeomEncoding;
+            eGeomEncoding = GetPreciseArrowGeomEncoding(eEncodingType, eGType);
+            if (eGeomEncoding == eEncodingType)
                 return false;
         }
         m_aeGeomEncoding.push_back(eGeomEncoding);
@@ -220,7 +510,7 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
 /*                         CloseFileWriter()                            */
 /************************************************************************/
 
-void OGRParquetWriterLayer::CloseFileWriter()
+bool OGRParquetWriterLayer::CloseFileWriter()
 {
     auto status = m_poFileWriter->Close();
     if (!status.ok())
@@ -229,6 +519,7 @@ void OGRParquetWriterLayer::CloseFileWriter()
                  "FileWriter::Close() failed with %s",
                  status.message().c_str());
     }
+    return status.ok();
 }
 
 /************************************************************************/
@@ -351,11 +642,21 @@ static void RemoveIDFromMemberOfEnsembles(CPLJSONObject &obj)
 
 std::string OGRParquetWriterLayer::GetGeoMetadata() const
 {
+    // Just for unit testing purposes
+    const char *pszGeoMetadata =
+        CPLGetConfigOption("OGR_PARQUET_GEO_METADATA", nullptr);
+    if (pszGeoMetadata)
+        return pszGeoMetadata;
+
     if (m_poFeatureDefn->GetGeomFieldCount() != 0 &&
         CPLTestBool(CPLGetConfigOption("OGR_PARQUET_WRITE_GEO", "YES")))
     {
         CPLJSONObject oRoot;
-        oRoot.Add("version", "1.0.0-beta.1");
+        oRoot.Add("version",
+                  m_eGeomEncoding ==
+                          OGRArrowGeomEncoding::GEOARROW_STRUCT_GENERIC
+                      ? "1.1.0"
+                      : "1.0.0");
         oRoot.Add("primary_column",
                   m_poFeatureDefn->GetGeomFieldDefn(0)->GetNameRef());
         CPLJSONObject oColumns;
@@ -366,7 +667,7 @@ std::string OGRParquetWriterLayer::GetGeoMetadata() const
             CPLJSONObject oColumn;
             oColumns.Add(poGeomFieldDefn->GetNameRef(), oColumn);
             oColumn.Add("encoding",
-                        GetGeomEncodingAsString(m_aeGeomEncoding[i]));
+                        GetGeomEncodingAsString(m_aeGeomEncoding[i], true));
 
             if (CPLTestBool(CPLGetConfigOption("OGR_PARQUET_WRITE_CRS", "YES")))
             {
@@ -405,7 +706,7 @@ std::string OGRParquetWriterLayer::GetGeoMetadata() const
                         char *pszPROJJSON = nullptr;
                         oSRSIdentified.exportToPROJJSON(&pszPROJJSON, nullptr);
                         CPLJSONDocument oCRSDoc;
-                        oCRSDoc.LoadMemory(pszPROJJSON);
+                        CPL_IGNORE_RET_VAL(oCRSDoc.LoadMemory(pszPROJJSON));
                         CPLFree(pszPROJJSON);
                         CPLJSONObject oCRSRoot = oCRSDoc.GetRoot();
                         RemoveIDFromMemberOfEnsembles(oCRSRoot);
@@ -459,6 +760,29 @@ std::string OGRParquetWriterLayer::GetGeoMetadata() const
                 if (bHasZ)
                     oBBOX.Add(m_aoEnvelopes[i].MaxZ);
                 oColumn.Add("bbox", oBBOX);
+            }
+
+            // Bounding box column definition
+            if (m_bWriteBBoxStruct &&
+                CPLTestBool(CPLGetConfigOption(
+                    "OGR_PARQUET_WRITE_COVERING_BBOX_IN_METADATA", "YES")))
+            {
+                CPLJSONObject oCovering;
+                oColumn.Add("covering", oCovering);
+                CPLJSONObject oBBOX;
+                oCovering.Add("bbox", oBBOX);
+                const auto AddComponent =
+                    [this, i, &oBBOX](const char *pszComponent)
+                {
+                    CPLJSONArray oArray;
+                    oArray.Add(m_apoFieldsBBOX[i]->name());
+                    oArray.Add(pszComponent);
+                    oBBOX.Add(pszComponent, oArray);
+                };
+                AddComponent("xmin");
+                AddComponent("ymin");
+                AddComponent("xmax");
+                AddComponent("ymax");
             }
 
             const auto GetStringGeometryType = [](OGRwkbGeometryType eType)
@@ -543,14 +867,67 @@ void OGRParquetWriterLayer::PerformStepsBeforeFinalFlushGroup()
             {
                 // The serialized schema is not UTF-8, which is required for
                 // Thrift
-                std::string schema_as_string = (*status)->ToString();
-                std::string schema_base64 =
+                const std::string schema_as_string = (*status)->ToString();
+                const std::string schema_base64 =
                     ::arrow::util::base64_encode(schema_as_string);
                 static const std::string kArrowSchemaKey = "ARROW:schema";
                 const_cast<arrow::KeyValueMetadata *>(
                     m_poKeyValueMetadata.get())
                     ->Append(kArrowSchemaKey, schema_base64);
             }
+        }
+
+        // Put GDAL metadata into a gdal:metadata domain
+        CPLJSONObject oMultiMetadata;
+        bool bHasMultiMetadata = false;
+        auto &l_oMDMD = oMDMD.GetDomainList() && *(oMDMD.GetDomainList())
+                            ? oMDMD
+                            : m_poDataset->GetMultiDomainMetadata();
+        for (CSLConstList papszDomainIter = l_oMDMD.GetDomainList();
+             papszDomainIter && *papszDomainIter; ++papszDomainIter)
+        {
+            const char *pszDomain = *papszDomainIter;
+            CSLConstList papszMD = l_oMDMD.GetMetadata(pszDomain);
+            if (STARTS_WITH(pszDomain, "json:") && papszMD && papszMD[0])
+            {
+                CPLJSONDocument oDoc;
+                if (oDoc.LoadMemory(papszMD[0]))
+                {
+                    bHasMultiMetadata = true;
+                    oMultiMetadata.Add(pszDomain, oDoc.GetRoot());
+                    continue;
+                }
+            }
+            else if (STARTS_WITH(pszDomain, "xml:") && papszMD && papszMD[0])
+            {
+                bHasMultiMetadata = true;
+                oMultiMetadata.Add(pszDomain, papszMD[0]);
+                continue;
+            }
+            CPLJSONObject oMetadata;
+            bool bHasMetadata = false;
+            for (CSLConstList papszMDIter = papszMD;
+                 papszMDIter && *papszMDIter; ++papszMDIter)
+            {
+                char *pszKey = nullptr;
+                const char *pszValue = CPLParseNameValue(*papszMDIter, &pszKey);
+                if (pszKey && pszValue)
+                {
+                    bHasMetadata = true;
+                    bHasMultiMetadata = true;
+                    oMetadata.Add(pszKey, pszValue);
+                }
+                CPLFree(pszKey);
+            }
+            if (bHasMetadata)
+                oMultiMetadata.Add(pszDomain, oMetadata);
+        }
+        if (bHasMultiMetadata)
+        {
+            const_cast<arrow::KeyValueMetadata *>(m_poKeyValueMetadata.get())
+                ->Append(
+                    "gdal:metadata",
+                    oMultiMetadata.Format(CPLJSONObject::PrettyFormat::Plain));
         }
     }
 }
@@ -582,9 +959,9 @@ Open(const ::arrow::Schema &schema, ::arrow::MemoryPool *pool,
     *outMetadata = metadata;
 
     std::unique_ptr<parquet::ParquetFileWriter> base_writer;
-    PARQUET_CATCH_NOT_OK(
-        base_writer = parquet::ParquetFileWriter::Open(
-            std::move(sink), schema_node, std::move(properties), metadata));
+    PARQUET_CATCH_NOT_OK(base_writer = parquet::ParquetFileWriter::Open(
+                             std::move(sink), std::move(schema_node),
+                             std::move(properties), metadata));
 
     auto schema_ptr = std::make_shared<::arrow::Schema>(schema);
     return parquet::arrow::FileWriter::Make(
@@ -605,7 +982,7 @@ void OGRParquetWriterLayer::CreateSchema()
 /*                          CreateGeomField()                           */
 /************************************************************************/
 
-OGRErr OGRParquetWriterLayer::CreateGeomField(OGRGeomFieldDefn *poField,
+OGRErr OGRParquetWriterLayer::CreateGeomField(const OGRGeomFieldDefn *poField,
                                               int bApproxOK)
 {
     OGRErr eErr = OGRArrowWriterLayer::CreateGeomField(poField, bApproxOK);
@@ -642,8 +1019,70 @@ void OGRParquetWriterLayer::CreateWriter()
         parquet::ArrowWriterProperties::Builder().store_schema()->build();
     CPL_IGNORE_RET_VAL(Open(*m_poSchema, m_poMemoryPool, m_poOutputStream,
                             m_oWriterPropertiesBuilder.build(),
-                            arrowWriterProperties, &m_poFileWriter,
+                            std::move(arrowWriterProperties), &m_poFileWriter,
                             &m_poKeyValueMetadata));
+}
+
+/************************************************************************/
+/*                          ICreateFeature()                            */
+/************************************************************************/
+
+OGRErr OGRParquetWriterLayer::ICreateFeature(OGRFeature *poFeature)
+{
+    // If not using SORT_BY_BBOX=YES layer creation option, we can directly
+    // write features to the final Parquet file
+    if (!m_poTmpGPKGLayer)
+        return OGRArrowWriterLayer::ICreateFeature(poFeature);
+
+    // SORT_BY_BBOX=YES case: we write for now a serialized version of poFeature
+    // in a temporary GeoPackage file.
+
+    GIntBig nFID = poFeature->GetFID();
+    if (!m_osFIDColumn.empty() && nFID == OGRNullFID)
+    {
+        nFID = m_nTmpFeatureCount;
+        poFeature->SetFID(nFID);
+    }
+    ++m_nTmpFeatureCount;
+
+    std::vector<GByte> abyBuffer;
+    // Serialize the source feature as a single array of bytes to preserve it
+    // fully
+    if (!poFeature->SerializeToBinary(abyBuffer))
+    {
+        return OGRERR_FAILURE;
+    }
+
+    // SQLite3 limitation: a row must fit in slightly less than 1 GB.
+    constexpr int SOME_MARGIN = 128;
+    if (abyBuffer.size() > 1024 * 1024 * 1024 - SOME_MARGIN)
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Features larger than 1 GB are not supported");
+        return OGRERR_FAILURE;
+    }
+
+    OGRFeature oFeat(m_poTmpGPKGLayer->GetLayerDefn());
+    oFeat.SetFID(nFID);
+    oFeat.SetField(0, static_cast<int>(abyBuffer.size()), abyBuffer.data());
+    const auto poSrcGeom = poFeature->GetGeometryRef();
+    if (poSrcGeom && !poSrcGeom->IsEmpty())
+    {
+        // For the purpose of building an RTree, just use the bounding box of
+        // the geometry as the geometry.
+        OGREnvelope sEnvelope;
+        poSrcGeom->getEnvelope(&sEnvelope);
+        auto poPoly = std::make_unique<OGRPolygon>();
+        auto poLR = std::make_unique<OGRLinearRing>();
+        poLR->addPoint(sEnvelope.MinX, sEnvelope.MinY);
+        poLR->addPoint(sEnvelope.MinX, sEnvelope.MaxY);
+        poLR->addPoint(sEnvelope.MaxX, sEnvelope.MaxY);
+        poLR->addPoint(sEnvelope.MaxX, sEnvelope.MinY);
+        poLR->addPoint(sEnvelope.MinX, sEnvelope.MinY);
+        poPoly->addRingDirectly(poLR.release());
+        oFeat.SetGeometryDirectly(poPoly.release());
+    }
+    return m_poTmpGPKGLayer->CreateFeature(&oFeat);
 }
 
 /************************************************************************/
@@ -657,7 +1096,7 @@ bool OGRParquetWriterLayer::FlushGroup()
     {
         CPLError(CE_Failure, CPLE_AppDefined, "NewRowGroup() failed with %s",
                  status.message().c_str());
-        m_apoBuilders.clear();
+        ClearArrayBuilers();
         return false;
     }
 
@@ -676,8 +1115,21 @@ bool OGRParquetWriterLayer::FlushGroup()
             return true;
         });
 
-    m_apoBuilders.clear();
+    ClearArrayBuilers();
     return ret;
+}
+
+/************************************************************************/
+/*                    FixupWKBGeometryBeforeWriting()                   */
+/************************************************************************/
+
+void OGRParquetWriterLayer::FixupWKBGeometryBeforeWriting(GByte *pabyWkb,
+                                                          size_t nLen)
+{
+    if (!m_bForceCounterClockwiseOrientation)
+        return;
+
+    OGRWKBFixupCounterClockWiseExternalRing(pabyWkb, nLen);
 }
 
 /************************************************************************/
@@ -713,4 +1165,153 @@ void OGRParquetWriterLayer::FixupGeometryBeforeWriting(OGRGeometry *poGeom)
             FixupGeometryBeforeWriting(poSubGeom);
         }
     }
+}
+
+/************************************************************************/
+/*                          WriteArrowBatch()                           */
+/************************************************************************/
+
+#if PARQUET_VERSION_MAJOR > 10
+inline bool
+OGRParquetWriterLayer::WriteArrowBatch(const struct ArrowSchema *schema,
+                                       struct ArrowArray *array,
+                                       CSLConstList papszOptions)
+{
+    if (m_poTmpGPKGLayer)
+    {
+        // When using SORT_BY_BBOX=YES option, we can't directly write the
+        // input array, because we need to sort features. Hence we fallback
+        // to the OGRLayer base implementation, which will ultimately call
+        // OGRParquetWriterLayer::ICreateFeature()
+        return OGRLayer::WriteArrowBatch(schema, array, papszOptions);
+    }
+
+    return WriteArrowBatchInternal(
+        schema, array, papszOptions,
+        [this](const std::shared_ptr<arrow::RecordBatch> &poBatch)
+        {
+            auto status = m_poFileWriter->NewBufferedRowGroup();
+            if (!status.ok())
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "NewBufferedRowGroup() failed with %s",
+                         status.message().c_str());
+                return false;
+            }
+
+            status = m_poFileWriter->WriteRecordBatch(*poBatch);
+            if (!status.ok())
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "WriteRecordBatch() failed: %s",
+                         status.message().c_str());
+                return false;
+            }
+
+            return true;
+        });
+}
+#endif
+
+/************************************************************************/
+/*                         TestCapability()                             */
+/************************************************************************/
+
+inline int OGRParquetWriterLayer::TestCapability(const char *pszCap)
+{
+#if PARQUET_VERSION_MAJOR <= 10
+    if (EQUAL(pszCap, OLCFastWriteArrowBatch))
+        return false;
+#endif
+
+    if (m_poTmpGPKGLayer && EQUAL(pszCap, OLCFastWriteArrowBatch))
+    {
+        // When using SORT_BY_BBOX=YES option, we can't directly write the
+        // input array, because we need to sort features. So this is not
+        // fast
+        return false;
+    }
+
+    return OGRArrowWriterLayer::TestCapability(pszCap);
+}
+
+/************************************************************************/
+/*                        CreateFieldFromArrowSchema()                  */
+/************************************************************************/
+
+#if PARQUET_VERSION_MAJOR > 10
+bool OGRParquetWriterLayer::CreateFieldFromArrowSchema(
+    const struct ArrowSchema *schema, CSLConstList papszOptions)
+{
+    if (m_poTmpGPKGLayer)
+    {
+        // When using SORT_BY_BBOX=YES option, we can't directly write the
+        // input array, because we need to sort features. But this process
+        // only supports the base Arrow types supported by
+        // OGRLayer::WriteArrowBatch()
+        return OGRLayer::CreateFieldFromArrowSchema(schema, papszOptions);
+    }
+
+    return OGRArrowWriterLayer::CreateFieldFromArrowSchema(schema,
+                                                           papszOptions);
+}
+#endif
+
+/************************************************************************/
+/*                        IsArrowSchemaSupported()                      */
+/************************************************************************/
+
+#if PARQUET_VERSION_MAJOR > 10
+bool OGRParquetWriterLayer::IsArrowSchemaSupported(
+    const struct ArrowSchema *schema, CSLConstList papszOptions,
+    std::string &osErrorMsg) const
+{
+    if (m_poTmpGPKGLayer)
+    {
+        // When using SORT_BY_BBOX=YES option, we can't directly write the
+        // input array, because we need to sort features. But this process
+        // only supports the base Arrow types supported by
+        // OGRLayer::WriteArrowBatch()
+        return OGRLayer::IsArrowSchemaSupported(schema, papszOptions,
+                                                osErrorMsg);
+    }
+
+    if (schema->format[0] == 'e' && schema->format[1] == 0)
+    {
+        osErrorMsg = "float16 not supported";
+        return false;
+    }
+    for (int64_t i = 0; i < schema->n_children; ++i)
+    {
+        if (!IsArrowSchemaSupported(schema->children[i], papszOptions,
+                                    osErrorMsg))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
+/************************************************************************/
+/*                            SetMetadata()                             */
+/************************************************************************/
+
+CPLErr OGRParquetWriterLayer::SetMetadata(char **papszMetadata,
+                                          const char *pszDomain)
+{
+    if (!pszDomain || !EQUAL(pszDomain, "SHAPEFILE"))
+    {
+        return OGRLayer::SetMetadata(papszMetadata, pszDomain);
+    }
+    return CE_None;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRParquetWriterLayer::GetDataset()
+{
+    return m_poDataset;
 }

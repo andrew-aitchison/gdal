@@ -124,8 +124,8 @@ def test_osr_compd_3():
         AUTHORITY["EPSG","5719"]],
     AUTHORITY["EPSG","7401"]]"""
     wkt = srs.ExportToPrettyWkt()
-    assert (
-        gdaltest.equal_srs_from_wkt(exp_wkt, wkt) != 0
+    assert gdaltest.equal_srs_from_wkt(
+        exp_wkt, wkt
     ), "did not get expected compound cs for EPSG:7401"
 
 
@@ -161,8 +161,8 @@ def test_osr_compd_4():
     AUTHORITY["EPSG","7400"]]"""
     wkt = srs.ExportToPrettyWkt()
 
-    assert (
-        gdaltest.equal_srs_from_wkt(exp_wkt, wkt) != 0
+    assert gdaltest.equal_srs_from_wkt(
+        exp_wkt, wkt
     ), "did not get expected compound cs for EPSG:7400"
 
 
@@ -209,9 +209,9 @@ def test_osr_compd_5():
         AUTHORITY["EPSG","5703"]]]"""
     wkt = srs.ExportToPrettyWkt()
 
-    if gdaltest.equal_srs_from_wkt(exp_wkt, wkt) == 0:
-        pytest.fail()
-    elif exp_wkt != wkt:
+    assert gdaltest.equal_srs_from_wkt(exp_wkt, wkt)
+
+    if exp_wkt != wkt:
         print("warning they are equivalent, but not completely the same")
         print(wkt)
 
@@ -267,14 +267,19 @@ def test_osr_compd_6():
         "Unknown based on GRS80 ellipsoid using towgs84=0,0,0,0,0,0,0",
         "Unknown_based_on_GRS80_ellipsoid",
     )
+    # PROJ >= 9.2.1 returns the below
+    wkt = wkt.replace(
+        "Unknown based on GRS 1980 ellipsoid using towgs84=0,0,0,0,0,0,0",
+        "Unknown_based_on_GRS80_ellipsoid",
+    )
     wkt = wkt.replace(
         "unknown using geoidgrids=g2003conus.gtx,g2003alaska.gtx,g2003h01.gtx,g2003p01.gtx",
         "unknown",
     )
 
-    if gdaltest.equal_srs_from_wkt(exp_wkt, wkt) == 0:
-        pytest.fail()
-    elif exp_wkt != wkt:
+    assert gdaltest.equal_srs_from_wkt(exp_wkt, wkt)
+
+    if exp_wkt != wkt:
         print("warning they are equivalent, but not completely the same")
         print(wkt)
 
@@ -324,9 +329,9 @@ def test_osr_compd_7():
 
     wkt = srs.ExportToPrettyWkt()
 
-    if gdaltest.equal_srs_from_wkt(exp_wkt, wkt) == 0:
-        pytest.fail()
-    elif exp_wkt != wkt:
+    assert gdaltest.equal_srs_from_wkt(exp_wkt, wkt)
+
+    if exp_wkt != wkt:
         print("warning they are equivalent, but not completely the same")
         print(wkt)
 
@@ -356,11 +361,8 @@ def test_osr_compd_8():
 # Test COMPD_CS with a VERT_DATUM type = 2002 (Ellipsoid height)
 
 
+@pytest.mark.require_proj(7, 1)
 def test_osr_compd_vert_datum_2002():
-
-    if osr.GetPROJVersionMajor() * 10000 + osr.GetPROJVersionMinor() * 100 < 70100:
-        # Not supported before PROJ 7.1
-        pytest.skip()
 
     sr = osr.SpatialReference()
     sr.SetFromUserInput(

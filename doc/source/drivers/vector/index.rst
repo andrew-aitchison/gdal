@@ -55,16 +55,19 @@ Vector drivers
    gpsbabel
    gpx
    grass
+   gtfs
    hana
    idb
    idrisi
    ili
    jml
+   jsonfg
    kml
    libkml
    lvbag
    mapml
    memory
+   miramon
    mitab
    mongodbv3
    mssqlspatial
@@ -88,6 +91,7 @@ Vector drivers
    pgeo
    pg
    plscenes
+   pmtiles
    s57
    sdts
    selafin
@@ -97,6 +101,7 @@ Vector drivers
    svg
    sxf
    tiger
+   tiledb
    topojson
    vdv
    vfk

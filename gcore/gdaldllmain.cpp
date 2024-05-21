@@ -47,6 +47,8 @@ int GDALIsInGlobalDestructor()
 
 void CPLFinalizeTLS();
 
+static bool bGDALDestroyAlreadyCalled = FALSE;
+
 /************************************************************************/
 /*                           GDALDestroy()                              */
 /************************************************************************/
@@ -70,7 +72,6 @@ void CPLFinalizeTLS();
  * @since GDAL 2.0
  */
 
-static bool bGDALDestroyAlreadyCalled = FALSE;
 void GDALDestroy(void)
 {
     if (bGDALDestroyAlreadyCalled)

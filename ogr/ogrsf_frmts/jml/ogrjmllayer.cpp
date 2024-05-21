@@ -31,16 +31,18 @@
 
 #ifdef HAVE_EXPAT
 
+constexpr int PARSER_BUF_SIZE = 8192;
+
 /************************************************************************/
 /*                              OGRJMLLayer()                           */
 /************************************************************************/
 
-OGRJMLLayer::OGRJMLLayer(const char *pszLayerName, OGRJMLDataset * /* poDSIn */,
+OGRJMLLayer::OGRJMLLayer(const char *pszLayerName, OGRJMLDataset *poDSIn,
                          VSILFILE *fpIn)
-    : poFeatureDefn(new OGRFeatureDefn(pszLayerName)), nNextFID(0), fp(fpIn),
-      bHasReadSchema(false), oParser(nullptr), currentDepth(0),
-      bStopParsing(false), nWithoutEventCounter(0), nDataHandlerCounter(0),
-      bAccumulateElementValue(false),
+    : m_poDS(poDSIn), poFeatureDefn(new OGRFeatureDefn(pszLayerName)),
+      nNextFID(0), fp(fpIn), bHasReadSchema(false), oParser(nullptr),
+      currentDepth(0), bStopParsing(false), nWithoutEventCounter(0),
+      nDataHandlerCounter(0), bAccumulateElementValue(false),
       pszElementValue(static_cast<char *>(CPLCalloc(1024, 1))),
       nElementValueLen(0), nElementValueAlloc(1024), poFeature(nullptr),
       ppoFeatureTab(nullptr), nFeatureTabLength(0), nFeatureTabIndex(0),
@@ -287,8 +289,8 @@ void OGRJMLLayer::endElementCbk(const char *pszName)
     {
         if (nElementValueLen)
         {
-            OGRGeometry *poGeom = reinterpret_cast<OGRGeometry *>(
-                OGR_G_CreateFromGML(pszElementValue));
+            OGRGeometry *poGeom =
+                OGRGeometry::FromHandle(OGR_G_CreateFromGML(pszElementValue));
             if (poGeom != nullptr &&
                 poGeom->getGeometryType() == wkbGeometryCollection &&
                 poGeom->IsEmpty())
@@ -397,7 +399,7 @@ void OGRJMLLayer::dataHandlerCbk(const char *data, int nLen)
         return;
 
     nDataHandlerCounter++;
-    if (nDataHandlerCounter >= BUFSIZ)
+    if (nDataHandlerCounter >= PARSER_BUF_SIZE)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "File probably corrupted (million laugh pattern)");
@@ -434,7 +436,7 @@ OGRFeature *OGRJMLLayer::GetNextFeature()
     if (VSIFEofL(fp))
         return nullptr;
 
-    char aBuf[BUFSIZ];
+    std::vector<char> aBuf(PARSER_BUF_SIZE);
 
     nFeatureTabLength = 0;
     nFeatureTabIndex = 0;
@@ -445,9 +447,10 @@ OGRFeature *OGRJMLLayer::GetNextFeature()
     do
     {
         nDataHandlerCounter = 0;
-        unsigned int nLen = (unsigned int)VSIFReadL(aBuf, 1, sizeof(aBuf), fp);
+        unsigned int nLen =
+            (unsigned int)VSIFReadL(aBuf.data(), 1, aBuf.size(), fp);
         nDone = VSIFEofL(fp);
-        if (XML_Parse(oParser, aBuf, nLen, nDone) == XML_STATUS_ERROR)
+        if (XML_Parse(oParser, aBuf.data(), nLen, nDone) == XML_STATUS_ERROR)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "XML parsing of JML file failed : %s "
@@ -505,15 +508,15 @@ void OGRJMLLayer::LoadSchema()
 
     VSIFSeekL(fp, 0, SEEK_SET);
 
-    char aBuf[BUFSIZ];
+    std::vector<char> aBuf(PARSER_BUF_SIZE);
     int nDone = 0;
     do
     {
         nDataHandlerCounter = 0;
-        const unsigned int nLen =
-            static_cast<unsigned int>(VSIFReadL(aBuf, 1, sizeof(aBuf), fp));
+        const unsigned int nLen = static_cast<unsigned int>(
+            VSIFReadL(aBuf.data(), 1, aBuf.size(), fp));
         nDone = VSIFEofL(fp);
-        if (XML_Parse(oParser, aBuf, nLen, nDone) == XML_STATUS_ERROR)
+        if (XML_Parse(oParser, aBuf.data(), nLen, nDone) == XML_STATUS_ERROR)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "XML parsing of JML file failed : %s at line %d, "

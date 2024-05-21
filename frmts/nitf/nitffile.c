@@ -35,9 +35,13 @@
 #include "cpl_string.h"
 #include <stdbool.h>
 
+#ifndef CPL_IGNORE_RET_VAL_INT_defined
+#define CPL_IGNORE_RET_VAL_INT_defined
+
 CPL_INLINE static void CPL_IGNORE_RET_VAL_INT(CPL_UNUSED int unused)
 {
 }
+#endif
 
 static int NITFWriteBLOCKA(VSILFILE *fp, vsi_l_offset nOffsetUDIDL,
                            int *pnOffset, char **papszOptions);
@@ -268,6 +272,7 @@ retry_read_header:
         GetMD(psFile, pachHeader, 324 + nCOff, 18, OPHONE);
         NITFGetField(szTemp, pachHeader, 342 + nCOff, 12);
     }
+#undef GetMD
 
     if (!bTriedStreamingFileHeader && EQUAL(szTemp, "999999999999"))
     {
@@ -548,7 +553,7 @@ int NITFCreateEx(const char *pszFilename, int nPixels, int nLines, int nBands,
     VSILFILE *fp;
     GUIntBig nCur = 0;
     int nOffset = 0, iBand, nIHSize, nNPPBH, nNPPBV;
-    GUIntBig nImageSize;
+    GUIntBig nImageSize = 0;
     int nNBPR, nNBPC;
     const char *pszIREP;
     const char *pszIC = CSLFetchNameValue(papszOptions, "IC");
@@ -691,8 +696,11 @@ int NITFCreateEx(const char *pszFilename, int nPixels, int nLines, int nBands,
         nNPPBH = 0;
         nNPPBV = 0;
 
-        nImageSize =
-            ((nBitsPerSample) / 8) * ((GUIntBig)nPixels * nLines) * nBands;
+        if (EQUAL(pszIC, "NC"))
+        {
+            nImageSize =
+                ((nBitsPerSample) / 8) * ((GUIntBig)nPixels * nLines) * nBands;
+        }
     }
     else if ((EQUAL(pszIC, "NC") || EQUAL(pszIC, "C8")) && nPixels > 8192 &&
              nNPPBH == nPixels)
@@ -711,8 +719,11 @@ int NITFCreateEx(const char *pszFilename, int nPixels, int nLines, int nBands,
             return FALSE;
         }
 
-        nImageSize = ((nBitsPerSample) / 8) *
-                     ((GUIntBig)nPixels * (nNBPC * nNPPBV)) * nBands;
+        if (EQUAL(pszIC, "NC"))
+        {
+            nImageSize = ((nBitsPerSample) / 8) *
+                         ((GUIntBig)nPixels * (nNBPC * nNPPBV)) * nBands;
+        }
     }
     else if ((EQUAL(pszIC, "NC") || EQUAL(pszIC, "C8")) && nLines > 8192 &&
              nNPPBV == nLines)
@@ -731,8 +742,11 @@ int NITFCreateEx(const char *pszFilename, int nPixels, int nLines, int nBands,
             return FALSE;
         }
 
-        nImageSize = ((nBitsPerSample) / 8) *
-                     ((GUIntBig)nLines * (nNBPR * nNPPBH)) * nBands;
+        if (EQUAL(pszIC, "NC"))
+        {
+            nImageSize = ((nBitsPerSample) / 8) *
+                         ((GUIntBig)nLines * (nNBPR * nNPPBH)) * nBands;
+        }
     }
     else
     {
@@ -750,8 +764,11 @@ int NITFCreateEx(const char *pszFilename, int nPixels, int nLines, int nBands,
             return FALSE;
         }
 
-        nImageSize = ((nBitsPerSample) / 8) * ((GUIntBig)nNBPR * nNBPC) *
-                     nNPPBH * nNPPBV * nBands;
+        if (EQUAL(pszIC, "NC"))
+        {
+            nImageSize = ((nBitsPerSample) / 8) * ((GUIntBig)nNBPR * nNBPC) *
+                         nNPPBH * nNPPBV * nBands;
+        }
     }
 
     if (EQUAL(pszIC, "NC"))
@@ -2592,7 +2609,7 @@ static int NITFEvaluateCond(const char *pszCond, char **papszMD, int *pnMDSize,
             CPLDebug("NITF", "Cannot find if cond variable %s", pszCondVar);
         }
         else if (strtoul(pszCondVal, CPL_NULLPTR, 10) &
-                 (1 << atoi(pszCondTestBit)))
+                 (1U << (unsigned)atoi(pszCondTestBit)))
         {
             nRet = 1;
         }
@@ -2922,46 +2939,6 @@ static char **NITFGenericMetadataReadTREInternal(
                 nIterations = atoi(pszIterations);
             }
             else if (pszFormula != NULL &&
-                     strcmp(pszFormula, "(NPART+1)*(NPART)/2") == 0)
-            {
-                char *pszMDItemName =
-                    CPLStrdup(CPLSPrintf("%s%s", pszMDPrefix, "NPART"));
-                int NPART = atoi(NITFFindValFromEnd(papszMD, *pnMDSize,
-                                                    pszMDItemName, "-1"));
-                CPLFree(pszMDItemName);
-                if (NPART < 0)
-                {
-                    CPLError(
-                        bValidate ? CE_Failure : CE_Warning, CPLE_AppDefined,
-                        "Invalid loop construct in %s %s in XML resource : "
-                        "invalid 'counter' %s",
-                        pszDESOrTREName, pszDESOrTREKind, "NPART");
-                    *pbError = TRUE;
-                    break;
-                }
-                nIterations = NPART * (NPART + 1) / 2;
-            }
-            else if (pszFormula != NULL &&
-                     strcmp(pszFormula, "(NUMOPG+1)*(NUMOPG)/2") == 0)
-            {
-                char *pszMDItemName =
-                    CPLStrdup(CPLSPrintf("%s%s", pszMDPrefix, "NUMOPG"));
-                int NUMOPG = atoi(NITFFindValFromEnd(papszMD, *pnMDSize,
-                                                     pszMDItemName, "-1"));
-                CPLFree(pszMDItemName);
-                if (NUMOPG < 0)
-                {
-                    CPLError(
-                        bValidate ? CE_Failure : CE_Warning, CPLE_AppDefined,
-                        "Invalid loop construct in %s %s in XML resource : "
-                        "invalid 'counter' %s",
-                        pszDESOrTREName, pszDESOrTREKind, "NUMOPG");
-                    *pbError = TRUE;
-                    break;
-                }
-                nIterations = NUMOPG * (NUMOPG + 1) / 2;
-            }
-            else if (pszFormula != NULL &&
                      strcmp(pszFormula, "NPAR*NPARO") == 0)
             {
                 char *pszMDNPARName =
@@ -3050,15 +3027,54 @@ static char **NITFGenericMetadataReadTREInternal(
                 }
                 nIterations = NXPTS * NYPTS;
             }
-            else
+            else if (pszFormula)
             {
-                CPLError(
-                    bValidate ? CE_Failure : CE_Warning, CPLE_AppDefined,
-                    "Invalid loop construct in %s %s in XML resource : "
-                    "missing or invalid 'counter' or 'iterations' or 'formula'",
-                    pszDESOrTREName, pszDESOrTREKind);
-                *pbError = TRUE;
-                break;
+                const char *const apszVarAndFormulaNp1NDiv2[] = {
+                    "NPAR",         "(NPART+1)*(NPART)/2",
+                    "NUMOPG",       "(NUMOPG+1)*(NUMOPG)/2",
+                    "NUM_ADJ_PARM", "(NUM_ADJ_PARM+1)*(NUM_ADJ_PARM)/2",
+                    "N1_CAL",       "(N1_CAL+1)*(N1_CAL)/2",
+                    "NUM_PARA",     "(NUM_PARA+1)*(NUM_PARA)/2",
+                    NULL,           NULL};
+
+                for (int i = 0; apszVarAndFormulaNp1NDiv2[i]; i += 2)
+                {
+                    if (strcmp(pszFormula, apszVarAndFormulaNp1NDiv2[i + 1]) ==
+                        0)
+                    {
+                        const char *pszVar = apszVarAndFormulaNp1NDiv2[i];
+                        char *pszMDItemName =
+                            CPLStrdup(CPLSPrintf("%s%s", pszMDPrefix, pszVar));
+                        int var = atoi(NITFFindValFromEnd(papszMD, *pnMDSize,
+                                                          pszMDItemName, "-1"));
+                        CPLFree(pszMDItemName);
+                        if (var < 0)
+                        {
+                            CPLError(bValidate ? CE_Failure : CE_Warning,
+                                     CPLE_AppDefined,
+                                     "Invalid loop construct in %s %s in XML "
+                                     "resource : "
+                                     "invalid 'counter' %s",
+                                     pszDESOrTREName, pszDESOrTREKind, pszVar);
+                            *pbError = TRUE;
+                            return papszMD;
+                        }
+                        nIterations = var * (var + 1) / 2;
+                        break;
+                    }
+                }
+
+                if (nIterations < 0)
+                {
+                    CPLError(
+                        bValidate ? CE_Failure : CE_Warning, CPLE_AppDefined,
+                        "Invalid loop construct in %s %s in XML resource : "
+                        "missing or invalid 'counter' or 'iterations' or "
+                        "'formula'",
+                        pszDESOrTREName, pszDESOrTREKind);
+                    *pbError = TRUE;
+                    break;
+                }
             }
 
             if (nIterations > 0)

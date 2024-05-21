@@ -61,6 +61,7 @@ def test_vsistdin_1():
     ds = gdal.Open("tmp/vsistdin_1_out.tif")
     assert ds is not None
     assert ds.GetRasterBand(1).Checksum() == cs
+    ds = None
 
     gdal.Unlink("tmp/vsistdin_1_out.tif")
 
@@ -95,11 +96,11 @@ def test_vsistdin_2():
 # Test opening /vsistdin/ in write mode (failure expected)
 
 
+@gdaltest.disable_exceptions()
 def test_vsistdin_3():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsistdin/", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsistdin/", "wb")
     assert f is None
 
 
@@ -147,6 +148,7 @@ def test_vsistdin_4():
 ###############################################################################
 
 
+@gdaltest.disable_exceptions()
 def test_vsistdin_5():
 
     f = open("tmp/test_vsistdin_5.bin", "wb")
@@ -228,7 +230,7 @@ def test_vsistdin_5():
         assert gdal.VSIFSeekL(f, 0, 0) == 0
         assert gdal.VSIFReadL(5, 1, f) == b"01234"
         assert gdal.VSIFReadL(3, 1, f) == b"567"
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             assert gdal.VSIFReadL(3, 1, f) == b""
         gdal.VSIFCloseL(f)
 

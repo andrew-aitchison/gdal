@@ -39,9 +39,10 @@
 /*                           OGRDGNLayer()                              */
 /************************************************************************/
 
-OGRDGNLayer::OGRDGNLayer(const char *pszName, DGNHandle hDGNIn, int bUpdateIn)
-    : poFeatureDefn(new OGRFeatureDefn(pszName)), iNextShapeId(0), hDGN(hDGNIn),
-      bUpdate(bUpdateIn)
+OGRDGNLayer::OGRDGNLayer(GDALDataset *poDS, const char *pszName,
+                         DGNHandle hDGNIn, int bUpdateIn)
+    : m_poDS(poDS), poFeatureDefn(new OGRFeatureDefn(pszName)), iNextShapeId(0),
+      hDGN(hDGNIn), bUpdate(bUpdateIn)
 {
 
     /* -------------------------------------------------------------------- */
@@ -833,10 +834,9 @@ OGRFeature *OGRDGNLayer::ElementToFeature(DGNElemCore *psElement, int nRecLevel)
             OGRGeometry *poGeom = nullptr;
 
             if (psElement->type == DGNT_COMPLEX_SHAPE_HEADER)
-                poGeom =
-                    reinterpret_cast<OGRGeometry *>(OGRBuildPolygonFromEdges(
-                        reinterpret_cast<OGRGeometryH>(&oChildren), TRUE, TRUE,
-                        100000, nullptr));
+                poGeom = OGRGeometry::FromHandle(
+                    OGRBuildPolygonFromEdges(OGRGeometry::ToHandle(&oChildren),
+                                             TRUE, TRUE, 100000, nullptr));
             else
                 poGeom = oChildren.clone();
 
@@ -1018,7 +1018,7 @@ OGRErr OGRDGNLayer::GetExtent(OGREnvelope *psExtent, int /* bForce */)
 
 constexpr int MAX_ELEM_POINTS = 38;
 
-DGNElemCore **OGRDGNLayer::LineStringToElementGroup(OGRLineString *poLS,
+DGNElemCore **OGRDGNLayer::LineStringToElementGroup(const OGRLineString *poLS,
                                                     int nGroupType)
 
 {
@@ -1211,14 +1211,6 @@ OGRErr OGRDGNLayer::ICreateFeature(OGRFeature *poFeature)
         return OGRERR_FAILURE;
     }
 
-    if (poFeature->GetGeometryRef() == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Features with empty, geometry collection geometries not\n"
-                 "supported in DGN format.");
-        return OGRERR_FAILURE;
-    }
-
     return CreateFeatureWithGeom(poFeature, poFeature->GetGeometryRef());
 }
 
@@ -1231,9 +1223,18 @@ OGRErr OGRDGNLayer::ICreateFeature(OGRFeature *poFeature)
 /************************************************************************/
 
 OGRErr OGRDGNLayer::CreateFeatureWithGeom(OGRFeature *poFeature,
-                                          OGRGeometry *poGeom)
+                                          const OGRGeometry *poGeom)
 
 {
+
+    if (poGeom == nullptr || poGeom->IsEmpty())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Features with empty, geometry collection geometries not\n"
+                 "supported in DGN format.");
+        return OGRERR_FAILURE;
+    }
+
     /* -------------------------------------------------------------------- */
     /*      Translate the geometry.                                         */
     /* -------------------------------------------------------------------- */
@@ -1242,7 +1243,7 @@ OGRErr OGRDGNLayer::CreateFeatureWithGeom(OGRFeature *poFeature,
 
     if (wkbFlatten(poGeom->getGeometryType()) == wkbPoint)
     {
-        OGRPoint *poPoint = poGeom->toPoint();
+        const OGRPoint *poPoint = poGeom->toPoint();
         const char *pszText = poFeature->GetFieldAsString("Text");
 
         if ((pszText == nullptr || strlen(pszText) == 0) &&
@@ -1272,7 +1273,7 @@ OGRErr OGRDGNLayer::CreateFeatureWithGeom(OGRFeature *poFeature,
     }
     else if (wkbFlatten(poGeom->getGeometryType()) == wkbPolygon)
     {
-        OGRPolygon *poPoly = poGeom->toPolygon();
+        const OGRPolygon *poPoly = poGeom->toPolygon();
 
         DGNElemCore **papsGroupExt =
             LineStringToElementGroup(poPoly->getExteriorRing(), DGNT_SHAPE);

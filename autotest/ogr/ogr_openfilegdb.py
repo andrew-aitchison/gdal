@@ -31,6 +31,7 @@
 
 import os
 import shutil
+import sys
 
 import gdaltest
 import ogrtest
@@ -156,18 +157,23 @@ ogrtest.openfilegdb_datalist_m = [
 ]
 
 
+@pytest.fixture(autouse=True, scope="module")
+def fgdb_drv():
+    drv = ogr.GetDriverByName("FileGDB")
+    yield drv
+
+
 @pytest.fixture(scope="module", autouse=True)
-def setup_driver():
+def setup_driver(fgdb_drv):
     # remove FileGDB driver before running tests
-    filegdb_driver = ogr.GetDriverByName("FileGDB")
-    if filegdb_driver is not None:
-        filegdb_driver.Deregister()
+    if fgdb_drv is not None:
+        fgdb_drv.Deregister()
 
     yield
 
-    if filegdb_driver is not None:
+    if fgdb_drv is not None:
         print("Reregistering FileGDB driver")
-        filegdb_driver.Register()
+        fgdb_drv.Register()
 
 
 @pytest.fixture()
@@ -251,9 +257,9 @@ def ogr_openfilegdb_make_test_data():
             feat.SetField("real", 4.56)
             feat.SetField("adate", "2013/12/26 12:34:56")
             feat.SetField("guid", "{12345678-9abc-DEF0-1234-567890ABCDEF}")
-            feat.SetFieldBinaryFromHexString("binary", "00FF7F")
+            feat.SetField("binary", b"\x00\xFF\x7F")
             feat.SetField("xml", "<foo></foo>")
-            feat.SetFieldBinaryFromHexString("binary2", "123456")
+            feat.SetField("binary2", b"\x12\x34\x56")
             lyr.CreateFeature(feat)
 
         if data[0] == "none":
@@ -273,13 +279,12 @@ def ogr_openfilegdb_make_test_data():
     if True:  # pylint: disable=using-constant-test
         lyr = ds.CreateLayer("big_layer", geom_type=ogr.wkbNone)
         lyr.CreateField(ogr.FieldDefn("real", ogr.OFTReal))
-        gdal.SetConfigOption("FGDB_BULK_LOAD", "YES")
-        # for i in range(340*341+1):
-        for i in range(340 + 1):
-            feat = ogr.Feature(lyr.GetLayerDefn())
-            feat.SetField(0, i % 4)
-            lyr.CreateFeature(feat)
-        gdal.SetConfigOption("FGDB_BULK_LOAD", None)
+        with gdal.config_option("FGDB_BULK_LOAD", "YES"):
+            # for i in range(340*341+1):
+            for i in range(340 + 1):
+                feat = ogr.Feature(lyr.GetLayerDefn())
+                feat.SetField(0, i % 4)
+                lyr.CreateFeature(feat)
 
     if True:  # pylint: disable=using-constant-test
         lyr = ds.CreateLayer("hole", geom_type=ogr.wkbPoint, srs=None)
@@ -400,12 +405,17 @@ def ogr_openfilegdb_make_test_data():
 # Basic tests
 
 
+@gdaltest.disable_exceptions()
 def test_ogr_openfilegdb_1(gdb_source):
     filename = gdb_source["src"]
     version10 = gdb_source["version_10"]
 
     srs = osr.SpatialReference()
     srs.SetFromUserInput("WGS84")
+
+    assert gdal.OpenEx(filename, gdal.OF_RASTER) is None
+
+    assert gdal.OpenEx(filename, gdal.OF_RASTER | gdal.OF_VECTOR) is not None
 
     ds = ogr.Open(filename)
 
@@ -416,6 +426,7 @@ def test_ogr_openfilegdb_1(gdb_source):
         if lyr_name == "multilinestring25D_multipart" and not version10:
             continue
         lyr = ds.GetLayerByName(lyr_name)
+        assert lyr.GetDataset().GetDescription() == ds.GetDescription()
         expected_geom_type = data[1]
         if expected_geom_type == ogr.wkbLineString:
             expected_geom_type = ogr.wkbMultiLineString
@@ -464,12 +475,8 @@ def test_ogr_openfilegdb_1(gdb_source):
             geom = feat.GetGeometryRef()
             if geom:
                 geom = geom.ExportToWkt()
-            if (
-                geom != expected_wkt
-                and ogrtest.check_feature_geometry(feat, expected_wkt) == 1
-            ):
-                feat.DumpReadable()
-                pytest.fail(expected_wkt)
+            if geom != expected_wkt:
+                ogrtest.check_feature_geometry(feat, expected_wkt)
 
         if (
             feat.GetField("id") != 1
@@ -529,13 +536,8 @@ def test_ogr_openfilegdb_1(gdb_source):
                 expected_wkt = data[3]
             except IndexError:
                 expected_wkt = data[2]
-            if expected_wkt is None:
-                if feat.GetGeometryRef() is not None:
-                    feat.DumpReadable()
-                    pytest.fail(data)
-            elif ogrtest.check_feature_geometry(feat, expected_wkt) != 0:
-                feat.DumpReadable()
-                pytest.fail(data)
+
+            ogrtest.check_feature_geometry(feat, expected_wkt)
 
     ds = None
 
@@ -831,22 +833,25 @@ def test_ogr_openfilegdb_str_indexed_truncated():
 # Test opening an unzipped dataset
 
 
-def test_ogr_openfilegdb_5():
+@pytest.fixture()
+def testopenfilegdb(tmp_path):
 
     try:
-        shutil.rmtree("tmp/testopenfilegdb.gdb")
-    except OSError:
-        pass
-    try:
-        gdaltest.unzip("tmp/", "data/filegdb/testopenfilegdb.gdb.zip")
-    except OSError:
-        pytest.skip()
-    try:
-        os.stat("tmp/testopenfilegdb.gdb")
+        gdaltest.unzip(tmp_path, "data/filegdb/testopenfilegdb.gdb.zip")
     except OSError:
         pytest.skip()
 
-    ds = ogr.Open("tmp/testopenfilegdb.gdb")
+    try:
+        os.stat(tmp_path / "testopenfilegdb.gdb")
+    except OSError:
+        pytest.skip()
+
+    return tmp_path / "testopenfilegdb.gdb"
+
+
+def test_ogr_openfilegdb_5(testopenfilegdb):
+
+    ds = ogr.Open(testopenfilegdb)
     assert ds is not None
 
 
@@ -903,6 +908,7 @@ def test_ogr_openfilegdb_6():
 # Test special SQL processing for ORDER BY
 
 
+@gdaltest.disable_exceptions()
 def test_ogr_openfilegdb_7():
 
     ds = ogr.Open("data/filegdb/testopenfilegdb.gdb.zip")
@@ -1004,12 +1010,11 @@ def test_ogr_openfilegdb_8():
     ds = None
 
     dict_feat_count2 = {}
-    gdal.SetConfigOption("OPENFILEGDB_IGNORE_GDBTABLX", "YES")
-    ds = ogr.Open("data/filegdb/testopenfilegdb.gdb.zip")
-    for i in range(ds.GetLayerCount()):
-        lyr = ds.GetLayer(i)
-        dict_feat_count2[lyr.GetName()] = lyr.GetFeatureCount()
-    gdal.SetConfigOption("OPENFILEGDB_IGNORE_GDBTABLX", None)
+    with gdal.config_option("OPENFILEGDB_IGNORE_GDBTABLX", "YES"):
+        ds = ogr.Open("data/filegdb/testopenfilegdb.gdb.zip")
+        for i in range(ds.GetLayerCount()):
+            lyr = ds.GetLayer(i)
+            dict_feat_count2[lyr.GetName()] = lyr.GetFeatureCount()
 
     assert dict_feat_count == dict_feat_count2
 
@@ -1044,16 +1049,11 @@ def test_ogr_openfilegdb_8():
 # Test reading a .gdbtable outside a .gdb
 
 
-def test_ogr_openfilegdb_9():
+def test_ogr_openfilegdb_9(tmp_path, testopenfilegdb):
 
-    try:
-        os.stat("tmp/testopenfilegdb.gdb")
-    except OSError:
-        pytest.skip()
-
-    shutil.copy("tmp/testopenfilegdb.gdb/a00000009.gdbtable", "tmp/a00000009.gdbtable")
-    shutil.copy("tmp/testopenfilegdb.gdb/a00000009.gdbtablx", "tmp/a00000009.gdbtablx")
-    ds = ogr.Open("tmp/a00000009.gdbtable")
+    shutil.copy(testopenfilegdb / "a00000009.gdbtable", tmp_path / "a00000009.gdbtable")
+    shutil.copy(testopenfilegdb / "a00000009.gdbtablx", tmp_path / "a00000009.gdbtablx")
+    ds = ogr.Open(tmp_path / "a00000009.gdbtable")
     assert ds is not None
     lyr = ds.GetLayer(0)
     feat = lyr.GetNextFeature()
@@ -1080,19 +1080,15 @@ def unfuzz(backup):
         f.write(chr(v).encode("ISO-8859-1"))
 
 
-def test_ogr_openfilegdb_10():
+@gdaltest.disable_exceptions()
+def test_ogr_openfilegdb_10(testopenfilegdb, tmp_path):
 
-    try:
-        os.stat("tmp/testopenfilegdb.gdb")
-    except OSError:
-        pytest.skip()
-
-    shutil.copytree("tmp/testopenfilegdb.gdb", "tmp/testopenfilegdb_fuzzed.gdb")
+    shutil.copytree(testopenfilegdb, tmp_path / "testopenfilegdb_fuzzed.gdb")
 
     if False:  # pylint: disable=using-constant-test
         for filename in [
-            "tmp/testopenfilegdb_fuzzed.gdb/a00000001.gdbtable",
-            "tmp/testopenfilegdb_fuzzed.gdb/a00000001.gdbtablx",
+            tmp_path / "testopenfilegdb_fuzzed.gdb/a00000001.gdbtable",
+            tmp_path / "testopenfilegdb_fuzzed.gdb/a00000001.gdbtablx",
         ]:
             errors = set()
             offsets = []
@@ -1103,7 +1099,7 @@ def test_ogr_openfilegdb_10():
                 backup = fuzz(filename, offset)
                 gdal.ErrorReset()
                 # print(offset)
-                ds = ogr.Open("tmp/testopenfilegdb_fuzzed.gdb")
+                ds = ogr.Open(tmp_path / "testopenfilegdb_fuzzed.gdb")
                 error_msg = gdal.GetLastErrorMsg()
                 feat = None
                 if ds is not None:
@@ -1130,8 +1126,9 @@ def test_ogr_openfilegdb_10():
             print(offsets)
 
         for filename in [
-            "tmp/testopenfilegdb_fuzzed.gdb/a00000004.gdbindexes",
-            "tmp/testopenfilegdb_fuzzed.gdb/a00000004.CatItemsByPhysicalName.atx",
+            tmp_path / "testopenfilegdb_fuzzed.gdb/a00000004.gdbindexes",
+            tmp_path
+            / "testopenfilegdb_fuzzed.gdb/a00000004.CatItemsByPhysicalName.atx",
         ]:
             errors = set()
             offsets = []
@@ -1142,7 +1139,7 @@ def test_ogr_openfilegdb_10():
                 backup = fuzz(filename, offset)
                 gdal.ErrorReset()
                 # print(offset)
-                ds = ogr.Open("tmp/testopenfilegdb_fuzzed.gdb")
+                ds = ogr.Open(tmp_path / "testopenfilegdb_fuzzed.gdb")
                 error_msg = gdal.GetLastErrorMsg()
                 feat = None
                 if ds is not None:
@@ -1173,7 +1170,7 @@ def test_ogr_openfilegdb_10():
 
         for (filename, offsets) in [
             (
-                "tmp/testopenfilegdb_fuzzed.gdb/a00000001.gdbtable",
+                tmp_path / "testopenfilegdb_fuzzed.gdb/a00000001.gdbtable",
                 [
                     4,
                     5,
@@ -1204,39 +1201,38 @@ def test_ogr_openfilegdb_10():
                 ],
             ),
             (
-                "tmp/testopenfilegdb_fuzzed.gdb/a00000001.gdbtablx",
+                tmp_path / "testopenfilegdb_fuzzed.gdb/a00000001.gdbtablx",
                 [4, 7, 11, 12, 16, 31, 5136, 5140, 5142, 5144],
             ),
         ]:
             for offset in offsets:
                 backup = fuzz(filename, offset)
-                gdal.PushErrorHandler("CPLQuietErrorHandler")
-                gdal.ErrorReset()
-                ds = ogr.Open("tmp/testopenfilegdb_fuzzed.gdb")
-                error_msg = gdal.GetLastErrorMsg()
-                feat = None
-                if ds is not None:
+                with gdal.quiet_errors():
                     gdal.ErrorReset()
-                    lyr = ds.GetLayerByName("GDB_SystemCatalog")
-                    if error_msg == "":
-                        error_msg = gdal.GetLastErrorMsg()
-                    if lyr is not None:
+                    ds = ogr.Open(tmp_path / "testopenfilegdb_fuzzed.gdb")
+                    error_msg = gdal.GetLastErrorMsg()
+                    feat = None
+                    if ds is not None:
                         gdal.ErrorReset()
-                        feat = lyr.GetNextFeature()
+                        lyr = ds.GetLayerByName("GDB_SystemCatalog")
                         if error_msg == "":
                             error_msg = gdal.GetLastErrorMsg()
-                if feat is not None and error_msg == "":
-                    print(
-                        "%s: expected problem at offset %d, but did not find"
-                        % (filename, offset)
-                    )
-                ds = None
-                gdal.PopErrorHandler()
+                        if lyr is not None:
+                            gdal.ErrorReset()
+                            feat = lyr.GetNextFeature()
+                            if error_msg == "":
+                                error_msg = gdal.GetLastErrorMsg()
+                    if feat is not None and error_msg == "":
+                        print(
+                            "%s: expected problem at offset %d, but did not find"
+                            % (filename, offset)
+                        )
+                    ds = None
                 unfuzz(backup)
 
         for (filename, offsets) in [
             (
-                "tmp/testopenfilegdb_fuzzed.gdb/a00000004.gdbindexes",
+                tmp_path / "testopenfilegdb_fuzzed.gdb/a00000004.gdbindexes",
                 [
                     0,
                     4,
@@ -1263,36 +1259,36 @@ def test_ogr_openfilegdb_10():
                 ],
             ),
             (
-                "tmp/testopenfilegdb_fuzzed.gdb/a00000004.CatItemsByPhysicalName.atx",
+                tmp_path
+                / "testopenfilegdb_fuzzed.gdb/a00000004.CatItemsByPhysicalName.atx",
                 [4, 12, 8196, 8300, 8460, 8620, 8780, 8940, 9100, 12290, 12294, 12298],
             ),
         ]:
             for offset in offsets:
                 # print(offset)
                 backup = fuzz(filename, offset)
-                gdal.PushErrorHandler("CPLQuietErrorHandler")
-                gdal.ErrorReset()
-                ds = ogr.Open("tmp/testopenfilegdb_fuzzed.gdb")
-                error_msg = gdal.GetLastErrorMsg()
-                feat = None
-                if ds is not None:
+                with gdal.quiet_errors():
                     gdal.ErrorReset()
-                    lyr = ds.GetLayerByName("GDB_Items")
-                    lyr.SetAttributeFilter("PhysicalName = 'NO_FIELD'")
-                    if error_msg == "":
-                        error_msg = gdal.GetLastErrorMsg()
-                    if lyr is not None:
+                    ds = ogr.Open(tmp_path / "testopenfilegdb_fuzzed.gdb")
+                    error_msg = gdal.GetLastErrorMsg()
+                    feat = None
+                    if ds is not None:
                         gdal.ErrorReset()
-                        feat = lyr.GetNextFeature()
+                        lyr = ds.GetLayerByName("GDB_Items")
+                        lyr.SetAttributeFilter("PhysicalName = 'NO_FIELD'")
                         if error_msg == "":
                             error_msg = gdal.GetLastErrorMsg()
-                if feat is not None and error_msg == "":
-                    print(
-                        "%s: expected problem at offset %d, but did not find"
-                        % (filename, offset)
-                    )
-                ds = None
-                gdal.PopErrorHandler()
+                        if lyr is not None:
+                            gdal.ErrorReset()
+                            feat = lyr.GetNextFeature()
+                            if error_msg == "":
+                                error_msg = gdal.GetLastErrorMsg()
+                    if feat is not None and error_msg == "":
+                        print(
+                            "%s: expected problem at offset %d, but did not find"
+                            % (filename, offset)
+                        )
+                    ds = None
                 unfuzz(backup)
 
 
@@ -1312,6 +1308,7 @@ def get_spi_state(ds, lyr):
     return value
 
 
+@gdaltest.disable_exceptions()
 def test_ogr_openfilegdb_in_memory_spatial_filter():
 
     with gdaltest.config_option("OPENFILEGDB_USE_SPATIAL_INDEX", "NO"):
@@ -1538,6 +1535,52 @@ def test_ogr_openfilegdb_spx_spatial_filter():
 
 
 ###############################################################################
+# Test reading a broken .spx that has an index depth of 1 instead of 2
+# Simulates scenario of SWISSTLM3D_2022_LV95_LN02.gdb/a00000019.spx
+# from https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/swisstlm3d_2022-03/swisstlm3d_2022-03_2056_5728.gdb.zip
+# which advertises nIndexDepth == 1 whereas it seems to be it should be 2.
+
+
+@gdaltest.disable_exceptions()
+def test_ogr_openfilegdb_read_broken_spx_wrong_index_depth():
+
+    dirname = "/vsimem/test_ogr_openfilegdb_read_broken_spx_wrong_index_depth.gdb"
+    ds = ogr.GetDriverByName("OpenFileGDB").CreateDataSource(dirname)
+    lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint)
+    for j in range(50):
+        for i in range(50):
+            p = ogr.CreateGeometryFromWkt("POINT(%d %d)" % (i, j))
+            f = ogr.Feature(lyr.GetLayerDefn())
+            f.SetGeometry(p)
+            lyr.CreateFeature(f)
+    ds = None
+
+    # Manually patch index depth from 2 to 1
+    f = gdal.VSIFOpenL(dirname + "/a00000009.spx", "rb+")
+    assert f
+    gdal.VSIFSeekL(f, 0, os.SEEK_END)
+    pos = gdal.VSIFTellL(f) - 22 + 6
+    gdal.VSIFSeekL(f, pos, os.SEEK_SET)
+    assert gdal.VSIFReadL(1, 1, f) == b"\x02"
+    gdal.VSIFSeekL(f, pos, os.SEEK_SET)
+    gdal.VSIFWriteL(b"\x01", 1, 1, f)
+    gdal.VSIFCloseL(f)
+
+    ds = ogr.Open(dirname)
+    lyr = ds.GetLayer(0)
+    lyr.SetSpatialFilterRect(0.5, 0.5, 48.5, 48.5)
+    with gdal.quiet_errors():
+        assert lyr.GetFeatureCount() == 48 * 48
+    assert (
+        "Cannot use /vsimem/test_ogr_openfilegdb_read_broken_spx_wrong_index_depth.gdb/a00000009.spx"
+        in gdal.GetLastErrorMsg()
+    )
+    ds = None
+
+    gdal.RmdirRecursive(dirname)
+
+
+###############################################################################
 # Test opening a FGDB with both SRID and LatestSRID set (#5638)
 
 
@@ -1689,6 +1732,7 @@ def test_ogr_openfilegdb_17():
 # Read curves
 
 
+@pytest.mark.require_driver("CSV")
 def test_ogr_openfilegdb_18():
 
     ds = ogr.Open("data/filegdb/curves.gdb")
@@ -1697,18 +1741,14 @@ def test_ogr_openfilegdb_18():
     lyr_ref = ds_ref.GetLayer(0)
     for f in lyr:
         f_ref = lyr_ref.GetNextFeature()
-        if ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef()) != 0:
-            print(f.GetGeometryRef().ExportToWkt())
-            pytest.fail(f_ref.GetGeometryRef().ExportToWkt())
+        ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef())
 
     lyr = ds.GetLayerByName("polygon")
     ds_ref = ogr.Open("data/filegdb/curves_polygon.csv")
     lyr_ref = ds_ref.GetLayer(0)
     for f in lyr:
         f_ref = lyr_ref.GetNextFeature()
-        if ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef()) != 0:
-            print(f.GetGeometryRef().ExportToWkt())
-            pytest.fail(f_ref.GetGeometryRef().ExportToWkt())
+        ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef())
 
     ds = ogr.Open("data/filegdb/curve_circle_by_center.gdb")
     lyr = ds.GetLayer(0)
@@ -1716,9 +1756,7 @@ def test_ogr_openfilegdb_18():
     lyr_ref = ds_ref.GetLayer(0)
     for f in lyr:
         f_ref = lyr_ref.GetNextFeature()
-        if ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef()) != 0:
-            print(f.GetGeometryRef().ExportToWkt())
-            pytest.fail(f_ref.GetGeometryRef().ExportToWkt())
+        ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef())
 
 
 ###############################################################################
@@ -1738,6 +1776,7 @@ def test_ogr_openfilegdb_19():
 # one of the starting point (#7017)
 
 
+@pytest.mark.require_driver("CSV")
 def test_ogr_openfilegdb_20():
 
     ds = ogr.Open("data/filegdb/filegdb_polygonzm_m_not_closing_with_curves.gdb")
@@ -1748,9 +1787,7 @@ def test_ogr_openfilegdb_20():
     lyr_ref = ds_ref.GetLayer(0)
     for f in lyr:
         f_ref = lyr_ref.GetNextFeature()
-        if ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef()) != 0:
-            print(f.GetGeometryRef().ExportToIsoWkt())
-            pytest.fail(f_ref.GetGeometryRef().ExportToIsoWkt())
+        ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef())
 
     ds = ogr.Open("data/filegdb/filegdb_polygonzm_nan_m_with_curves.gdb")
     lyr = ds.GetLayer(0)
@@ -1758,9 +1795,7 @@ def test_ogr_openfilegdb_20():
     lyr_ref = ds_ref.GetLayer(0)
     for f in lyr:
         f_ref = lyr_ref.GetNextFeature()
-        if ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef()) != 0:
-            print(f.GetGeometryRef().ExportToIsoWkt())
-            pytest.fail(f_ref.GetGeometryRef().ExportToIsoWkt())
+        ogrtest.check_feature_geometry(f, f_ref.GetGeometryRef())
 
 
 ###############################################################################
@@ -1793,10 +1828,8 @@ def test_ogr_openfilegdb_21():
 # where a polygon with inner rings has its exterior ring with wrong orientation
 
 
+@pytest.mark.require_geos
 def test_ogr_openfilegdb_weird_winding_order():
-
-    if not ogrtest.have_geos():
-        pytest.skip()
 
     ds = ogr.Open(
         "/vsizip/data/filegdb/weird_winding_order_fgdb.zip/roads_clip Drawing.gdb"
@@ -1905,7 +1938,7 @@ def _check_domains(ds):
         "SpeedLimit",
     }
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetFieldDomain("i_dont_exist") is None
     lyr = ds.GetLayer(0)
     lyr_defn = lyr.GetLayerDefn()
@@ -1950,13 +1983,9 @@ def test_ogr_openfilegdb_read_domains():
 # Test writing field domains
 
 
-def test_ogr_openfilegdb_write_domains_from_other_gdb():
+def test_ogr_openfilegdb_write_domains_from_other_gdb(tmp_path):
 
-    out_dir = "tmp/test_ogr_fgdb_write_domains.gdb"
-    try:
-        shutil.rmtree(out_dir)
-    except OSError:
-        pass
+    out_dir = tmp_path / "test_ogr_fgdb_write_domains.gdb"
 
     ds = gdal.VectorTranslate(
         out_dir, "data/filegdb/Domains.gdb", options="-f OpenFileGDB"
@@ -1967,7 +1996,7 @@ def test_ogr_openfilegdb_write_domains_from_other_gdb():
     assert ds.TestCapability(ogr.ODsCDeleteFieldDomain) == 1
     assert ds.TestCapability(ogr.ODsCUpdateFieldDomain) == 1
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ds.DeleteFieldDomain("not_existing")
 
     domain = ogr.CreateCodedFieldDomain(
@@ -2001,6 +2030,7 @@ def test_ogr_openfilegdb_write_domains_from_other_gdb():
 # Test reading layer hierarchy
 
 
+@gdaltest.disable_exceptions()
 def test_ogr_openfilegdb_read_layer_hierarchy():
 
     if False:
@@ -2035,7 +2065,7 @@ def test_ogr_openfilegdb_read_layer_hierarchy():
     assert fd1 is not None
     assert fd1.GetVectorLayerNames() == ["fd1_lyr1", "fd1_lyr2"]
     assert fd1.OpenVectorLayer("not_existing") is None
-    assert fd1.GetGroupNames() is None
+    assert len(fd1.GetGroupNames()) == 0
 
     fd1_lyr1 = fd1.OpenVectorLayer("fd1_lyr1")
     assert fd1_lyr1 is not None
@@ -2352,7 +2382,7 @@ def test_ogr_openfilegdb_read_relationships():
     assert rel.GetRightMappingTableFields() is None
     assert rel.GetForwardPathLabel() == "my forward path label"
     assert rel.GetBackwardPathLabel() == "my backward path label"
-    assert rel.GetRelatedTableType() == "feature"
+    assert rel.GetRelatedTableType() == "features"
 
     rel = ds.GetRelationship("simple_one_to_many")
     assert rel is not None
@@ -2364,7 +2394,7 @@ def test_ogr_openfilegdb_read_relationships():
     assert rel.GetType() == gdal.GRT_ASSOCIATION
     assert rel.GetLeftTableFields() == ["pk"]
     assert rel.GetRightTableFields() == ["parent_pk"]
-    assert rel.GetRelatedTableType() == "feature"
+    assert rel.GetRelatedTableType() == "features"
 
     rel = ds.GetRelationship("simple_many_to_many")
     assert rel is not None
@@ -2378,7 +2408,7 @@ def test_ogr_openfilegdb_read_relationships():
     assert rel.GetLeftMappingTableFields() == ["origin_foreign_key"]
     assert rel.GetRightTableFields() == ["parent_pk"]
     assert rel.GetRightMappingTableFields() == ["destination_foreign_key"]
-    assert rel.GetRelatedTableType() == "feature"
+    assert rel.GetRelatedTableType() == "features"
 
     rel = ds.GetRelationship("composite_one_to_one")
     assert rel is not None
@@ -2390,7 +2420,7 @@ def test_ogr_openfilegdb_read_relationships():
     assert rel.GetType() == gdal.GRT_COMPOSITE
     assert rel.GetLeftTableFields() == ["pk"]
     assert rel.GetRightTableFields() == ["parent_pk"]
-    assert rel.GetRelatedTableType() == "feature"
+    assert rel.GetRelatedTableType() == "features"
 
     rel = ds.GetRelationship("composite_one_to_many")
     assert rel is not None
@@ -2402,7 +2432,7 @@ def test_ogr_openfilegdb_read_relationships():
     assert rel.GetType() == gdal.GRT_COMPOSITE
     assert rel.GetLeftTableFields() == ["pk"]
     assert rel.GetRightTableFields() == ["parent_pk"]
-    assert rel.GetRelatedTableType() == "feature"
+    assert rel.GetRelatedTableType() == "features"
 
     rel = ds.GetRelationship("composite_many_to_many")
     assert rel is not None
@@ -2416,7 +2446,7 @@ def test_ogr_openfilegdb_read_relationships():
     assert rel.GetLeftMappingTableFields() == ["origin_foreign_key"]
     assert rel.GetRightTableFields() == ["parent_pk"]
     assert rel.GetRightMappingTableFields() == ["dest_foreign_key"]
-    assert rel.GetRelatedTableType() == "feature"
+    assert rel.GetRelatedTableType() == "features"
 
     rel = ds.GetRelationship("points__ATTACHREL")
     assert rel is not None
@@ -2434,21 +2464,273 @@ def test_ogr_openfilegdb_read_relationships():
 
 
 ###############################################################################
-# Cleanup
+# Test opening a read-only database in update mode
 
 
-def test_ogr_openfilegdb_cleanup():
+@pytest.mark.skipif(sys.platform != "linux", reason="Incorrect platform")
+def test_ogr_openfilegdb_read_readonly_in_update_mode(tmp_path):
+
+    if os.getuid() == 0:
+        pytest.skip("running as root... skipping")
+
+    shutil.copytree("data/filegdb/Domains.gdb", tmp_path / "testreadonly.gdb")
+    os.chmod(tmp_path / "testreadonly.gdb", 0o555)
+    for f in os.listdir(tmp_path / "testreadonly.gdb"):
+        os.chmod(f"{tmp_path}/testreadonly.gdb/{f}", 0o555)
 
     try:
-        shutil.rmtree("tmp/testopenfilegdb.gdb")
-    except OSError:
-        pass
-    try:
-        os.remove("tmp/a00000009.gdbtable")
-        os.remove("tmp/a00000009.gdbtablx")
-    except OSError:
-        pass
-    try:
-        shutil.rmtree("tmp/testopenfilegdb_fuzzed.gdb")
-    except OSError:
-        pass
+        with pytest.raises(Exception):
+            ogr.Open(tmp_path / "testreadonly.gdb", update=1)
+
+        assert ogr.Open(tmp_path / "testreadonly.gdb")
+
+        # Only turn on a few system tables in read-write mode, but not the
+        # layer of interest
+        for f in os.listdir(tmp_path / "testreadonly.gdb"):
+            if f.startswith("a00000001.") or f.startswith("a00000004."):
+                os.chmod(f"{tmp_path}/testreadonly.gdb/{f}", 0o755)
+        ds = ogr.Open(tmp_path / "testreadonly.gdb", update=1)
+        lyr = ds.GetLayer(0)
+        with pytest.raises(
+            Exception, match="Cannot open Roads in update mode, but only in read-only"
+        ):
+            lyr.TestCapability(ogr.OLCSequentialWrite)
+        assert lyr.TestCapability(ogr.OLCSequentialWrite) == 0
+
+    finally:
+        os.chmod(tmp_path / "testreadonly.gdb", 0o755)
+        for f in os.listdir(tmp_path / "testreadonly.gdb"):
+            os.chmod(f"{tmp_path}/testreadonly.gdb/{f}", 0o755)
+        shutil.rmtree(tmp_path / "testreadonly.gdb")
+
+
+###############################################################################
+# Test reading a Integer64 field (ArcGIS Pro >= 3.2)
+
+
+def test_ogr_openfilegdb_read_int64():
+
+    ds = ogr.Open("data/filegdb/arcgis_pro_32_types.gdb")
+    lyr = ds.GetLayerByName("big_int")
+    lyr_defn = lyr.GetLayerDefn()
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("big"))
+    assert fld_defn.GetType() == ogr.OFTInteger64
+    assert fld_defn.GetDefault() == "1234567890123456"
+
+    f = lyr.GetNextFeature()
+    assert f["short"] == 32767
+    assert f["long"] == 2147483647
+    assert f["big"] == 9007199254740991
+    assert f["float"] == pytest.approx(3.4e38)
+    assert f["double"] == pytest.approx(1.7976931348623e308)
+
+    f = lyr.GetNextFeature()
+    assert f["short"] == -32768
+    assert f["long"] == -2147483647
+    assert f["big"] == -9007199254740991
+    assert f["float"] == pytest.approx(-3.4e38)
+    assert f["double"] == pytest.approx(-1.7976931348623e308)
+
+    lyr.SetAttributeFilter("big > 0")
+    f = lyr.GetNextFeature()
+    assert f["big"] == 9007199254740991
+
+    lyr.SetAttributeFilter("big < 0")
+    f = lyr.GetNextFeature()
+    assert f["big"] == -9007199254740991
+
+    with ds.ExecuteSQL("SELECT MIN(big), MAX(big) FROM big_int") as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        assert f["MIN_big"] == -9007199254740991
+        assert f["MAX_big"] == 9007199254740991
+
+
+###############################################################################
+# Test reading DateOnly, TimeOnly, TimestampOffset fields (ArcGIS Pro >= 3.2)
+
+
+def test_ogr_openfilegdb_read_new_datetime_types():
+
+    ds = ogr.Open("data/filegdb/arcgis_pro_32_types.gdb")
+
+    lyr = ds.GetLayerByName("date_types")
+    lyr_defn = lyr.GetLayerDefn()
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("date"))
+    assert fld_defn.GetType() == ogr.OFTDateTime
+    assert fld_defn.GetDefault() == "'2023/02/01 04:05:06'"
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("date_only"))
+    assert fld_defn.GetType() == ogr.OFTDate
+    assert fld_defn.GetDefault() == "'2023/02/01'"
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("time_only"))
+    assert fld_defn.GetType() == ogr.OFTTime
+    assert fld_defn.GetDefault() == "'04:05:06'"
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("timestamp_offset"))
+    assert fld_defn.GetType() == ogr.OFTDateTime
+    assert fld_defn.GetDefault() == "'2023/02/01 04:05:06.000+06:00'"
+
+    f = lyr.GetNextFeature()
+    assert f["date"] == "2023/11/29 13:14:15+00"
+    assert f["date_only"] == "2023/11/29"
+    assert f["time_only"] == "13:14:15"
+    assert f["timestamp_offset"] == "2023/11/29 13:14:15-05"
+
+    f = lyr.GetNextFeature()
+    assert f["date"] == "2023/12/31 00:01:01+00"
+    assert f["date_only"] == "2023/12/31"
+    assert f["time_only"] == "00:01:01"
+    assert f["timestamp_offset"] == "2023/12/31 00:01:01+10"
+
+    with ds.ExecuteSQL('SELECT MIN("date"), MAX("date") FROM date_types') as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        assert f["MIN_date"] == "1901/01/01 00:01:01+00"
+        assert f["MAX_date"] == "2023/12/31 00:01:01+00"
+
+    with ds.ExecuteSQL(
+        'SELECT MIN("date_only"), MAX("date_only") FROM date_types'
+    ) as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        assert f["MIN_date_only"] == "1901/01/01"
+        assert f["MAX_date_only"] == "2023/12/31"
+
+    with ds.ExecuteSQL(
+        'SELECT MIN("time_only"), MAX("time_only") FROM date_types'
+    ) as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        assert f["MIN_time_only"] == "00:01:01"
+        assert f["MAX_time_only"] == "13:14:15"
+
+    with ds.ExecuteSQL(
+        'SELECT MIN("timestamp_offset"), MAX("timestamp_offset") FROM date_types'
+    ) as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        assert f["MIN_timestamp_offset"] == "1901/01/01 00:01:01+10"
+        assert f["MAX_timestamp_offset"] == "2023/12/31 00:01:01+10"
+
+    lyr = ds.GetLayerByName("date_types_high_precision")
+    lyr_defn = lyr.GetLayerDefn()
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("date"))
+    assert fld_defn.GetType() == ogr.OFTDateTime
+    assert fld_defn.GetDefault() == "'2023/01/02 04:05:06'"
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("date_only"))
+    assert fld_defn.GetType() == ogr.OFTDate
+    assert fld_defn.GetDefault() == "'2023/01/02'"
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("time_only"))
+    assert fld_defn.GetType() == ogr.OFTTime
+    assert fld_defn.GetDefault() == "'04:05:06'"
+
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("timestamp_offset"))
+    assert fld_defn.GetType() == ogr.OFTDateTime
+    assert fld_defn.GetDefault() == "'2023/01/02 04:05:06.000+06:00'"
+
+    f = lyr.GetNextFeature()
+    assert f["date"] == "2023/11/29 13:14:15.678+00"
+    assert f["date_only"] == "2023/11/29"
+    assert f["time_only"] == "13:14:15"
+    assert f["timestamp_offset"] == "2023/11/29 13:14:15-05"
+
+    f = lyr.GetNextFeature()
+    assert f["date"] == "2023/12/31 00:01:01.001+00"
+    assert f["date_only"] == "2023/12/31"
+    assert f["time_only"] == "00:01:01"
+    assert f["timestamp_offset"] == "2023/12/31 00:01:01+10"
+
+    with ds.ExecuteSQL(
+        'SELECT MIN("timestamp_offset"), MAX("timestamp_offset") FROM date_types_high_precision'
+    ) as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        assert f["MIN_timestamp_offset"] == "1900/12/31 14:01:01"
+        assert f["MAX_timestamp_offset"] == "2023/12/30 14:01:01"
+
+
+###############################################################################
+# Test GetExtent() and GetExtent3D()
+
+
+def test_ogr_openfilegdb_get_extent_getextent3d():
+
+    ds = ogr.Open("data/filegdb/testopenfilegdb.gdb.zip")
+
+    lyr = ds.GetLayerByName("point")
+    assert lyr.TestCapability(ogr.OLCFastGetExtent)
+    assert lyr.GetExtent() == (1.0, 1.0, 2.0, 2.0)
+    assert lyr.TestCapability(ogr.OLCFastGetExtent3D)
+    assert lyr.GetExtent3D() == (1.0, 1.0, 2.0, 2.0, float("inf"), float("-inf"))
+
+    lyr = ds.GetLayerByName("point25D")
+    assert lyr.TestCapability(ogr.OLCFastGetExtent)
+    assert lyr.GetExtent() == (1.0, 1.0, 2.0, 2.0)
+    assert lyr.TestCapability(ogr.OLCFastGetExtent3D)
+    assert lyr.GetExtent3D() == (1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
+    lyr.SetAttributeFilter("1=1")
+    assert lyr.TestCapability(ogr.OLCFastGetExtent3D) == 0
+    assert lyr.GetExtent3D() == pytest.approx((1.0, 1.0, 2.0, 2.0, 3.0, 3.0))
+
+    lyr = ds.GetLayerByName("none")
+    lyr.TestCapability(ogr.OLCFastGetExtent)
+    assert lyr.GetExtent(can_return_null=True) is None
+    lyr.TestCapability(ogr.OLCFastGetExtent3D)
+    assert lyr.GetExtent3D(can_return_null=True) is None
+
+    ds = ogr.Open("data/filegdb/arcgis_pro_32_types.gdb")
+    lyr = ds.GetLayerByName("date_types")
+    assert lyr.TestCapability(ogr.OLCFastGetExtent)
+    assert lyr.GetExtent() == pytest.approx(
+        (
+            -109.26723474299996,
+            -104.69136945899999,
+            40.407842636000055,
+            41.69941751400006,
+        )
+    )
+    assert lyr.TestCapability(ogr.OLCFastGetExtent3D) == 0
+    assert lyr.GetExtent3D() == pytest.approx(
+        (
+            -109.26723474299996,
+            -104.69136945899999,
+            40.407842636000055,
+            41.69941751400006,
+            0.0,
+            0.0,
+        )
+    )
+
+
+###############################################################################
+# Test IdentifyDriver()
+
+
+def test_ogr_openfilegdb_try_identify_vector_as_raster():
+
+    assert gdal.IdentifyDriverEx("data/filegdb/empty_polygon.gdb") is not None
+    assert (
+        gdal.IdentifyDriverEx("data/filegdb/empty_polygon.gdb", gdal.OF_RASTER) is None
+    )
+
+
+###############################################################################
+# Test reading a database with a compressed layer (.cdf)
+
+
+@gdaltest.disable_exceptions()
+def test_ogr_openfilegdb_read_cdf():
+
+    msgs = []
+
+    def error_handler(klass, type, msg):
+        msgs.append(msg)
+
+    with gdaltest.error_handler(error_handler):
+        assert ogr.Open("data/filegdb/with_cdf.gdb") is None
+
+    assert len(msgs) == 1
+    assert (
+        "file using Compressed Data Format (CDF) that is unhandled by the OpenFileGDB driver, but could be handled by the FileGDB driver"
+        in msgs[0]
+    )

@@ -55,12 +55,12 @@ for dirname in alg port gcore ogr frmts gnm apps fuzzers; do
     printf "Running cppcheck on %s (can be long): " "$dirname"
     cppcheck --inline-suppr --template='{file}:{line},{severity},{id},{message}' \
         --enable=all --inconclusive ${POSIX} -UAFL_FRIENDLY -UANDROID \
-        -UCOMPAT_WITH_ICC_CONVERSION_CHECK -DDEBUG -UDEBUG_BOOL -DHAVE_CXX11=1 \
+        -UCOMPAT_WITH_ICC_CONVERSION_CHECK -DDEBUG -UDEBUG_BOOL \
         -D__linux \
         -DGBool=int -DCPL_HAS_GINT64=1 -DHAVE_GEOS -DHAVE_EXPAT -DHAVE_XERCES -DCOMPILATION_ALLOWED \
         -DHAVE_SFCGAL -DHAVE_SPATIALITE -DSPATIALITE_412_OR_LATER \
         -D_SC_NPROCESSORS_ONLN -DHAVE_SCHED_GETAFFINITY \
-        -DHAVE_SQLITE -DSQLITE_VERSION_NUMBER=3006000 -DHAVE_SQLITE_VFS \
+        -DHAVE_SQLITE -DSQLITE_VERSION_NUMBER=3031001 -DHAVE_SQLITE_VFS \
         -DHAVE_RASTERLITE2 \
         -DHAVE_CURL -DLIBCURL_VERSION_NUM=0x073800 \
         -DPTHREAD_MUTEX_RECURSIVE -DCPU_LITTLE_ENDIAN -DCPL_IS_LSB=1 \
@@ -76,7 +76,7 @@ for dirname in alg port gcore ogr frmts gnm apps fuzzers; do
         -DHAVE_MITAB \
         -DOGR_SQLITE_ALLOW_LOAD_EXTENSIONS \
         -Dva_copy=va_start \
-        -D__cplusplus=201103 \
+        -D__cplusplus=201703 \
         -DVSIRealloc=realloc \
         -DCPPCHECK \
         -DDEBUG_MUTEX \
@@ -95,7 +95,21 @@ for dirname in alg port gcore ogr frmts gnm apps fuzzers; do
         -DINT_MIN=-2147483648 \
         -DINT_MAX=2147483647 \
         -DUINT_MAX=4294967295U \
+        -D__x86_64__ \
+        -DFLT_EVAL_METHOD \
         -DKDU_HAS_ROI_RECT \
+        -Dflatbuffers=gdal_flatbuffers \
+        -DPROJ_VERSION_MAJOR=9 \
+        -DPROJ_VERSION_MINOR=4 \
+        -DPROJ_VERSION_PATCH=0 \
+        -DLIBCURL_VERSION="\"X.Y.Z\"" \
+        -DMVT_MBTILES_PMTILES_COMMON_DSCO="\"\"" \
+        -DMVT_MBTILES_COMMON_DSCO="\"\"" \
+        -DKDU_CORE_VERSION="\"X.Y.Z\"" \
+        -DPCIDSK_FRMT_64_WITHOUT_PREFIX="\"ll\"" \
+        -DPCIDSK_FRMT_UINT64="\"%llu\"" \
+        -DGNMGFIDFormat="\"%lld\"" \
+        -DGDAL_RELEASE_NAME="\"dummy\"" \
         --include="${CPL_CONFIG_H}" \
         --include=port/cpl_port.h \
         -I "${CPL_CONFIG_H_DIR}" \
@@ -133,8 +147,24 @@ mv ${LOG_FILE}.tmp ${LOG_FILE}
 grep -v -e "ogr/ogrsf_frmts/flatgeobuf/flatbuffers" ${LOG_FILE} > ${LOG_FILE}.tmp
 mv ${LOG_FILE}.tmp ${LOG_FILE}
 
+# Ignore pmtiles header
+grep -v -e "ogr/ogrsf_frmts/pmtiles/pmtiles/" ${LOG_FILE} > ${LOG_FILE}.tmp
+mv ${LOG_FILE}.tmp ${LOG_FILE}
+
+# Ignore apps/argparse/ header
+grep -v -e "apps/argparse/" ${LOG_FILE} > ${LOG_FILE}.tmp
+mv ${LOG_FILE}.tmp ${LOG_FILE}
+
+# Ignore third_party/fast_float
+grep -v -e "third_party/fast_float" ${LOG_FILE} > ${LOG_FILE}.tmp
+mv ${LOG_FILE}.tmp ${LOG_FILE}
+
 # False positive deallocuse
 grep -v -e "frmts/png/libpng/png.c" ${LOG_FILE} > ${LOG_FILE}.tmp
+mv ${LOG_FILE}.tmp ${LOG_FILE}
+
+# Ignore duplInheritedMember warning
+grep -v -e "duplInheritedMember" ${LOG_FILE} > ${LOG_FILE}.tmp
 mv ${LOG_FILE}.tmp ${LOG_FILE}
 
 if grep "null pointer" ${LOG_FILE} ; then

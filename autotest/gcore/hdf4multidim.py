@@ -37,6 +37,12 @@ from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("HDF4")
 
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Test reading HDFEOS SWATH products
@@ -44,11 +50,10 @@ pytestmark = pytest.mark.require_driver("HDF4")
 
 def test_hdf4multidim_hdfeos_swath():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "https://gamma.hdfgroup.org/ftp/pub/outgoing/NASAHDFfiles2/eosweb/hdf4/hdfeos2-swath-wo-dimmaps/AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
         "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.OpenEx(
         "tmp/cache/AMSR_E_L2_Ocean_B01_200206182340_A.hdf", gdal.OF_MULTIDIM_RASTER
@@ -134,11 +139,10 @@ def test_hdf4multidim_hdfeos_swath():
 
 def test_hdf4multidim_hdfeos_grid():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/MOD09A1.A2010041.h06v03.005.2010051001103.hdf",
         "MOD09A1.A2010041.h06v03.005.2010051001103.hdf",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.OpenEx(
         "tmp/cache/MOD09A1.A2010041.h06v03.005.2010051001103.hdf",
@@ -221,7 +225,7 @@ def test_hdf4multidim_gdal_sds_2d():
     ds = gdal.OpenEx("data/byte_2.hdf", gdal.OF_MULTIDIM_RASTER)
     assert ds
     rg = ds.GetRootGroup()
-    assert rg.GetGroupNames() is None
+    assert len(rg.GetGroupNames()) == 0
     assert rg.OpenGroup("scientific_datasets") is None
     assert rg.GetMDArrayNames() == ["Band0", "X", "Y"]
     dims = rg.GetDimensions()
@@ -267,7 +271,7 @@ def test_hdf4multidim_gdal_sds_3d():
     ds = gdal.OpenEx("data/byte_3.hdf", gdal.OF_MULTIDIM_RASTER)
     assert ds
     rg = ds.GetRootGroup()
-    assert rg.GetGroupNames() is None
+    assert len(rg.GetGroupNames()) == 0
     assert rg.OpenGroup("scientific_datasets") is None
     assert rg.GetMDArrayNames() == ["3-dimensional Scientific Dataset", "X", "Y"]
     dims = rg.GetDimensions()
@@ -388,11 +392,10 @@ def test_hdf4multidim_sds_unlimited_dim():
 
 def test_hdf4multidim_sds_read_world():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "http://download.osgeo.org/gdal/data/hdf4/A2004259075000.L2_LAC_SST.hdf",
         "A2004259075000.L2_LAC_SST.hdf",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.OpenEx("tmp/cache/A2004259075000.L2_LAC_SST.hdf", gdal.OF_MULTIDIM_RASTER)
     assert ds
@@ -429,11 +432,10 @@ def test_hdf4multidim_sds_read_world():
 
 def test_hdf4multidim_sds_read_world_with_indexing_variable():
 
-    if not gdaltest.download_file(
+    gdaltest.download_or_skip(
         "https://download.osgeo.org/gdal/data/hdf4/REANALYSIS_1999217.hdf",
         "REANALYSIS_1999217.hdf",
-    ):
-        pytest.skip()
+    )
 
     ds = gdal.OpenEx("tmp/cache/REANALYSIS_1999217.hdf", gdal.OF_MULTIDIM_RASTER)
     assert ds

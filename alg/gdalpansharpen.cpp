@@ -28,9 +28,11 @@
  ****************************************************************************/
 
 #include "cpl_port.h"
+#include "cpl_worker_thread_pool.h"
 #include "gdalpansharpen.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -50,8 +52,6 @@
 
 // Limit types to practical use cases.
 #define LIMIT_TYPES 1
-
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                     GDALCreatePansharpenOptions()                    */
@@ -148,8 +148,6 @@ GDALClonePansharpenOptions(const GDALPansharpenOptions *psOptions)
     psNewOptions->bHasNoData = psOptions->bHasNoData;
     psNewOptions->dfNoData = psOptions->dfNoData;
     psNewOptions->nThreads = psOptions->nThreads;
-    psNewOptions->dfMSShiftX = psOptions->dfMSShiftX;
-    psNewOptions->dfMSShiftY = psOptions->dfMSShiftY;
     return psNewOptions;
 }
 
@@ -210,8 +208,94 @@ GDALPansharpenOperation::Initialize(const GDALPansharpenOptions *psOptionsIn)
                  "spectral bands");
         return CE_Failure;
     }
+
+    auto poPanchroBand = GDALRasterBand::FromHandle(psOptionsIn->hPanchroBand);
+    auto poPanchroDS = poPanchroBand->GetDataset();
+    if (poPanchroDS == nullptr)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot retrieve dataset associated with hPanchroBand");
+        return CE_Failure;
+    }
+    // Make sure that the band is really a first level child of the owning dataset
+    if (poPanchroDS->GetRasterBand(poPanchroBand->GetBand()) != poPanchroBand)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "poPanchroDS->GetRasterBand(poPanchroBand->GetBand()) != "
+                 "poPanchroBand");
+        return CE_Failure;
+    }
+    std::array<double, 6> adfPanchroGT;
+    if (poPanchroDS->GetGeoTransform(adfPanchroGT.data()) != CE_None)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Panchromatic band has no associated geotransform");
+        return CE_Failure;
+    }
+
     GDALRasterBandH hRefBand = psOptionsIn->pahInputSpectralBands[0];
-    int bSameDataset = psOptionsIn->nInputSpectralBands > 1;
+    auto poRefBand = GDALRasterBand::FromHandle(hRefBand);
+    auto poRefBandDS = poRefBand->GetDataset();
+    if (poRefBandDS == nullptr)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Cannot retrieve dataset associated with ahInputSpectralBands[0]");
+        return CE_Failure;
+    }
+    // Make sure that the band is really a first level child of the owning dataset
+    if (poRefBandDS->GetRasterBand(poRefBand->GetBand()) != poRefBand)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "poRefBandDS->GetRasterBand(poRefBand->GetBand()) != poRefBand");
+        return CE_Failure;
+    }
+
+    std::array<double, 6> adfRefMSGT;
+    if (poRefBandDS->GetGeoTransform(adfRefMSGT.data()) != CE_None)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "ahInputSpectralBands[0] band has no associated geotransform");
+        return CE_Failure;
+    }
+
+    std::array<double, 6> adfInvMSGT;
+    if (!GDALInvGeoTransform(adfRefMSGT.data(), adfInvMSGT.data()))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "ahInputSpectralBands[0] geotransform is not invertible");
+        return CE_Failure;
+    }
+
+    // Do InvMSGT * PanchroGT multiplication
+    m_adfPanToMSGT[1] =
+        adfInvMSGT[1] * adfPanchroGT[1] + adfInvMSGT[2] * adfPanchroGT[4];
+    m_adfPanToMSGT[2] =
+        adfInvMSGT[1] * adfPanchroGT[2] + adfInvMSGT[2] * adfPanchroGT[5];
+    m_adfPanToMSGT[0] = adfInvMSGT[1] * adfPanchroGT[0] +
+                        adfInvMSGT[2] * adfPanchroGT[3] + adfInvMSGT[0];
+    m_adfPanToMSGT[4] =
+        adfInvMSGT[4] * adfPanchroGT[1] + adfInvMSGT[5] * adfPanchroGT[4];
+    m_adfPanToMSGT[5] =
+        adfInvMSGT[4] * adfPanchroGT[2] + adfInvMSGT[5] * adfPanchroGT[5];
+    m_adfPanToMSGT[3] = adfInvMSGT[4] * adfPanchroGT[0] +
+                        adfInvMSGT[5] * adfPanchroGT[3] + adfInvMSGT[3];
+#if 0
+    CPLDebug("GDAL", "m_adfPanToMSGT[] = %g %g %g %g %g %g",
+           m_adfPanToMSGT[0], m_adfPanToMSGT[1], m_adfPanToMSGT[2],
+           m_adfPanToMSGT[3], m_adfPanToMSGT[4], m_adfPanToMSGT[5]);
+#endif
+    if (std::fabs(m_adfPanToMSGT[2]) > 1e-10 ||
+        std::fabs(m_adfPanToMSGT[4]) > 1e-10)
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Composition of panchromatic and multispectral geotransform "
+                 "has rotational terms");
+        return CE_Failure;
+    }
+
+    bool bSameDataset = psOptionsIn->nInputSpectralBands > 1;
     if (bSameDataset)
         anInputBands.push_back(GDALGetBandNumber(hRefBand));
     for (int i = 1; i < psOptionsIn->nInputSpectralBands; i++)
@@ -223,16 +307,52 @@ GDALPansharpenOperation::Initialize(const GDALPansharpenOptions *psOptionsIn)
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Dimensions of input spectral band %d different from "
                      "first spectral band",
-                     i);
+                     i + 1);
             return CE_Failure;
         }
+
+        auto poBand = GDALRasterBand::FromHandle(hBand);
+        auto poBandDS = poBand->GetDataset();
+        if (poBandDS == nullptr)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot retrieve dataset associated with "
+                     "input spectral band %d",
+                     i + 1);
+            return CE_Failure;
+        }
+        // Make sure that the band is really a first level child of the owning dataset
+        if (poBandDS->GetRasterBand(poBand->GetBand()) != poBand)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "poBandDS->GetRasterBand(poBand->GetBand()) != poBand");
+            return CE_Failure;
+        }
+
+        std::array<double, 6> adfMSGT;
+        if (poBandDS->GetGeoTransform(adfMSGT.data()) != CE_None)
+        {
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                "input spectral band %d band has no associated geotransform",
+                i + 1);
+            return CE_Failure;
+        }
+        if (adfMSGT != adfRefMSGT)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "input spectral band %d has a different "
+                     "geotransform than the first spectral band",
+                     i + 1);
+            return CE_Failure;
+        }
+
         if (bSameDataset)
         {
-            if (GDALGetBandDataset(hBand) == nullptr ||
-                GDALGetBandDataset(hBand) != GDALGetBandDataset(hRefBand))
+            if (GDALGetBandDataset(hBand) != GDALGetBandDataset(hRefBand))
             {
                 anInputBands.resize(0);
-                bSameDataset = FALSE;
+                bSameDataset = false;
             }
             else
             {
@@ -258,8 +378,6 @@ GDALPansharpenOperation::Initialize(const GDALPansharpenOptions *psOptionsIn)
         }
     }
 
-    GDALRasterBand *poPanchroBand =
-        GDALRasterBand::FromHandle(psOptionsIn->hPanchroBand);
     GDALDataType eWorkDataType = poPanchroBand->GetRasterDataType();
     if (psOptionsIn->nBitDepth)
     {
@@ -422,7 +540,7 @@ void GDALPansharpenOperation::WeightedBroveyWithNoData(
     WorkDataType noData, validValue;
     GDALCopyWord(psOptions->dfNoData, noData);
 
-    if (!(std::numeric_limits<WorkDataType>::is_integer))
+    if constexpr (!(std::numeric_limits<WorkDataType>::is_integer))
         validValue = static_cast<WorkDataType>(noData + 1e-5);
     else if (noData == std::numeric_limits<WorkDataType>::min())
         validValue = std::numeric_limits<WorkDataType>::min() + 1;
@@ -536,8 +654,11 @@ void GDALPansharpenOperation::WeightedBrovey3(
                                          j];
             WorkDataType nPansharpenedValue;
             GDALCopyWord(nRawValue * dfFactor, nPansharpenedValue);
-            if (bHasBitDepth && nPansharpenedValue > nMaxValue)
-                nPansharpenedValue = nMaxValue;
+            if constexpr (bHasBitDepth)
+            {
+                if (nPansharpenedValue > nMaxValue)
+                    nPansharpenedValue = nMaxValue;
+            }
             GDALCopyWord(nPansharpenedValue, pDataBuf[i * nBandValues + j]);
         }
     }
@@ -554,15 +675,15 @@ size_t GDALPansharpenOperation::WeightedBroveyPositiveWeightsInternal(
     const T *pPanBuffer, const T *pUpsampledSpectralBuffer, T *pDataBuf,
     size_t nValues, size_t nBandValues, T nMaxValue) const
 {
-    CPL_STATIC_ASSERT(NINPUT == 3 || NINPUT == 4);
-    CPL_STATIC_ASSERT(NOUTPUT == 3 || NOUTPUT == 4);
+    static_assert(NINPUT == 3 || NINPUT == 4);
+    static_assert(NOUTPUT == 3 || NOUTPUT == 4);
     const XMMReg4Double w0 =
         XMMReg4Double::Load1ValHighAndLow(psOptions->padfWeights + 0);
     const XMMReg4Double w1 =
         XMMReg4Double::Load1ValHighAndLow(psOptions->padfWeights + 1);
     const XMMReg4Double w2 =
         XMMReg4Double::Load1ValHighAndLow(psOptions->padfWeights + 2);
-    const XMMReg4Double w3 =
+    [[maybe_unused]] const XMMReg4Double w3 =
         (NINPUT == 3)
             ? XMMReg4Double::Zero()
             : XMMReg4Double::Load1ValHighAndLow(psOptions->padfWeights + 3);
@@ -584,7 +705,7 @@ size_t GDALPansharpenOperation::WeightedBroveyPositiveWeightsInternal(
         XMMReg4Double val2 = XMMReg4Double::Load4Val(pUpsampledSpectralBuffer +
                                                      2 * nBandValues + j);
         XMMReg4Double val3;
-        if (NINPUT == 4 || NOUTPUT == 4)
+        if constexpr (NINPUT == 4 || NOUTPUT == 4)
         {
             val3 = XMMReg4Double::Load4Val(pUpsampledSpectralBuffer +
                                            3 * nBandValues + j);
@@ -593,7 +714,7 @@ size_t GDALPansharpenOperation::WeightedBroveyPositiveWeightsInternal(
         pseudoPanchro += w0 * val0;
         pseudoPanchro += w1 * val1;
         pseudoPanchro += w2 * val2;
-        if (NINPUT == 4)
+        if constexpr (NINPUT == 4)
             pseudoPanchro += w3 * val3;
 
         /* Little trick to avoid use of ternary operator due to one of the
@@ -605,14 +726,14 @@ size_t GDALPansharpenOperation::WeightedBroveyPositiveWeightsInternal(
         val0 = XMMReg4Double::Min(val0 * factor, maxValue);
         val1 = XMMReg4Double::Min(val1 * factor, maxValue);
         val2 = XMMReg4Double::Min(val2 * factor, maxValue);
-        if (NOUTPUT == 4)
+        if constexpr (NOUTPUT == 4)
         {
             val3 = XMMReg4Double::Min(val3 * factor, maxValue);
         }
         val0.Store4Val(pDataBuf + 0 * nBandValues + j);
         val1.Store4Val(pDataBuf + 1 * nBandValues + j);
         val2.Store4Val(pDataBuf + 2 * nBandValues + j);
-        if (NOUTPUT == 4)
+        if constexpr (NOUTPUT == 4)
         {
             val3.Store4Val(pDataBuf + 3 * nBandValues + j);
         }
@@ -627,13 +748,13 @@ size_t GDALPansharpenOperation::WeightedBroveyPositiveWeightsInternal(
     const T *pPanBuffer, const T *pUpsampledSpectralBuffer, T *pDataBuf,
     size_t nValues, size_t nBandValues, T nMaxValue) const
 {
-    // cppcheck-suppress knownConditionTrueFalse
-    CPLAssert(NINPUT == 3 || NINPUT == 4);
+    static_assert(NINPUT == 3 || NINPUT == 4);
     const double dfw0 = psOptions->padfWeights[0];
     const double dfw1 = psOptions->padfWeights[1];
     const double dfw2 = psOptions->padfWeights[2];
     // cppcheck-suppress knownConditionTrueFalse
-    const double dfw3 = (NINPUT == 3) ? 0 : psOptions->padfWeights[3];
+    [[maybe_unused]] const double dfw3 =
+        (NINPUT == 3) ? 0 : psOptions->padfWeights[3];
     size_t j = 0;  // Used after for.
     for (; j + 1 < nValues; j += 2)
     {
@@ -653,7 +774,7 @@ size_t GDALPansharpenOperation::WeightedBroveyPositiveWeightsInternal(
         dfPseudoPanchro2 +=
             dfw2 * pUpsampledSpectralBuffer[2 * nBandValues + j + 1];
 
-        if (NINPUT == 4)
+        if constexpr (NINPUT == 4)
         {
             dfPseudoPanchro +=
                 dfw3 * pUpsampledSpectralBuffer[3 * nBandValues + j];
@@ -1066,7 +1187,8 @@ CPLErr GDALPansharpenOperation::ProcessRegion(int nXOff, int nYOff, int nXSize,
 #endif
     const int nDataTypeSize = GDALGetDataTypeSizeBytes(eWorkDataType);
     GByte *pUpsampledSpectralBuffer = static_cast<GByte *>(VSI_MALLOC3_VERBOSE(
-        nXSize, nYSize, psOptions->nInputSpectralBands * nDataTypeSize));
+        nXSize, nYSize,
+        cpl::fits_on<int>(psOptions->nInputSpectralBands * nDataTypeSize)));
     GByte *pPanBuffer = static_cast<GByte *>(
         VSI_MALLOC3_VERBOSE(nXSize, nYSize, nDataTypeSize));
     if (pUpsampledSpectralBuffer == nullptr || pPanBuffer == nullptr)
@@ -1100,14 +1222,10 @@ CPLErr GDALPansharpenOperation::ProcessRegion(int nXOff, int nYOff, int nXSize,
     // cppcheck-suppress redundantAssignment
     sExtraArg.eResampleAlg = eResampleAlg;
     sExtraArg.bFloatingPointWindowValidity = TRUE;
-    double dfRatioX = static_cast<double>(poPanchroBand->GetXSize()) /
-                      aMSBands[0]->GetXSize();
-    double dfRatioY = static_cast<double>(poPanchroBand->GetYSize()) /
-                      aMSBands[0]->GetYSize();
-    sExtraArg.dfXOff = (nXOff + psOptions->dfMSShiftX) / dfRatioX;
-    sExtraArg.dfYOff = (nYOff + psOptions->dfMSShiftY) / dfRatioY;
-    sExtraArg.dfXSize = nXSize / dfRatioX;
-    sExtraArg.dfYSize = nYSize / dfRatioY;
+    sExtraArg.dfXOff = m_adfPanToMSGT[0] + nXOff * m_adfPanToMSGT[1];
+    sExtraArg.dfYOff = m_adfPanToMSGT[3] + nYOff * m_adfPanToMSGT[5];
+    sExtraArg.dfXSize = nXSize * m_adfPanToMSGT[1];
+    sExtraArg.dfYSize = nYSize * m_adfPanToMSGT[5];
     if (sExtraArg.dfXOff + sExtraArg.dfXSize > aMSBands[0]->GetXSize())
         sExtraArg.dfXOff = aMSBands[0]->GetXSize() - sExtraArg.dfXSize;
     if (sExtraArg.dfYOff + sExtraArg.dfYSize > aMSBands[0]->GetYSize())
@@ -1149,7 +1267,7 @@ CPLErr GDALPansharpenOperation::ProcessRegion(int nXOff, int nYOff, int nXSize,
 
         GByte *pSpectralBuffer = static_cast<GByte *>(VSI_MALLOC3_VERBOSE(
             nXSizeExtract, nYSizeExtract,
-            psOptions->nInputSpectralBands * nDataTypeSize));
+            cpl::fits_on<int>(psOptions->nInputSpectralBands * nDataTypeSize)));
         if (pSpectralBuffer == nullptr)
         {
             VSIFree(pUpsampledSpectralBuffer);
@@ -1257,12 +1375,11 @@ CPLErr GDALPansharpenOperation::ProcessRegion(int nXOff, int nYOff, int nXSize,
                     pasJobs[i].eResampleAlg = eResampleAlg;
                     pasJobs[i].dfXOff = sExtraArg.dfXOff - nXOffExtract;
                     pasJobs[i].dfYOff =
-                        (nYOff + psOptions->dfMSShiftY + iStartLine) /
-                            dfRatioY -
-                        nYOffExtract;
+                        m_adfPanToMSGT[3] +
+                        (nYOff + iStartLine) * m_adfPanToMSGT[5] - nYOffExtract;
                     pasJobs[i].dfXSize = sExtraArg.dfXSize;
                     pasJobs[i].dfYSize =
-                        (iNextStartLine - iStartLine) / dfRatioY;
+                        (iNextStartLine - iStartLine) * m_adfPanToMSGT[5];
                     if (pasJobs[i].dfXOff + pasJobs[i].dfXSize >
                         aMSBands[0]->GetXSize())
                     {

@@ -42,6 +42,13 @@ from osgeo import gdal, osr
 pytestmark = pytest.mark.require_driver("GRIB")
 
 
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
 def has_jp2kdrv():
     for i in range(gdal.GetDriverCount()):
         if gdal.GetDriver(i).ShortName.startswith("JP2"):
@@ -56,7 +63,7 @@ def has_jp2kdrv():
 def test_grib_1():
 
     tst = gdaltest.GDALTest("GRIB", "grib/ds.mint.bin", 2, 46927)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -83,15 +90,12 @@ def test_grib_2():
 def test_grib_read_different_sizes_messages():
 
     tst = gdaltest.GDALTest("GRIB", "grib/bug3246.grb", 4, 4081)
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    result = tst.testOpen()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        tst.testOpen()
 
     msg = gdal.GetLastErrorMsg()
-    if msg.find("data access may be incomplete") == -1 or gdal.GetLastErrorType() != 2:
-        gdaltest.post_reason("did not get expected warning.")
-
-    return result
+    assert "data access may be incomplete" in msg, "did not get expected warning."
+    assert gdal.GetLastErrorType() == 2, "did not get expected warning."
 
 
 ###############################################################################
@@ -119,6 +123,24 @@ def test_grib_grib2_read_nodata():
     }
     for k in expected_md:
         assert k in md and md[k] == expected_md[k], "Did not get expected metadata"
+
+
+###############################################################################
+# Check nodata
+
+
+@pytest.mark.parametrize("band_nr", [1, 2])
+@pytest.mark.parametrize("call_getmetadata_before", [False, True])
+def test_grib_grib2_read_nodata_bands_with_bitmap(band_nr, call_getmetadata_before):
+
+    # File generated with the following (build in -DDEBUG mode so GRIB_WRITE_BITMAP_TEST related code is compiled)
+    # gdal_translate autotest/gcore/data/byte.tif test.grib2 --config GRIB_WRITE_BITMAP_TEST YES
+    # gdal_translate autotest/gcore/data/byte.tif test.grib2 --config GRIB_WRITE_BITMAP_TEST YES -co append_subdataset=yes
+
+    ds = gdal.Open("data/grib/two_bands_with_bitmap.grib2")
+    if call_getmetadata_before:
+        ds.GetRasterBand(band_nr).GetMetadata()
+    assert ds.GetRasterBand(band_nr).GetNoDataValue() == 9999
 
 
 ###############################################################################
@@ -232,10 +254,8 @@ def test_grib_grib2_read_template_4_15():
 # Test support for PNG compressed
 
 
+@pytest.mark.require_driver("PNG")
 def test_grib_grib2_read_png():
-
-    if gdal.GetDriverByName("PNG") is None:
-        pytest.skip()
 
     ds = gdal.Open("data/grib/MRMS_EchoTop_18_00.50_20161015-133230.grib2")
     cs = ds.GetRasterBand(1).Checksum()
@@ -321,7 +341,7 @@ def test_grib_grib1_read_rotated_pole_lonlat():
 
     projection = ds.GetProjectionRef()
     expected_projection_proj_7 = 'GEOGCRS["Coordinate System imported from GRIB file",BASEGEOGCRS["Coordinate System imported from GRIB file",DATUM["unnamed",ELLIPSOID["Sphere",6367470,0,LENGTHUNIT["metre",1,ID["EPSG",9001]]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]],DERIVINGCONVERSION["Pole rotation (GRIB convention)",METHOD["Pole rotation (GRIB convention)"],PARAMETER["Latitude of the southern pole (GRIB convention)",-30,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],PARAMETER["Longitude of the southern pole (GRIB convention)",-15,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],PARAMETER["Axis rotation (GRIB convention)",0,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]],CS[ellipsoidal,2],AXIS["latitude",north,ORDER[1],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],AXIS["longitude",east,ORDER[2],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]]'
-    expected_projection_before_proj_7 = 'PROJCS["unnamed",GEOGCS["Coordinate System imported from GRIB file",DATUM["unnamed",SPHEROID["Sphere",6367470,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],PROJECTION["Rotated_pole"],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=ob_tran +lon_0=-15 +o_proj=longlat +o_lon_p=0 +o_lat_p=30 +a=6367470 +b=6367470 +to_meter=0.0174532925199 +wktext"]]'
+    expected_projection_before_proj_7 = 'PROJCS["unnamed",GEOGCS["Coordinate System imported from GRIB file",DATUM["unnamed",SPHEROID["Sphere",6367470,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],PROJECTION["Rotated_pole"],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=ob_tran +lon_0=-15 +o_proj=longlat +o_lon_p=0 +o_lat_p=30 +a=6367470 +b=6367470 +to_meter=0.0174532925199433 +wktext"]]'
     assert projection in (
         expected_projection_proj_7,
         expected_projection_before_proj_7,
@@ -362,7 +382,7 @@ def test_grib_grib2_read_rotated_pole_lonlat():
 
     projection = ds.GetProjectionRef()
     expected_projection_proj_7 = 'GEOGCRS["Coordinate System imported from GRIB file",BASEGEOGCRS["Coordinate System imported from GRIB file",DATUM["unnamed",ELLIPSOID["Sphere",6371229,0,LENGTHUNIT["metre",1,ID["EPSG",9001]]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]],DERIVINGCONVERSION["Pole rotation (GRIB convention)",METHOD["Pole rotation (GRIB convention)"],PARAMETER["Latitude of the southern pole (GRIB convention)",-31.758312,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],PARAMETER["Longitude of the southern pole (GRIB convention)",-92.402969,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],PARAMETER["Axis rotation (GRIB convention)",0,ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]],CS[ellipsoidal,2],AXIS["latitude",north,ORDER[1],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],AXIS["longitude",east,ORDER[2],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]]'
-    expected_projection_before_proj_7 = 'PROJCS["unnamed",GEOGCS["Coordinate System imported from GRIB file",DATUM["unnamed",SPHEROID["Sphere",6371229,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],PROJECTION["Rotated_pole"],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=ob_tran +lon_0=-92.4029689999999846 +o_proj=longlat +o_lon_p=0 +o_lat_p=31.7583120000000001 +a=6371229 +b=6371229 +to_meter=0.0174532925199 +wktext"]]'
+    expected_projection_before_proj_7 = 'PROJCS["unnamed",GEOGCS["Coordinate System imported from GRIB file",DATUM["unnamed",SPHEROID["Sphere",6371229,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],PROJECTION["Rotated_pole"],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=ob_tran +lon_0=-92.4029689999999846 +o_proj=longlat +o_lon_p=0 +o_lat_p=31.7583120000000001 +a=6371229 +b=6371229 +to_meter=0.0174532925199433 +wktext"]]'
     assert projection in (
         expected_projection_proj_7,
         expected_projection_before_proj_7,
@@ -384,11 +404,10 @@ def test_grib_grib2_read_rotated_pole_lonlat():
 # Test support for GRIB2 Section 4 Template 40, Analysis or forecast at a horizontal level or in a horizontal layer at a point in time for atmospheric chemical constituents
 
 
+@pytest.mark.skipif(not has_jp2kdrv(), reason="No JPEG2000 driver")
 def test_grib_grib2_read_template_4_40():
 
     # We could use some other encoding that JP2K...
-    if not has_jp2kdrv():
-        pytest.skip()
 
     # First band extracted from https://download.regional.atmosphere.copernicus.eu/services/CAMS50?token=__M0bChV6QsoOFqHz31VRqnpr4GhWPtcpaRy3oeZjBNSg__&grid=0.1&model=ENSEMBLE&package=ANALYSIS_PM10_SURFACE&time=-24H-1H&referencetime=2017-09-12T00:00:00Z&format=GRIB2&licence=yes
     # with data nullified
@@ -416,7 +435,7 @@ def test_grib_grib2_read_template_4_40():
 
 def test_grib_grib2_read_template_4_unhandled():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("data/grib/template_4_65535.grb2")
     md = ds.GetRasterBand(1).GetMetadata()
     expected_md = {"GRIB_PDS_TEMPLATE_NUMBERS": "0 1 2 3 4 5", "GRIB_PDS_PDTN": "65535"}
@@ -601,9 +620,7 @@ def test_grib_grib2_read_spatial_differencing_order_1():
 
     ds = gdal.Open("data/grib/spatial_differencing_order_1.grb2")
     cs = ds.GetRasterBand(1).Checksum()
-    if cs != 46650:
-        gdaltest.post_reason("Did not get expected checksum")
-        print(cs)
+    assert cs == 46650, "Did not get expected checksum"
 
 
 ###############################################################################
@@ -640,7 +657,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_TEMPLATE_NUMBERS and more elements than needed (warning)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -664,7 +681,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_TEMPLATE_ASSEMBLED_VALUES and insufficient number of elements
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -699,7 +716,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_TEMPLATE_ASSEMBLED_VALUES and more elements than needed (warning)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -723,7 +740,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_TEMPLATE_ASSEMBLED_VALUES and insufficient number of elements
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -758,7 +775,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_TEMPLATE_ASSEMBLED_VALUES with variable number of elements, and insufficient number of elements in the variable section
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -772,7 +789,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_TEMPLATE_ASSEMBLED_VALUES with variable number of elements, and extra elements
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -815,7 +832,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with unknown PDS_PDTN with PDS_TEMPLATE_NUMBERS
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -824,7 +841,7 @@ def test_grib_grib2_write_creation_options():
         )
     assert out_ds is not None
     out_ds = None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(tmpfilename)
     md = ds.GetRasterBand(1).GetMetadata()
     expected_md = {"GRIB_PDS_PDTN": "65535", "GRIB_PDS_TEMPLATE_NUMBERS": "1 2 3 4 5"}
@@ -834,7 +851,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with unknown PDS_PDTN with PDS_TEMPLATE_ASSEMBLED_VALUES
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -848,7 +865,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with PDS_PDTN != 0 without template numbers
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename, "data/byte.tif", format="GRIB", creationOptions=["PDS_PDTN=32"]
         )
@@ -856,7 +873,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with invalid values in PDS_TEMPLATE_NUMBERS
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -868,7 +885,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with invalid values in PDS_TEMPLATE_ASSEMBLED_VALUES
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -884,7 +901,7 @@ def test_grib_grib2_write_creation_options():
     gdal.Unlink(tmpfilename)
 
     # Test with both PDS_TEMPLATE_NUMBERS and PDS_TEMPLATE_ASSEMBLED_VALUES
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate(
             tmpfilename,
             "data/byte.tif",
@@ -1036,6 +1053,141 @@ def test_grib_grib2_write_projections():
     ), "did not get expected geotransform for LCC_1SP"
     out_ds = None
     gdal.Unlink(tmpfilename)
+
+
+###############################################################################
+# Test GRIB2 write support for projections
+
+
+@pytest.mark.require_proj(9, 0)
+def test_grib_grib2_write_rotated_lat_lon_from_projstring(tmp_vsimem):
+
+    filename = str(
+        tmp_vsimem / "test_grib_grib2_write_rotated_lat_lon_from_projstring.grb2"
+    )
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        "+proj=ob_tran +o_proj=longlat +o_lon_p=-10 +o_lat_p=39.25 +lon_0=18 +a=6367470 +rf=594.313048347956 +no_defs"
+    )
+    src_ds.SetSpatialRef(srs)
+    src_ds.SetGeoTransform([2, 1, 0, 49, 0, -1])
+    gdal.Translate(filename, src_ds, format="GRIB")
+    assert gdal.VSIStatL(filename + ".aux.xml") is None
+    out_ds = gdal.Open(filename)
+    assert (
+        out_ds.GetSpatialRef().ExportToProj4()
+        == "+proj=ob_tran +o_proj=longlat +o_lon_p=-10 +o_lat_p=39.25 +lon_0=18 +a=6367470 +rf=594.313048347956 +no_defs"
+    )
+    assert out_ds.GetGeoTransform() == pytest.approx([2, 1, 0, 49, 0, -1])
+
+
+###############################################################################
+# Test GRIB2 write support for projections
+
+
+@pytest.mark.require_proj(9, 0)
+def test_grib_grib2_write_rotated_lat_lon_from_grib_convention(tmp_vsimem):
+
+    filename = str(
+        tmp_vsimem / "test_grib_grib2_write_rotated_lat_lon_from_grib_convention.grb2"
+    )
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        """GEOGCRS["Coordinate System imported from GRIB file",
+    BASEGEOGCRS["Coordinate System imported from GRIB file",
+        DATUM["unnamed",
+            ELLIPSOID["Spheroid imported from GRIB file",6367470,594.313048347956,
+                LENGTHUNIT["metre",1,
+                    ID["EPSG",9001]]]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]]],
+    DERIVINGCONVERSION["Pole rotation (GRIB convention)",
+        METHOD["Pole rotation (GRIB convention)"],
+        PARAMETER["Latitude of the southern pole (GRIB convention)",-39.25,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]],
+        PARAMETER["Longitude of the southern pole (GRIB convention)",18,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]],
+        PARAMETER["Axis rotation (GRIB convention)",10,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]]],
+    CS[ellipsoidal,2],
+        AXIS["latitude",north,
+            ORDER[1],
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]],
+        AXIS["longitude",east,
+            ORDER[2],
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]]]"""
+    )
+    src_ds.SetSpatialRef(srs)
+    src_ds.SetGeoTransform([2, 1, 0, 49, 0, -1])
+    gdal.Translate(filename, src_ds, format="GRIB")
+    assert gdal.VSIStatL(filename + ".aux.xml") is None
+    out_ds = gdal.Open(filename)
+    assert (
+        out_ds.GetSpatialRef().ExportToProj4()
+        == "+proj=ob_tran +o_proj=longlat +o_lon_p=-10 +o_lat_p=39.25 +lon_0=18 +a=6367470 +rf=594.313048347956 +no_defs"
+    )
+
+
+###############################################################################
+# Test GRIB2 write support for projections
+
+
+@pytest.mark.require_proj(9, 0)
+def test_grib_grib2_write_rotated_lat_lon_from_netcdf_convention(tmp_vsimem):
+
+    filename = str(
+        tmp_vsimem / "test_grib_grib2_write_rotated_lat_lon_from_netcdf_convention.grb2"
+    )
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        """GEOGCRS["Rotated_pole",
+    BASEGEOGCRS["unknown",
+        DATUM["unnamed",
+            ELLIPSOID["Spheroid",6367470,594.313048347956,
+                LENGTHUNIT["metre",1,
+                    ID["EPSG",9001]]]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]]],
+    DERIVINGCONVERSION["Pole rotation (netCDF CF convention)",
+        METHOD["Pole rotation (netCDF CF convention)"],
+        PARAMETER["Grid north pole latitude (netCDF CF convention)",39.25,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]],
+        PARAMETER["Grid north pole longitude (netCDF CF convention)",-162,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]],
+        PARAMETER["North pole grid longitude (netCDF CF convention)",-10,
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]]],
+    CS[ellipsoidal,2],
+        AXIS["latitude",north,
+            ORDER[1],
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]],
+        AXIS["longitude",east,
+            ORDER[2],
+            ANGLEUNIT["degree",0.0174532925199433,
+                ID["EPSG",9122]]]]"""
+    )
+    src_ds.SetSpatialRef(srs)
+    src_ds.SetGeoTransform([2, 1, 0, 49, 0, -1])
+    gdal.Translate(filename, src_ds, format="GRIB")
+    assert gdal.VSIStatL(filename + ".aux.xml") is None
+    out_ds = gdal.Open(filename)
+    assert (
+        out_ds.GetSpatialRef().ExportToProj4()
+        == "+proj=ob_tran +o_proj=longlat +o_lon_p=-10 +o_lat_p=39.25 +lon_0=18 +a=6367470 +rf=594.313048347956 +no_defs"
+    )
 
 
 ###############################################################################
@@ -1393,7 +1545,7 @@ def test_grib_grib2_write_data_encodings():
         gdal.ErrorReset()
         options = ["DATA_ENCODING=" + encoding]
         if encoding == "COMPLEX_PACKING":
-            with gdaltest.error_handler():
+            with gdal.quiet_errors():
                 success = gdal.Translate(
                     tmpfilename, test_ds, format="GRIB", creationOptions=options
                 )
@@ -1494,11 +1646,9 @@ def test_grib_grib2_write_data_encodings():
         cs = out_ds.GetRasterBand(1).Checksum()
         out_ds = None
         gdal.Unlink(tmpfilename)
-        if cs == 0 or cs == 50235:  # 50235: lossless checksum
-            gdaltest.post_reason(
-                "did not get expected checksum for lossy JPEG2000 with " + drvname
-            )
-            print(cs)
+        assert (
+            cs != 0 and cs != 50235
+        ), f"did not get expected checksum for lossy JPEG2000 with {drvname}"  # 50235: lossless checksum
 
 
 ###############################################################################
@@ -1545,7 +1695,7 @@ def test_grib_grib2_write_data_encodings_warnings_and_errors():
         tmpfilename = "/vsimem/out.grb2"
         src_ds = gdal.Open(filename)
         gdal.ErrorReset()
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             out_ds = gdaltest.grib_drv.CreateCopy(tmpfilename, src_ds, options=options)
 
         error_msg = gdal.GetLastErrorMsg()
@@ -1596,7 +1746,7 @@ def test_grib_grib2_write_data_encodings_warnings_and_errors():
         tmpfilename = "/vsimem/out.grb2"
         src_ds = gdal.Open(filename)
         gdal.ErrorReset()
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             out_ds = gdaltest.grib_drv.CreateCopy(tmpfilename, src_ds, options=options)
 
         error_msg = gdal.GetLastErrorMsg()
@@ -1613,7 +1763,7 @@ def test_grib_grib2_write_data_encodings_warnings_and_errors():
 
     gdal.Unlink("/vsimem/huge.tif")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdal.Translate("/i/do_not/exist.grb2", "data/byte.tif", format="GRIB")
     assert out_ds is None, "expected null return"
 
@@ -1806,16 +1956,11 @@ def test_grib_grib2_write_mix_nodata_and_a_single_data():
 # Test GRIB2 file with JPEG2000 codestream on a single line (#6719)
 
 
+@pytest.mark.skipif(not has_jp2kdrv(), reason="No JPEG2000 driver")
 def test_grib_online_grib2_jpeg2000_single_line():
 
-    if not has_jp2kdrv():
-        pytest.skip()
-
     filename = "CMC_hrdps_continental_PRATE_SFC_0_ps2.5km_2017111712_P001-00.grib2"
-    if not gdaltest.download_file(
-        "http://download.osgeo.org/gdal/data/grib/" + filename
-    ):
-        pytest.skip()
+    gdaltest.download_or_skip("http://download.osgeo.org/gdal/data/grib/" + filename)
 
     ds = gdal.Open("tmp/cache/" + filename)
     cs = ds.GetRasterBand(1).Checksum()
@@ -2166,3 +2311,69 @@ def test_grib_grib2_parameter_in_wmo_tables_only():
         ds.GetRasterBand(1).GetMetadataItem("GRIB_ELEMENT")
         == "Latent heat net flux due to evaporation"
     )
+
+
+# Test reading a south polar stereographic GRIB1 dataset (#7298)
+
+
+def test_grib_grib1_south_polar_stereographic():
+
+    ds = gdal.Open("/vsisparse/data/grib/south_polar_stereo_grib1.grb.xml")
+    assert "+proj=stere +lat_0=-90 +lat_ts=-60" in ds.GetSpatialRef().ExportToProj4()
+    assert ds.GetGeoTransform() == pytest.approx(
+        (-3243994.6063763676, 7673.0, 0.0, 3286668.2989108698, 0.0, -7673.0)
+    )
+
+
+# Test reading a LAEA GRIB2 dataset with negative longitudes (#7456)
+
+
+def test_grib_grib2_laea_negative_longitudes():
+
+    # Dataset generated with
+    # gdal_translate ukv2km.grib2 out.grib2 -srcwin 0 0 1 1 --config GRIB_ADJUST_LONGITUDE_RANGE NO
+    ds = gdal.Open("data/grib/laea_with_negative_longitudes_issue_7456.grib2")
+    assert (
+        "+proj=laea +lat_0=54.9 +lon_0=-2.5 +x_0=0 +y_0=0"
+        in ds.GetSpatialRef().ExportToProj4()
+    )
+    assert ds.GetGeoTransform() == pytest.approx(
+        (-1158999.9595231502, 2000.0, 0.0, 903000.0029299166, 0.0, -2000.0)
+    )
+
+
+# Test reading file with wrong shape of earth (#7811)
+
+
+def test_grib_grib2_wrong_earth_shape():
+
+    # Dataset generated with
+    # gdal_translate byte.tif byte_wrong_shape.grib2 -of grib
+    # with patching WriteEllipsoidAndRasterSize() to write
+    # Byte=1 (spherical sphere)
+    # Byte=255 (invalid scale)
+    # UInt32=-1 (invalid scaled radius)
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/grib/byte_wrong_earth_shape.grib2")
+        assert (
+            "The GRIB file contains invalid values for the spheroid"
+            in gdal.GetLastErrorMsg()
+        )
+    assert ds.GetSpatialRef() is None
+
+    with gdaltest.config_option("GRIB_USE_DEFAULT_SPHEROID", "YES"):
+        ds = gdal.Open("data/grib/byte_wrong_earth_shape.grib2")
+        assert ds.GetSpatialRef().GetSemiMajor() == 6377563.396
+        assert ds.GetSpatialRef().GetSemiMinor() == 6377563.396
+
+
+# Test reading file with template 5.42 / CCSDS szip/aes compression
+
+
+def test_grib_grib2_template_5_42_CCDS_aes_decompression():
+
+    ds = gdal.Open("data/grib/template_5_42_ccsds_aec.grb2")
+    if gdal.GetDriverByName("GRIB").GetMetadataItem("HAVE_AEC"):
+        assert ds.GetRasterBand(1).Checksum() == 41970
+    else:
+        assert ds.GetRasterBand(1).Checksum() == -1

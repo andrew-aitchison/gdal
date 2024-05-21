@@ -36,7 +36,7 @@
 
 #define MAX_GCPS 5000  // this should be more than enough ground control points
 
-namespace
+namespace gdal::TSX
 {
 enum ePolarization
 {
@@ -54,7 +54,9 @@ enum eProductType
     eGEC,
     eUnknown
 };
-}  // namespace
+}  // namespace gdal::TSX
+
+using namespace gdal::TSX;
 
 /************************************************************************/
 /* Helper Functions                                                     */
@@ -193,8 +195,8 @@ CPLErr TSXRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     {
         nRequestYSize = nRasterYSize - nBlockYOff * nBlockYSize;
         memset(pImage, 0,
-               (GDALGetDataTypeSize(eDataType) / 8) * nBlockXSize *
-                   nBlockYSize);
+               static_cast<size_t>(GDALGetDataTypeSizeBytes(eDataType)) *
+                   nBlockXSize * nBlockYSize);
     }
     else
     {
@@ -437,7 +439,7 @@ bool TSXDataset::getGCPsFromGEOREF_XML(char *pszGeorefFilename)
         // CPLAtof(CPLGetXMLValue(psNode,"height",""));
     }
 
-    m_oGCPSRS = osr;
+    m_oGCPSRS = std::move(osr);
 
     CPLDestroyXMLNode(psGeorefData);
 
@@ -650,7 +652,7 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
 
             /* try opening the file that represents that band */
             GDALDataset *poBandData =
-                reinterpret_cast<GDALDataset *>(GDALOpen(pszPath, GA_ReadOnly));
+                GDALDataset::FromHandle(GDALOpen(pszPath, GA_ReadOnly));
             if (poBandData != nullptr)
             {
                 TSXRasterBand *poBand =

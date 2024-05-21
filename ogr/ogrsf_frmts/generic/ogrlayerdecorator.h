@@ -65,6 +65,11 @@ class CPL_DLL OGRLayerDecorator : public OGRLayer
     virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
     virtual OGRErr IUpsertFeature(OGRFeature *poFeature) override;
     virtual OGRErr DeleteFeature(GIntBig nFID) override;
+    OGRErr IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
+                          const int *panUpdatedFieldsIdx,
+                          int nUpdatedGeomFieldsCount,
+                          const int *panUpdatedGeomFieldsIdx,
+                          bool bUpdateStyleString) override;
 
     virtual GDALDataset *GetDataset() override;
     virtual bool GetArrowStream(struct ArrowArrayStream *out_stream,
@@ -83,7 +88,7 @@ class CPL_DLL OGRLayerDecorator : public OGRLayer
 
     virtual int TestCapability(const char *) override;
 
-    virtual OGRErr CreateField(OGRFieldDefn *poField,
+    virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
     virtual OGRErr DeleteField(int iField) override;
     virtual OGRErr ReorderFields(int *panMap) override;
@@ -94,7 +99,7 @@ class CPL_DLL OGRLayerDecorator : public OGRLayer
                        const OGRGeomFieldDefn *poNewGeomFieldDefn,
                        int nFlags) override;
 
-    virtual OGRErr CreateGeomField(OGRGeomFieldDefn *poField,
+    virtual OGRErr CreateGeomField(const OGRGeomFieldDefn *poField,
                                    int bApproxOK = TRUE) override;
 
     virtual OGRErr SyncToDisk() override;
@@ -111,7 +116,7 @@ class CPL_DLL OGRLayerDecorator : public OGRLayer
     virtual const char *GetFIDColumn() override;
     virtual const char *GetGeometryColumn() override;
 
-    virtual OGRErr SetIgnoredFields(const char **papszFields) override;
+    virtual OGRErr SetIgnoredFields(CSLConstList papszFields) override;
 
     virtual char **GetMetadata(const char *pszDomain = "") override;
     virtual CPLErr SetMetadata(char **papszMetadata,

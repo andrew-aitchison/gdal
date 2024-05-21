@@ -68,6 +68,7 @@ class COASPMetadataReader
     COASPMetadataItem *GetNextItem();
     COASPMetadataItem *GetItem(int nItem);
     int GotoMetadataItem(const char *pszName);
+
     int GetCurrentItem() const
     {
         return nCurrentItem;
@@ -85,11 +86,13 @@ class COASPMetadataItem
     COASPMetadataItem() : pszItemName(nullptr), pszItemValue(nullptr)
     {
     }
+
     COASPMetadataItem(char *pszItemName, char *pszItemValue);
     ~COASPMetadataItem();
 
     char *GetItemName();
     char *GetItemValue();
+
     static int GetType()
     {
         return TYPE_GENERIC;
@@ -112,11 +115,14 @@ class COASPMetadataGeorefGridItem : public COASPMetadataItem
   public:
     COASPMetadataGeorefGridItem(int nId, int nPixels, int nLines, double ndLat,
                                 double ndLong);
+
     static const char *GetItemName()
     {
         return "georef_grid";
     }
+
     static GDAL_GCP *GetItemValue();
+
     static int GetType()
     {
         return TYPE_GEOREF;
@@ -273,6 +279,7 @@ class COASPDataset final : public GDALDataset
           fpBinVV(nullptr), pszFileName(nullptr)
     {
     }
+
     ~COASPDataset();
 
     static GDALDataset *Open(GDALOpenInfo *);
@@ -316,7 +323,8 @@ CPLErr COASPRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
     }
 
     /* 8 bytes per pixel: 4 bytes I, 4 bytes Q */
-    unsigned long nByteNum = poDS->GetRasterXSize() * 8 * nBlockYOff;
+    const vsi_l_offset nByteNum =
+        static_cast<vsi_l_offset>(poDS->GetRasterXSize()) * 8 * nBlockYOff;
 
     VSIFSeekL(this->fp, nByteNum, SEEK_SET);
     int nReadSize =

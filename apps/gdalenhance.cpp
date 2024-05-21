@@ -62,8 +62,8 @@ typedef struct
 static void Usage()
 
 {
-    printf("Usage: gdalenhance [--help-general]\n"
-           "       [-of format] [-co \"NAME=VALUE\"]*\n"
+    printf("Usage: gdalenhance [--help] [--help-general]\n"
+           "       [-of <format>] [-co <NAME>=<VALUE>]...\n"
            "       [-ot {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/\n"
            "             CInt16/CInt32/CFloat32/CFloat64}]\n"
            //            "       [-src_scale[_n] src_min src_max]\n"
@@ -72,8 +72,8 @@ static void Usage()
            //            "       [-s_nodata[_n] value]\n"
            //            "       [-stddev multiplier]\n"
            "       [-equalize]\n"
-           "       [-config filename]\n"
-           "       src_dataset dst_dataset\n\n");
+           "       [-config <filename>]\n"
+           "       <src_dataset> <dst_dataset>\n\n");
     printf("%s\n\n", GDALVersionInfo("--version"));
     exit(1);
 }
@@ -124,6 +124,10 @@ MAIN_START(argc, argv)
                    "GDAL %s\n",
                    argv[0], GDAL_RELEASE_NAME, GDALVersionInfo("RELEASE_NAME"));
             return 0;
+        }
+        else if (EQUAL(argv[i], "--help"))
+        {
+            Usage();
         }
         else if (i < argc - 1 &&
                  (EQUAL(argv[i], "-of") || EQUAL(argv[i], "-f")))
@@ -497,6 +501,7 @@ MAIN_START(argc, argv)
 
     exit(0);
 }
+
 MAIN_END
 
 /************************************************************************/
@@ -620,8 +625,8 @@ static CPLErr EnhancerCallback(void *hCBData, int nXOff, int nYOff, int nXSize,
 
     GByte *pabyOutImage = static_cast<GByte *>(pData);
     CPLErr eErr;
-    float *pafSrcImage =
-        static_cast<float *>(CPLCalloc(sizeof(float), nXSize * nYSize));
+    float *pafSrcImage = static_cast<float *>(
+        CPLCalloc(sizeof(float), static_cast<size_t>(nXSize) * nYSize));
 
     eErr = psEInfo->poSrcBand->RasterIO(GF_Read, nXOff, nYOff, nXSize, nYSize,
                                         pafSrcImage, nXSize, nYSize,

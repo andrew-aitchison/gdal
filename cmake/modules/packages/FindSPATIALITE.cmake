@@ -31,11 +31,6 @@ This module defines the following variables:
   The version of Spatialite found.
 #]=======================================================================]
 
-if(CMAKE_VERSION VERSION_LESS 3.13)
-    set(SPATIALITE_ROOT CACHE PATH "")
-    mark_as_advanced(SPATIALITE_ROOT)
-endif()
-
 find_package(PkgConfig QUIET)
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(PC_SPATIALITE QUIET spatialite)
@@ -55,8 +50,8 @@ mark_as_advanced(SPATIALITE_LIBRARY SPATIALITE_INCLUDE_DIR)
 if(SPATIALITE_LIBRARY AND SPATIALITE_INCLUDE_DIR
    AND NOT SPATIALITE_VERSION_STRING)
     file(STRINGS "${SPATIALITE_INCLUDE_DIR}/spatialite.h" _spatialite_h_ver
-         REGEX "^[ \t]version[ \t]([0-9]+\\.[0-9]+),.*")
-    string(REGEX REPLACE "[ \t]version[ \t]([0-9]+\\.[0-9]+),.*" "\\1" _spatialite_h_ver ${_spatialite_h_ver})
+         REGEX "^[ \t]version[ \t]([0-9]+\\.[0-9]+)[,.].*")
+    string(REGEX REPLACE "[ \t]version[ \t]([0-9]+\\.[0-9]+)[,.].*" "\\1" _spatialite_h_ver "${_spatialite_h_ver}")
     set(SPATIALITE_VERSION_STRING "${_spatialite_h_ver}")
 endif()
 
@@ -66,13 +61,13 @@ find_package_handle_standard_args(SPATIALITE
                                   REQUIRED_VARS SPATIALITE_LIBRARY SPATIALITE_INCLUDE_DIR
                                   VERSION_VAR SPATIALITE_VERSION_STRING)
 if(SPATIALITE_FOUND)
-    set(SPATIALITE_LIBRARIES ${SPATIALITE_LIBRARY})
-    set(SPATIALITE_INCLUDE_DIRS ${SPATIALITE_INCLUDE_DIR})
+    set(SPATIALITE_LIBRARIES "${SPATIALITE_LIBRARY}")
+    set(SPATIALITE_INCLUDE_DIRS "${SPATIALITE_INCLUDE_DIR}")
     if(NOT TARGET SPATIALITE::SPATIALITE)
         add_library(SPATIALITE::SPATIALITE UNKNOWN IMPORTED)
         set_target_properties(SPATIALITE::SPATIALITE PROPERTIES
-                              INTERFACE_INCLUDE_DIRECTORIES ${SPATIALITE_INCLUDE_DIR}
+                              INTERFACE_INCLUDE_DIRECTORIES "${SPATIALITE_INCLUDE_DIR}"
                               IMPORTED_LINK_INTERFACE_LANGUAGES "C"
-                              IMPORTED_LOCATION ${SPATIALITE_LIBRARY})
+                              IMPORTED_LOCATION "${SPATIALITE_LIBRARY}")
     endif()
 endif()

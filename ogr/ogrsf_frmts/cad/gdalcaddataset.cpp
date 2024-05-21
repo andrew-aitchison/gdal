@@ -39,7 +39,8 @@ class CADWrapperRasterBand : public GDALProxyRasterBand
     GDALRasterBand *poBaseBand;
 
   protected:
-    virtual GDALRasterBand *RefUnderlyingRasterBand() const override
+    virtual GDALRasterBand *
+    RefUnderlyingRasterBand(bool /* bForceOpen */) const override
     {
         return poBaseBand;
     }
@@ -51,6 +52,7 @@ class CADWrapperRasterBand : public GDALProxyRasterBand
         eDataType = poBaseBand->GetRasterDataType();
         poBaseBand->GetBlockSize(&nBlockXSize, &nBlockYSize);
     }
+
     virtual ~CADWrapperRasterBand()
     {
     }
@@ -203,7 +205,7 @@ int GDALCADDataset::Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
                 OGRSpatialReference *poSRS =
                     poSpatialRef ? poSpatialRef->Clone() : nullptr;
                 papoLayers[nLayers++] =
-                    new OGRCADLayer(oLayer, poSRS, nEncoding);
+                    new OGRCADLayer(this, oLayer, poSRS, nEncoding);
                 if (poSRS)
                     poSRS->Release();
             }
@@ -251,7 +253,7 @@ int GDALCADDataset::Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
                                  nullptr))
                 return poOpenInfo->nOpenFlags & GDAL_OF_VECTOR;
 
-            poRasterDS = reinterpret_cast<GDALDataset *>(
+            poRasterDS = GDALDataset::FromHandle(
                 GDALOpen(osImgFilename, poOpenInfo->eAccess));
             if (poRasterDS == nullptr)
             {

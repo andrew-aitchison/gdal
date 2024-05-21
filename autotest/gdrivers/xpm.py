@@ -45,10 +45,7 @@ pytestmark = pytest.mark.require_driver("XPM")
     ids=[item[1] for item in xpm_list],
 )
 def test_xpm(downloadURL, fileName, checksum, download_size):
-    if not gdaltest.download_file(
-        downloadURL + "/" + fileName, fileName, download_size
-    ):
-        pytest.skip()
+    gdaltest.download_or_skip(downloadURL + "/" + fileName, fileName, download_size)
 
     ds = gdal.Open("tmp/cache/" + fileName)
 
@@ -59,4 +56,4 @@ def test_xpm(downloadURL, fileName, checksum, download_size):
 
 def test_xpm_1():
     tst = gdaltest.GDALTest("XPM", "byte.tif", 1, 4583)
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)

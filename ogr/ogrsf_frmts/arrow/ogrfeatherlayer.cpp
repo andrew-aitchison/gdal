@@ -68,8 +68,8 @@ OGRFeatherLayer::OGRFeatherLayer(
     const arrow::ipc::IpcReadOptions &oOptions,
     std::shared_ptr<arrow::ipc::RecordBatchStreamReader>
         &poRecordBatchStreamReader)
-    : OGRArrowLayer(poDS, pszLayerName), m_poDS(poDS), m_poFile(poFile),
-      m_bSeekable(bSeekable), m_oOptions(oOptions),
+    : OGRArrowLayer(poDS, pszLayerName), m_poDS(poDS),
+      m_poFile(std::move(poFile)), m_bSeekable(bSeekable), m_oOptions(oOptions),
       m_poRecordBatchReader(poRecordBatchStreamReader)
 {
     EstablishFeatureDefn();
@@ -162,9 +162,9 @@ void OGRFeatherLayer::EstablishFeatureDefn()
         LoadGeoMetadata(kv_metadata.get(), "geo");
     }
     const auto oMapFieldNameToGDALSchemaFieldDefn =
-        LoadGDALMetadata(kv_metadata.get());
+        LoadGDALSchema(kv_metadata.get());
 
-    const auto fields = m_poSchema->fields();
+    const auto &fields = m_poSchema->fields();
     for (int i = 0; i < m_poSchema->num_fields(); ++i)
     {
         const auto &field = fields[i];
@@ -205,12 +205,13 @@ void OGRFeatherLayer::EstablishFeatureDefn()
                 oJSONDef = oIter->second;
             auto osEncoding = oJSONDef.GetString("encoding");
             if (osEncoding.empty() && !osExtensionName.empty())
-                osEncoding = osExtensionName;
+                osEncoding = std::move(osExtensionName);
 
             OGRwkbGeometryType eGeomType = wkbUnknown;
             auto eGeomEncoding = OGRArrowGeomEncoding::WKB;
-            if (IsValidGeometryEncoding(field, osEncoding, eGeomType,
-                                        eGeomEncoding))
+            if (IsValidGeometryEncoding(field, osEncoding,
+                                        oIter != m_oMapGeometryColumns.end(),
+                                        eGeomType, eGeomEncoding))
             {
                 bRegularField = false;
                 OGRGeomFieldDefn oField(fieldName.c_str(), wkbUnknown);
@@ -441,27 +442,36 @@ bool OGRFeatherLayer::ReadNextBatch()
 
 bool OGRFeatherLayer::ReadNextBatchFile()
 {
-    ++m_iRecordBatch;
-    if (m_iRecordBatch == m_poRecordBatchFileReader->num_record_batches())
+    while (true)
     {
-        if (m_iRecordBatch == 1)
-            m_iRecordBatch = 0;
-        else
+        ++m_iRecordBatch;
+        if (m_iRecordBatch == m_poRecordBatchFileReader->num_record_batches())
+        {
+            if (m_iRecordBatch == 1)
+                m_iRecordBatch = 0;
+            else
+                m_poBatch.reset();
+            return false;
+        }
+
+        m_nIdxInBatch = 0;
+
+        auto result =
+            m_poRecordBatchFileReader->ReadRecordBatch(m_iRecordBatch);
+        if (!result.ok())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "ReadRecordBatch() failed: %s",
+                     result.status().message().c_str());
             m_poBatch.reset();
-        return false;
+            return false;
+        }
+        if ((*result)->num_rows() != 0)
+        {
+            SetBatch(*result);
+            break;
+        }
     }
-
-    m_nIdxInBatch = 0;
-
-    auto result = m_poRecordBatchFileReader->ReadRecordBatch(m_iRecordBatch);
-    if (!result.ok())
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "ReadRecordBatch() failed: %s",
-                 result.status().message().c_str());
-        m_poBatch.reset();
-        return false;
-    }
-    SetBatch(*result);
 
     return true;
 }
@@ -474,66 +484,71 @@ bool OGRFeatherLayer::ReadNextBatchStream()
 {
     m_nIdxInBatch = 0;
 
-    if (m_iRecordBatch == 0 && m_poBatchIdx0)
-    {
-        SetBatch(m_poBatchIdx0);
-        m_iRecordBatch = 1;
-        return true;
-    }
-
-    else if (m_iRecordBatch == 1 && m_poBatchIdx1)
-    {
-        SetBatch(m_poBatchIdx1);
-        m_iRecordBatch = 2;
-        return true;
-    }
-
-    else if (m_bSingleBatch)
-    {
-        CPLAssert(m_iRecordBatch == 0);
-        CPLAssert(m_poBatch != nullptr);
-        return false;
-    }
-
-    if (m_bResetRecordBatchReaderAsked)
-    {
-        if (!m_bSeekable)
-        {
-            CPLError(CE_Failure, CPLE_NotSupported,
-                     "Attempting to rewind non-seekable stream");
-            return false;
-        }
-        if (!ResetRecordBatchReader())
-            return false;
-        m_bResetRecordBatchReaderAsked = false;
-    }
-
-    CPLAssert(m_poRecordBatchReader);
-
-    ++m_iRecordBatch;
-
     std::shared_ptr<arrow::RecordBatch> poNextBatch;
-    auto status = m_poRecordBatchReader->ReadNext(&poNextBatch);
-    if (!status.ok())
+    do
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "ReadNext() failed: %s",
-                 status.message().c_str());
+        if (m_iRecordBatch == 0 && m_poBatchIdx0)
+        {
+            SetBatch(m_poBatchIdx0);
+            m_iRecordBatch = 1;
+            return true;
+        }
+
+        else if (m_iRecordBatch == 1 && m_poBatchIdx1)
+        {
+            SetBatch(m_poBatchIdx1);
+            m_iRecordBatch = 2;
+            return true;
+        }
+
+        else if (m_bSingleBatch)
+        {
+            CPLAssert(m_iRecordBatch == 0);
+            CPLAssert(m_poBatch != nullptr);
+            return false;
+        }
+
+        if (m_bResetRecordBatchReaderAsked)
+        {
+            if (!m_bSeekable)
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "Attempting to rewind non-seekable stream");
+                return false;
+            }
+            if (!ResetRecordBatchReader())
+                return false;
+            m_bResetRecordBatchReaderAsked = false;
+        }
+
+        CPLAssert(m_poRecordBatchReader);
+
+        ++m_iRecordBatch;
+
         poNextBatch.reset();
-    }
-    if (poNextBatch == nullptr)
-    {
-        if (m_iRecordBatch == 1)
+        auto status = m_poRecordBatchReader->ReadNext(&poNextBatch);
+        if (!status.ok())
         {
-            m_iRecordBatch = 0;
-            m_bSingleBatch = true;
+            CPLError(CE_Failure, CPLE_AppDefined, "ReadNext() failed: %s",
+                     status.message().c_str());
+            poNextBatch.reset();
         }
-        else
+        if (poNextBatch == nullptr)
         {
-            m_poBatch.reset();
-            m_poBatchColumns.clear();
+            if (m_iRecordBatch == 1)
+            {
+                m_iRecordBatch = 0;
+                m_bSingleBatch = true;
+            }
+            else
+            {
+                m_poBatch.reset();
+                m_poBatchColumns.clear();
+            }
+            return false;
         }
-        return false;
-    }
+    } while (poNextBatch->num_rows() == 0);
+
     SetBatch(poNextBatch);
 
     return true;
@@ -566,6 +581,31 @@ void OGRFeatherLayer::TryToCacheFirstTwoBatches()
             }
             ResetReading();
         }
+    }
+}
+
+/************************************************************************/
+/*                          CanPostFilterArrowArray()                   */
+/************************************************************************/
+
+bool OGRFeatherLayer::CanPostFilterArrowArray(
+    const struct ArrowSchema *schema) const
+{
+    if (m_poRecordBatchReader)
+        return false;
+    return OGRArrowLayer::CanPostFilterArrowArray(schema);
+}
+
+/************************************************************************/
+/*                     InvalidateCachedBatches()                        */
+/************************************************************************/
+
+void OGRFeatherLayer::InvalidateCachedBatches()
+{
+    if (m_poRecordBatchFileReader)
+    {
+        m_iRecordBatch = -1;
+        ResetReading();
     }
 }
 
@@ -649,26 +689,6 @@ int OGRFeatherLayer::TestCapability(const char *pszCap)
     {
         return m_bSeekable && m_poAttrQuery == nullptr &&
                m_poFilterGeom == nullptr;
-    }
-
-    if (EQUAL(pszCap, OLCFastGetExtent))
-    {
-        for (int i = 0; i < m_poFeatureDefn->GetGeomFieldCount(); i++)
-        {
-            auto oIter = m_oMapGeometryColumns.find(
-                m_poFeatureDefn->GetGeomFieldDefn(i)->GetNameRef());
-            if (oIter == m_oMapGeometryColumns.end())
-            {
-                return false;
-            }
-            const auto &oJSONDef = oIter->second;
-            const auto oBBox = oJSONDef.GetArray("bbox");
-            if (!(oBBox.IsValid() && (oBBox.Size() == 4 || oBBox.Size() == 6)))
-            {
-                return false;
-            }
-        }
-        return true;
     }
 
     if (EQUAL(pszCap, OLCMeasuredGeometries))

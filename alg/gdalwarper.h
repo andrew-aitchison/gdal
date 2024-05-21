@@ -132,6 +132,18 @@ CPLErr CPL_DLL GDALWarpCutlineMasker(void *pMaskFuncArg, int nBandCount,
                                      int nXSize, int nYSize,
                                      GByte ** /* ppImageData */,
                                      int bMaskIsFloat, void *pValidityMask);
+
+/* GCMVF stands for GDALWARP_CUTLINE_MASKER_VALIDITY_FLAG */
+#define GCMVF_PARTIAL_INTERSECTION 0
+#define GCMVF_NO_INTERSECTION 1
+#define GCMVF_CHUNK_FULLY_WITHIN_CUTLINE 2
+CPLErr CPL_DLL GDALWarpCutlineMaskerEx(void *pMaskFuncArg, int nBandCount,
+                                       GDALDataType eType, int nXOff, int nYOff,
+                                       int nXSize, int nYSize,
+                                       GByte ** /* ppImageData */,
+                                       int bMaskIsFloat, void *pValidityMask,
+                                       int *pnValidityFlag);
+
 /*! @endcond */
 
 /************************************************************************/
@@ -449,6 +461,12 @@ class CPL_DLL GDALWarpKernel
     bool bApplyVerticalShift = false;
 
     double dfMultFactorVerticalShift = 1.0;
+
+    // Tuples of values (e.g. "<R>,<G>,<B>" or "(<R1>,<G1>,<B1>),(<R2>,<G2>,<B2>)") that must
+    // be ignored as contributing source pixels during resampling. Only taken into account by
+    // Average currently
+    std::vector<std::vector<double>> m_aadfExcludedValues{};
+
     /*! @endcond */
 
     GDALWarpKernel();
@@ -477,6 +495,7 @@ void GWKThreadsEnd(void *psThreadDataIn);
 
 /*! @cond Doxygen_Suppress */
 typedef struct _GDALWarpChunk GDALWarpChunk;
+
 /*! @endcond */
 
 class CPL_DLL GDALWarpOperation
@@ -490,12 +509,11 @@ class CPL_DLL GDALWarpOperation
     void WipeOptions();
     int ValidateOptions();
 
-    CPLErr ComputeSourceWindow(int nDstXOff, int nDstYOff, int nDstXSize,
-                               int nDstYSize, int *pnSrcXOff, int *pnSrcYOff,
-                               int *pnSrcXSize, int *pnSrcYSize,
-                               double *pdfSrcXExtraSize,
-                               double *pdfSrcYExtraSize,
-                               double *pdfSrcFillRatio);
+    bool ComputeSourceWindowTransformPoints(
+        int nDstXOff, int nDstYOff, int nDstXSize, int nDstYSize, bool bUseGrid,
+        bool bAll, int nStepCount, bool bTryWithCheckWithInvertProj,
+        double &dfMinXOut, double &dfMinYOut, double &dfMaxXOut,
+        double &dfMaxYOut, int &nSamplePoints, int &nFailedCount);
 
     void ComputeSourceWindowStartingFromSource(int nDstXOff, int nDstYOff,
                                                int nDstXSize, int nDstYSize,
@@ -567,6 +585,18 @@ class CPL_DLL GDALWarpOperation
                               int nSrcYOff, int nSrcXSize, int nSrcYSize,
                               double dfSrcXExtraSize, double dfSrcYExtraSize,
                               double dfProgressBase, double dfProgressScale);
+
+  protected:
+    friend class VRTWarpedDataset;
+    CPLErr ComputeSourceWindow(int nDstXOff, int nDstYOff, int nDstXSize,
+                               int nDstYSize, int *pnSrcXOff, int *pnSrcYOff,
+                               int *pnSrcXSize, int *pnSrcYSize,
+                               double *pdfSrcXExtraSize,
+                               double *pdfSrcYExtraSize,
+                               double *pdfSrcFillRatio);
+
+    double GetWorkingMemoryForWindow(int nSrcXSize, int nSrcYSize,
+                                     int nDstXSize, int nDstYSize) const;
 };
 
 #endif /* def __cplusplus */

@@ -41,6 +41,9 @@
 
 #include "hdf4compat.h"
 #include "hdf4dataset.h"
+#include <cctype>
+
+#include "hdf4drivercore.h"
 
 extern const char *const pszGDALSignature;
 
@@ -678,22 +681,6 @@ CPLErr HDF4Dataset::ReadGlobalAttributes(int32 iHandler)
 }
 
 /************************************************************************/
-/*                              Identify()                              */
-/************************************************************************/
-
-int HDF4Dataset::Identify(GDALOpenInfo *poOpenInfo)
-
-{
-    if (poOpenInfo->nHeaderBytes < 4)
-        return FALSE;
-
-    if (memcmp(poOpenInfo->pabyHeader, "\016\003\023\001", 4) != 0)
-        return FALSE;
-
-    return TRUE;
-}
-
-/************************************************************************/
 /*                            QuoteIfNeeded()                           */
 /************************************************************************/
 
@@ -728,7 +715,7 @@ GDALDataset *HDF4Dataset::Open(GDALOpenInfo *poOpenInfo)
 {
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
     // During fuzzing, do not use Identify to reject crazy content.
-    if (!Identify(poOpenInfo))
+    if (!HDF4DatasetIdentify(poOpenInfo))
         return nullptr;
 #endif
 
@@ -1275,8 +1262,8 @@ GDALDataset *HDF4Dataset::Open(GDALOpenInfo *poOpenInfo)
         delete poDS;
         poDS = nullptr;
 
-        GDALDataset *poRetDS = reinterpret_cast<GDALDataset *>(
-            GDALOpen(pszSDSName, poOpenInfo->eAccess));
+        GDALDataset *poRetDS =
+            GDALDataset::FromHandle(GDALOpen(pszSDSName, poOpenInfo->eAccess));
         CPLFree(pszSDSName);
 
         CPLAcquireMutex(hHDF4Mutex, 1000.0);
@@ -1334,34 +1321,12 @@ void GDALRegister_HDF4()
     if (!GDAL_CHECK_VERSION("HDF4 driver"))
         return;
 
-    if (GDALGetDriverByName("HDF4") != nullptr)
+    if (GDALGetDriverByName(HDF4_DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("HDF4");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Hierarchical Data Format Release 4");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/hdf4.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "hdf");
-    poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_MULTIDIM_RASTER, "YES");
-
-    poDriver->SetMetadataItem(
-        GDAL_DMD_OPENOPTIONLIST,
-        "<OpenOptionList>"
-        "  <Option name='LIST_SDS' type='string-select' "
-        "description='Whether to report Scientific Data Sets' default='AUTO'>"
-        "       <Value>AUTO</Value>"
-        "       <Value>YES</Value>"
-        "       <Value>NO</Value>"
-        "  </Option>"
-        "</OpenOptionList>");
-
+    HDF4DriverSetCommonMetadata(poDriver);
     poDriver->pfnOpen = HDF4Dataset::Open;
-    poDriver->pfnIdentify = HDF4Dataset::Identify;
     poDriver->pfnUnloadDriver = HDF4UnloadDriver;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);

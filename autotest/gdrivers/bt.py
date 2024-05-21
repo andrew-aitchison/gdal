@@ -29,50 +29,40 @@
 ###############################################################################
 
 import gdaltest
+import pytest
 
 from osgeo import gdal, osr
 
-###############################################################################
-# Test CreateCopy() of int16.tif
+pytestmark = pytest.mark.require_driver("BT")
 
 
-def test_bt_1():
+@pytest.fixture(scope="module", autouse=True)
+def setup_and_cleanup():
 
-    tst = gdaltest.GDALTest("BT", "int16.tif", 1, 4672)
-    srs = osr.SpatialReference()
-    srs.SetWellKnownGeogCS("NAD27")
-    return tst.testCreateCopy(
-        vsimem=1,
-        check_srs=srs.ExportToWkt(),
-        check_gt=(-67.00041667, 0.00083333, 0.0, 50.000416667, 0.0, -0.00083333),
-    )
+    yield
 
-
-###############################################################################
-# Test CreateCopy() of int32.tif
-
-
-def test_bt_2():
-
-    tst = gdaltest.GDALTest("BT", "int32.tif", 1, 4672)
-    srs = osr.SpatialReference()
-    srs.SetWellKnownGeogCS("NAD27")
-    return tst.testCreateCopy(
-        check_srs=srs.ExportToWkt(),
-        check_gt=(-67.00041667, 0.00083333, 0.0, 50.000416667, 0.0, -0.00083333),
-    )
+    for f in ("/vsimem/int16.tif.prj", "tmp/int32.tif.prj", "tmp/float32.tif.prj"):
+        try:
+            gdal.Unlink(f)
+        except RuntimeError:
+            pass
 
 
 ###############################################################################
-# Test CreateCopy() of float32.tif
+# Test CreateCopy()
 
 
-def test_bt_3():
+@pytest.mark.parametrize(
+    "fname,to_vsimem",
+    [("int16.tif", True), ("int32.tif", False), ("float32.tif", False)],
+)
+def test_bt_create_copy(fname, to_vsimem):
 
-    tst = gdaltest.GDALTest("BT", "float32.tif", 1, 4672)
+    tst = gdaltest.GDALTest("BT", fname, 1, 4672)
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("NAD27")
-    return tst.testCreateCopy(
+    tst.testCreateCopy(
+        vsimem=to_vsimem,
         check_srs=srs.ExportToWkt(),
         check_gt=(-67.00041667, 0.00083333, 0.0, 50.000416667, 0.0, -0.00083333),
     )
@@ -82,38 +72,27 @@ def test_bt_3():
 # Test Create() of float32.tif
 
 
-def test_bt_4():
+def test_bt_create():
 
     tst = gdaltest.GDALTest("BT", "float32.tif", 1, 4672)
-    return tst.testCreate(out_bands=1)
+    tst.testCreate(out_bands=1)
 
 
 ###############################################################################
 # Test testSetProjection() of float32.tif
 
 
-def test_bt_5():
+def test_bt_set_projection():
 
     tst = gdaltest.GDALTest("BT", "float32.tif", 1, 4672)
-    return tst.testSetProjection()
+    tst.testSetProjection()
 
 
 ###############################################################################
 # Test testSetGeoTransform() of float32.tif
 
 
-def test_bt_6():
+def test_bt_set_geotransform():
 
     tst = gdaltest.GDALTest("BT", "float32.tif", 1, 4672)
-    return tst.testSetGeoTransform()
-
-
-###############################################################################
-# Cleanup
-
-
-def test_bt_cleanup():
-
-    gdal.Unlink("/vsimem/int16.tif.prj")
-    gdal.Unlink("tmp/int32.tif.prj")
-    gdal.Unlink("tmp/float32.tif.prj")
+    tst.testSetGeoTransform()

@@ -30,9 +30,13 @@
 ###############################################################################
 
 
+import pathlib
+import shutil
+
+import gdaltest
 import pytest
 
-from osgeo import gdal
+from osgeo import gdal, osr
 
 ###############################################################################
 # Simple test
@@ -46,26 +50,16 @@ def test_gdalinfo_lib_1():
     assert ret.find("Driver: GTiff/GeoTIFF") != -1, "did not get expected string."
 
 
-###############################################################################
-# Validate json schema output
+def test_gdalinfo_lib_1_str():
+
+    ret = gdal.Info("../gcore/data/byte.tif")
+    assert ret.find("Driver: GTiff/GeoTIFF") != -1, "did not get expected string."
 
 
-def _validate_json_output(instance):
+def test_gdalinfo_lib_1_path():
 
-    try:
-        from jsonschema import validate
-    except ImportError:
-        pytest.skip("jsonschema module not available")
-
-    gdal_data = gdal.GetConfigOption("GDAL_DATA")
-    if gdal_data is None:
-        pytest.skip("GDAL_DATA not defined")
-
-    import json
-
-    schema = json.loads(open(gdal_data + "/gdalinfo_output.schema.json", "rb").read())
-
-    validate(instance=instance, schema=schema)
+    ret = gdal.Info(pathlib.Path("../gcore/data/byte.tif"))
+    assert ret.find("Driver: GTiff/GeoTIFF") != -1, "did not get expected string."
 
 
 ###############################################################################
@@ -79,17 +73,15 @@ def test_gdalinfo_lib_2():
     ret = gdal.Info(ds, format="json")
     assert ret["driverShortName"] == "GTiff", "wrong value for driverShortName."
 
-    _validate_json_output(ret)
+    gdaltest.validate_json(ret, "gdalinfo_output.schema.json")
 
 
 ###############################################################################
 # Test extraMDDomains()
 
 
+@pytest.mark.require_driver("NITF")
 def test_gdalinfo_lib_3():
-
-    if gdal.GetDriverByName("NITF") is None:
-        pytest.skip("NITF driver is missing")
 
     ds = gdal.Open("../gdrivers/data/nitf/fake_nsif.ntf")
 
@@ -119,9 +111,12 @@ def test_gdalinfo_lib_4():
 # Test all options
 
 
-def test_gdalinfo_lib_5():
+def test_gdalinfo_lib_5(tmp_path):
 
-    ds = gdal.Open("../gdrivers/data/byte.tif")
+    tmp_tif = str(tmp_path / "byte.tif")
+    shutil.copy("../gcore/data/byte.tif", tmp_tif)
+
+    ds = gdal.Open(tmp_tif)
 
     ret = gdal.Info(
         ds,
@@ -130,7 +125,7 @@ def test_gdalinfo_lib_5():
         computeMinMax=True,
         reportHistograms=True,
         reportProj4=True,
-        stats=True,
+        # stats=True, this is mutually exclusive with approxStats
         approxStats=True,
         computeChecksum=True,
         showGCPs=False,
@@ -145,13 +140,12 @@ def test_gdalinfo_lib_5():
     assert "computedMin" in band
     assert "histogram" in band
     assert "checksum" in band
+    assert "stdDev" in band
     assert ret["coordinateSystem"]["dataAxisToSRSAxisMapping"] == [1, 2]
 
-    _validate_json_output(ret)
+    gdaltest.validate_json(ret, "gdalinfo_output.schema.json")
 
     ds = None
-
-    gdal.Unlink("../gdrivers/data/byte.tif.aux.xml")
 
 
 ###############################################################################
@@ -257,3 +251,60 @@ def test_gdalinfo_lib_nodata_full_precision_float64():
 
     ret = gdal.Info(ds, format="json")
     assert ret["bands"][0]["noDataValue"] == float(nodata_str)
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/8137
+
+
+def test_gdalinfo_lib_json_projjson_no_epsg():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetLocalCS("foo")
+    ds.SetSpatialRef(srs)
+    ret = gdal.Info(ds, options="-json")
+    assert ret["stac"]["proj:epsg"] is None
+    assert ret["stac"]["proj:wkt2"] is not None
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/9337
+
+
+def test_gdalinfo_lib_json_proj_shape():
+
+    width = 2
+    height = 1
+    ds = gdal.GetDriverByName("MEM").Create("", width, height)
+    ret = gdal.Info(ds, options="-json")
+    assert ret["stac"]["proj:shape"] == [height, width]
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/9396
+
+
+def test_gdalinfo_lib_json_engineering_crs():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        """ENGCRS["Arbitrary (m)",
+    EDATUM["Unknown engineering datum"],
+    CS[Cartesian,2],
+        AXIS["(E)",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]],
+        AXIS["(N)",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]]]"""
+    )
+    ds.SetSpatialRef(srs)
+    ds.SetGeoTransform([0, 1, 0, 0, 0, 1])
+    ret = gdal.Info(ds, format="json")
+    assert "coordinateSystem" in ret
+    assert "cornerCoordinates" in ret
+    assert "wgs84Extent" not in ret

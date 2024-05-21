@@ -29,10 +29,7 @@ Prerequisites:
 
 Process :
 
-1) a) Regenerate swig generated files for python bindings and commit if changed.
-      Currently SWIG 4.0.2 is used.
-
-   b) "make completion" to regenerate scripts/gdal-bash-completion.sh
+1)    "make completion" to regenerate scripts/gdal-bash-completion.sh
       if new command line switches have been added. scripts/completionFinder.py
       must also be edited before if new utilities/scripts are added/removed.
 
@@ -59,7 +56,7 @@ Process :
      git log --reverse -v v3.4.0..HEAD . ":(exclude)autotest" ":(exclude)doc" ":(exclude).github"
 
    For a feature release, e.g 3.6.0, you can use scripts/generate_log_feature_release.py to generate a log without commit that went in the previous 3.5.x bugfix releases with:
-     python scripts/generate_log_feature_release.py
+     python3 scripts/generate_log_feature_release.py
 
   - commit new version to NEWS.md file.
 
@@ -121,10 +118,12 @@ Process :
 
 8.2) Create a snapshot of the documentation (only for feature releases)
 
-    0. Potentially refresh
-       https://download.osgeo.org/gdal/for_doc/javadoc.zip (./make_doc.sh from swig/java)
-    1. cd doc
-    2. ./build_doc_snapshot 310
+    1. Refresh
+       https://download.osgeo.org/gdal/for_doc/javadoc.zip
+       by building the Java bindings, with -DGDAL_JAVA_GENERATE_JAVADOC=ON.
+       javadoc.zip is in the swig/java subdirectory of the build directory.
+    2. cd doc
+    3. ./build_doc_snapshot 310
        This generates gdal310doc.zip
 
 8.3) Publish the resulting files on download.osgeo.org,
@@ -155,19 +154,22 @@ Process :
 11.2) Log on download.osgeo.org, go to /osgeo/download/gdal/X.Y.Z
 
       Remove the RC suffixes for the final RC, like:
-      mv gdal-3.1.0rc1.tar.xz gdal-3.1.0.tar.xz
-      mv gdal-3.1.0rc1.tar.xz.md5 gdal-3.1.0.tar.xz.md5
-      mv gdal-3.1.0rc1.tar.gz gdal-3.1.0.tar.gz
-      mv gdal-3.1.0rc1.tar.gz.md5 gdal-3.1.0.tar.gz.md5
-      mv gdal310rc1.zip gdal310.zip
-      mv gdal310rc1.zip.md5 gdal310.zip.md5
-      mv gdalautotest-3.1.0rc1.tar.gz gdalautotest-3.1.0.tar.gz
-      mv gdalautotest-3.1.0rc1.zip gdalautotest-3.1.0.zip
+      mv gdal-3.8.3rc1.tar.xz gdal-3.8.3.tar.xz
+      mv gdal-3.8.3rc1.tar.xz.md5 gdal-3.8.3.tar.xz.md5
+      mv gdal-3.8.3rc1.tar.xz.sig gdal-3.8.3.tar.xz.sig
+      mv gdal-3.8.3rc1.tar.gz gdal-3.8.3.tar.gz
+      mv gdal-3.8.3rc1.tar.gz.md5 gdal-3.8.3.tar.gz.md5
+      mv gdal-3.8.3rc1.tar.gz.sig gdal-3.8.3.tar.gz.sig
+      mv gdal383rc1.zip gdal383.zip
+      mv gdal383rc1.zip.md5 gdal383.zip.md5
+      mv gdal383rc1.zip.sig gdal383.zip.sig
+      mv gdalautotest-3.8.3rc1.tar.gz gdalautotest-3.8.3.tar.gz
+      mv gdalautotest-3.8.3rc1.zip gdalautotest-3.8.3.zip
 
       And edit the .md5 file to remove the reference to RC in the names they contain
-      vim gdal-3.1.0.tar.gz.md5
-      vim gdal-3.1.0.tar.xz.md5
-      vim gdal310.zip.md5
+      vim gdal-3.8.3.tar.gz.md5
+      vim gdal-3.8.3.tar.xz.md5
+      vim gdal383.zip.md5
 
       Check that everything is fine:
       md5sum -c *.md5
@@ -212,22 +214,22 @@ the GDAL package by one of the current owners : HowardB/FrankW/EvenR)
 
     b) cd $BUILD_DIR/swig/python
 
-    c) python setup.py sdist
+    c) python3 setup.py sdist
 
-    d) Check the output:
-        twine check dist/GDAL-*.gz
+    d) Check the output (this assumes setuptools >= 65.3.0, otherwise the filename is GDAL-*.gz):
+        twine check dist/gdal-*.gz
 
     e) For trial :
-        twine upload dist/GDAL-*.gz -r pypitest
+        twine upload dist/gdal-*.gz -r pypitest
 
     f) For real :
-        twine upload dist/GDAL-*.gz
+        twine upload dist/gdal-*.gz
 
 15.3) create gdal-utils wheel and upload to pypi:
 
     a) cd $BUILD_DIR/swig/python/gdal-utils
 
-    b) python setup.py bdist_wheel
+    b) python3 setup.py bdist_wheel
 
     c) Check the output:
         twine check dist/gdal_utils-*.whl
@@ -316,7 +318,14 @@ e) Click the "Release" button and that is it! The release should be available in
 18) Create a release on GitHub
     Go to https://github.com/OSGeo/gdal/releases/new
     And create a release for the vX.Y.Z tag
-    Attach the gdal-X.Y.Z.tar.gz, gdal-X.Y.Z.tar.gz.md5, gdalXYZ.zip, gdalXYZ.zip.md5 and gdalautotest-X.Y.Z.zip files
+    Attach the following files:
+    - gdal-X.Y.Z.tar.gz
+    - gdal-X.Y.Z.tar.gz.sig
+    - gdal-X.Y.Z.tar.gz.md5
+    - gdalXYZ.zip
+    - gdalXYZ.zip.sig
+    - gdalXYZ.zip.md5
+    - gdalautotest-X.Y.Z.zip
 
 19) Regenerate Docker images
 

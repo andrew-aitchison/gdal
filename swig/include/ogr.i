@@ -269,11 +269,13 @@ using namespace std;
 #include "cpl_string.h"
 #include "ogr_srs_api.h"
 #include "ogr_recordbatch.h"
+#include "ogr_p.h"
 
 #define FIELD_INDEX_ERROR_TMPL "Invalid field index: '%i'"
 #define FIELD_NAME_ERROR_TMPL "Invalid field name: '%s'"
 
 typedef void GDALMajorObjectShadow;
+typedef void GDALDatasetShadow;
 
 #ifdef DEBUG
 typedef struct OGRSpatialReferenceHS OSRSpatialReferenceShadow;
@@ -302,6 +304,7 @@ typedef struct OGRGeomFieldDefnHS OGRGeomFieldDefnShadow;
 typedef struct OGRGeomTransformer OGRGeomTransformerShadow;
 typedef struct _OGRPreparedGeometry OGRPreparedGeometryShadow;
 typedef struct OGRFieldDomainHS OGRFieldDomainShadow;
+typedef struct OGRGeomCoordinatePrecision OGRGeomCoordinatePrecisionShadow;
 %}
 
 #ifdef SWIGJAVA
@@ -450,7 +453,9 @@ typedef void retGetPoints;
 %constant ALTER_DEFAULT_FLAG = 16;
 %constant ALTER_UNIQUE_FLAG = 32;
 %constant ALTER_DOMAIN_FLAG = 64;
-%constant ALTER_ALL_FLAG = 1 + 2 + 4 + 8 + 16 + 32 + 64;
+%constant ALTER_ALTERNATIVE_NAME_FLAG = 128;
+%constant ALTER_COMMENT_FLAG = 256;
+%constant ALTER_ALL_FLAG = 1 + 2 + 4 + 8 + 16 + 32 + 64 + 128 + 256;
 
 %constant ALTER_GEOM_FIELD_DEFN_NAME_FLAG = 4096;
 %constant ALTER_GEOM_FIELD_DEFN_TYPE_FLAG = 8192;
@@ -464,6 +469,11 @@ typedef void retGetPoints;
 %constant F_VAL_WIDTH = 0x00000004; /**< Validate that (string) fields respect field width */
 %constant F_VAL_ALLOW_NULL_WHEN_DEFAULT = 0x00000008; /***<Allow fields that are null when there's an associated default value. */
 %constant F_VAL_ALL = 0xFFFFFFFF; /**< Enable all validation tests */
+
+%constant TZFLAG_UNKNOWN = 0;
+%constant TZFLAG_LOCALTIME = 1;
+%constant TZFLAG_MIXED_TZ = 2;
+%constant TZFLAG_UTC = 100;
 
 /** Flag for OGR_L_GetGeometryTypes() indicating that
  * OGRGeometryTypeCounter::nCount value is not needed */
@@ -483,6 +493,7 @@ typedef void retGetPoints;
 %constant char *OLCFastSpatialFilter   = "FastSpatialFilter";
 %constant char *OLCFastFeatureCount    = "FastFeatureCount";
 %constant char *OLCFastGetExtent       = "FastGetExtent";
+%constant char *OLCFastGetExtent3D     = "FastGetExtent3D";
 %constant char *OLCCreateField         = "CreateField";
 %constant char *OLCDeleteField         = "DeleteField";
 %constant char *OLCReorderFields       = "ReorderFields";
@@ -490,6 +501,8 @@ typedef void retGetPoints;
 %constant char *OLCAlterGeomFieldDefn  = "AlterGeomFieldDefn";
 %constant char *OLCTransactions        = "Transactions";
 %constant char *OLCDeleteFeature       = "DeleteFeature";
+%constant char *OLCUpsertFeature       = "UpsertFeature";
+%constant char *OLCUpdateFeature       = "UpdateFeature";
 %constant char *OLCFastSetNextByIndex  = "FastSetNextByIndex";
 %constant char *OLCStringsAsUTF8       = "StringsAsUTF8";
 %constant char *OLCIgnoreFields        = "IgnoreFields";
@@ -499,6 +512,7 @@ typedef void retGetPoints;
 %constant char *OLCZGeometries         = "ZGeometries";
 %constant char *OLCRename              = "Rename";
 %constant char *OLCFastGetArrowStream  = "FastGetArrowStream";
+%constant char *OLCFastWriteArrowBatch = "FastWriteArrowBatch";
 
 %constant char *ODsCCreateLayer        = "CreateLayer";
 %constant char *ODsCDeleteLayer        = "DeleteLayer";
@@ -520,6 +534,9 @@ typedef void retGetPoints;
 
 %constant char *OLMD_FID64             = "OLMD_FID64";
 
+%constant int GEOS_PREC_NO_TOPO = 1;
+%constant int GEOS_PREC_KEEP_COLLAPSED = 2;
+
 #else
 typedef int OGRErr;
 
@@ -535,6 +552,7 @@ typedef int OGRErr;
 #define OLCFastSpatialFilter   "FastSpatialFilter"
 #define OLCFastFeatureCount    "FastFeatureCount"
 #define OLCFastGetExtent       "FastGetExtent"
+#define OLCFastGetExtent3D     "FastGetExtent3D"
 #define OLCCreateField         "CreateField"
 #define OLCDeleteField         "DeleteField"
 #define OLCReorderFields       "ReorderFields"
@@ -542,6 +560,8 @@ typedef int OGRErr;
 #define OLCAlterGeomFieldDefn  "AlterGeomFieldDefn"
 #define OLCTransactions        "Transactions"
 #define OLCDeleteFeature       "DeleteFeature"
+#define OLCUpsertFeature       "UpsertFeature"
+#define OLCUpdateFeature       "UpdateFeature"
 #define OLCFastSetNextByIndex  "FastSetNextByIndex"
 #define OLCStringsAsUTF8       "StringsAsUTF8"
 #define OLCCreateGeomField     "CreateGeomField"
@@ -549,7 +569,8 @@ typedef int OGRErr;
 #define OLCMeasuredGeometries  "MeasuredGeometries"
 #define OLCZGeometries         "ZGeometries"
 #define OLCRename              "Rename"
-#define OLCFastGetArrowStream  "FastGetArrowStream";
+#define OLCFastGetArrowStream  "FastGetArrowStream"
+#define OLCFastWriteArrowBatch "FastWriteArrowBatch"
 
 #define ODsCCreateLayer        "CreateLayer"
 #define ODsCDeleteLayer        "DeleteLayer"
@@ -557,16 +578,19 @@ typedef int OGRErr;
 #define ODsCCurveGeometries    "CurveGeometries"
 #define ODsCTransactions       "Transactions"
 #define ODsCEmulatedTransactions "EmulatedTransactions"
-#define ODsCMeasuredGeometries  "MeasuredGeometries";
-#define ODsCZGeometries        "ZGeometries";
-#define ODsCRandomLayerRead    "RandomLayerRead";
+#define ODsCMeasuredGeometries  "MeasuredGeometries"
+#define ODsCZGeometries        "ZGeometries"
+#define ODsCRandomLayerRead    "RandomLayerRead"
 /* Note the unfortunate trailing space at the end of the string */
-#define ODsCRandomLayerWrite   "RandomLayerWrite ";
+#define ODsCRandomLayerWrite   "RandomLayerWrite "
 
 #define ODrCCreateDataSource   "CreateDataSource"
 #define ODrCDeleteDataSource   "DeleteDataSource"
 
 #define OLMD_FID64             "OLMD_FID64"
+
+#define GEOS_PREC_NO_TOPO          1
+#define GEOS_PREC_KEEP_COLLAPSED   2
 
 #endif
 
@@ -618,6 +642,7 @@ typedef int CPLErr;
 #undef FROM_PYTHON_OGR_I
 #else /* defined(SWIGPYTHON) */
 %import MajorObject.i
+%import Dataset_import.i
 #endif /* defined(SWIGPYTHON) */
 #endif /* FROM_GDAL_I */
 
@@ -731,6 +756,11 @@ public:
 
 #ifndef FROM_GDAL_I
 
+#ifdef SWIGPYTHON
+/* In Python, gdal.Driver and ogr.Driver are equivalent */
+typedef GDALDriverShadow OGRDriverShadow;
+#else
+
 %rename (Driver) OGRDriverShadow;
 
 #ifdef SWIGCSHARP
@@ -842,10 +872,17 @@ public:
 } /* %extend */
 }; /* class OGRDriverShadow */
 
+#endif
+
 /************************************************************************/
 /*                            OGRDataSource                             */
 /************************************************************************/
 
+#ifdef SWIGPYTHON
+/* In Python, ogr.DataSource and gdal.Dataset are equivalent */
+typedef GDALDatasetShadow OGRDataSourceShadow;
+
+#else
 
 %rename (DataSource) OGRDataSourceShadow;
 
@@ -864,8 +901,13 @@ public:
   char const *name;
 %mutable;
 
+
   ~OGRDataSourceShadow() {
     OGRReleaseDataSource(self);
+  }
+
+  CPLErr Close() {
+    return GDALClose(self);
   }
 
   int GetRefCount() {
@@ -1003,6 +1045,8 @@ public:
 
 }; /* class OGRDataSourceShadow */
 
+#endif /* not SWIGPYTHON */
+
 #endif /* FROM_GDAL_I */
 
 #ifdef SWIGPYTHON
@@ -1011,6 +1055,10 @@ class ArrowArray {
   ArrowArray();
 public:
 %extend {
+
+  ArrowArray() {
+    return (struct ArrowArray* )calloc(1, sizeof(struct ArrowArray));
+  }
 
   ~ArrowArray() {
     if( self->release )
@@ -1039,6 +1087,10 @@ class ArrowSchema {
 public:
 %extend {
 
+  ArrowSchema() {
+    return (struct ArrowSchema* )calloc(1, sizeof(struct ArrowSchema));
+  }
+
   ~ArrowSchema() {
     if( self->release )
       self->release(self);
@@ -1049,8 +1101,21 @@ public:
     return self;
   }
 
+  const char* GetName() {
+    return self->name;
+  }
+
   GIntBig GetChildrenCount() {
     return self->n_children;
+  }
+
+  const ArrowSchema* GetChild(int iChild) {
+    if( iChild < 0 || iChild >= self->n_children )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Wrong index");
+        return NULL;
+    }
+    return self->children[iChild];
   }
 
 } /* %extend */
@@ -1103,6 +1168,89 @@ public:
 }; /* class ArrowArrayStream */
 #endif
 
+#ifdef SWIGPYTHON
+// Implements __arrow_c_stream__ export interface:
+// https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html#create-a-pycapsule
+%{
+static void ReleaseArrowArrayStreamPyCapsule(PyObject* capsule) {
+    struct ArrowArrayStream* stream =
+        (struct ArrowArrayStream*)PyCapsule_GetPointer(capsule, "arrow_array_stream");
+    if (stream->release != NULL) {
+        stream->release(stream);
+    }
+    CPLFree(stream);
+}
+
+static char** ParseArrowMetadata(const char *pabyMetadata)
+{
+    char** ret = NULL;
+    int32_t nKVP;
+    memcpy(&nKVP, pabyMetadata, sizeof(int32_t));
+    pabyMetadata += sizeof(int32_t);
+    for (int i = 0; i < nKVP; ++i)
+    {
+        int32_t nSizeKey;
+        memcpy(&nSizeKey, pabyMetadata, sizeof(int32_t));
+        pabyMetadata += sizeof(int32_t);
+        std::string osKey;
+        osKey.assign(pabyMetadata, nSizeKey);
+        pabyMetadata += nSizeKey;
+
+        int32_t nSizeValue;
+        memcpy(&nSizeValue, pabyMetadata, sizeof(int32_t));
+        pabyMetadata += sizeof(int32_t);
+        std::string osValue;
+        osValue.assign(pabyMetadata, nSizeValue);
+        pabyMetadata += nSizeValue;
+
+        ret = CSLSetNameValue(ret, osKey.c_str(), osValue.c_str());
+    }
+
+    return ret;
+}
+
+// Create output fields using CreateFieldFromArrowSchema()
+static bool CreateFieldsFromArrowSchema(OGRLayerH hDstLayer,
+                                        const struct ArrowSchema* schemaSrc,
+                                        char** options)
+{
+    for (int i = 0; i < schemaSrc->n_children; ++i)
+    {
+        const char *metadata =
+            schemaSrc->children[i]->metadata;
+        if( metadata )
+        {
+            char** keyValues = ParseArrowMetadata(metadata);
+            const char *ARROW_EXTENSION_NAME_KEY = "ARROW:extension:name";
+            const char *EXTENSION_NAME_OGC_WKB = "ogc.wkb";
+            const char *EXTENSION_NAME_GEOARROW_WKB = "geoarrow.wkb";
+            const char* value = CSLFetchNameValue(keyValues, ARROW_EXTENSION_NAME_KEY);
+            const bool bSkip = ( value && (EQUAL(value, EXTENSION_NAME_OGC_WKB) || EQUAL(value, EXTENSION_NAME_GEOARROW_WKB)) );
+            CSLDestroy(keyValues);
+            if( bSkip )
+                continue;
+        }
+
+        const char *pszFieldName =
+            schemaSrc->children[i]->name;
+        if (!EQUAL(pszFieldName, "OGC_FID") &&
+            !EQUAL(pszFieldName, "wkb_geometry") &&
+            !OGR_L_CreateFieldFromArrowSchema(
+                hDstLayer, schemaSrc->children[i], options))
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot create field %s",
+                     pszFieldName);
+            return false;
+        }
+    }
+    return true;
+}
+
+%}
+
+#endif
+
 /************************************************************************/
 /*                               OGRLayer                               */
 /************************************************************************/
@@ -1118,6 +1266,13 @@ class OGRLayerShadow : public GDALMajorObjectShadow {
   ~OGRLayerShadow();
 public:
 %extend {
+
+#ifndef SWIGCSHARP
+  GDALDatasetShadow* GetDataset()
+  {
+      return OGR_L_GetDataset(self);
+  }
+#endif
 
   %apply Pointer NONNULL {const char * new_name};
   OGRErr Rename(const char* new_name) {
@@ -1208,6 +1363,24 @@ public:
   OGRErr UpsertFeature(OGRFeatureShadow *feature) {
     return OGR_L_UpsertFeature(self, feature);
   }
+
+%apply (int nList, int *pList ) { (int nUpdatedFieldsCount, int *panUpdatedFieldsIdx ) };
+%apply (int nList, int *pList ) { (int nUpdatedGeomFieldsCount, int *panUpdatedGeomFieldsIdx ) };
+  OGRErr UpdateFeature(OGRFeatureShadow *feature,
+                       int nUpdatedFieldsCount,
+                       const int *panUpdatedFieldsIdx,
+                       int nUpdatedGeomFieldsCount,
+                       const int *panUpdatedGeomFieldsIdx,
+                       bool bUpdateStyleString) {
+    return OGR_L_UpdateFeature(self, feature,
+                               nUpdatedFieldsCount,
+                               panUpdatedFieldsIdx,
+                               nUpdatedGeomFieldsCount,
+                               panUpdatedGeomFieldsIdx,
+                               bUpdateStyleString);
+  }
+%clear (int nUpdatedFieldsCount, int *panUpdatedFieldsIdx );
+%clear (int nUpdatedGeomFieldsCount, int *panUpdatedGeomFieldsIdx );
 %clear OGRFeatureShadow *feature;
 
   OGRErr DeleteFeature(GIntBig fid) {
@@ -1218,8 +1391,12 @@ public:
     return OGR_L_SyncToDisk(self);
   }
 
+  %newobject GetLayerDefn;
   OGRFeatureDefnShadow *GetLayerDefn() {
-    return (OGRFeatureDefnShadow*) OGR_L_GetLayerDefn(self);
+    auto defn = (OGRFeatureDefnShadow*) OGR_L_GetLayerDefn(self);
+    if (defn)
+        OGR_FD_Reference(defn);
+    return defn;
   }
 
 #ifndef SWIGJAVA
@@ -1238,6 +1415,15 @@ public:
   %feature( "kwargs" ) GetExtent;
   void GetExtent(double argout[4], int* isvalid = NULL, int force = 1, int can_return_null = 0, int geom_field = 0 ) {
     OGRErr eErr = OGR_L_GetExtentEx(self, geom_field, (OGREnvelope*)argout, force);
+    if (can_return_null)
+        *isvalid = (eErr == OGRERR_NONE);
+    else
+        *isvalid = TRUE;
+    return;
+  }
+  %feature( "kwargs" ) GetExtent3D;
+  void GetExtent3D(double argout[6], int* isvalid = NULL, int force = 1, int can_return_null = 0, int geom_field = 0 ) {
+    OGRErr eErr = OGR_L_GetExtent3D(self, geom_field, (OGREnvelope3D*)argout, force);
     if (can_return_null)
         *isvalid = (eErr == OGRERR_NONE);
     else
@@ -1436,6 +1622,31 @@ public:
 
 #ifdef SWIGPYTHON
 
+    PyObject* ExportArrowArrayStreamPyCapsule(char** options = NULL)
+    {
+        struct ArrowArrayStream* stream =
+            (struct ArrowArrayStream*)CPLMalloc(sizeof(struct ArrowArrayStream));
+
+        const int success = OGR_L_GetArrowStream(self, stream, options);
+
+        PyObject* ret;
+        SWIG_PYTHON_THREAD_BEGIN_BLOCK;
+        if( success )
+        {
+            ret = PyCapsule_New(stream, "arrow_array_stream", ReleaseArrowArrayStreamPyCapsule);
+        }
+        else
+        {
+            CPLFree(stream);
+            Py_INCREF(Py_None);
+            ret = Py_None;
+        }
+
+        SWIG_PYTHON_THREAD_END_BLOCK;
+
+        return ret;
+    }
+
 %newobject GetArrowStream;
   ArrowArrayStream* GetArrowStream(char** options = NULL) {
       struct ArrowArrayStream* stream = (struct ArrowArrayStream* )malloc(sizeof(struct ArrowArrayStream));
@@ -1447,6 +1658,141 @@ public:
           return NULL;
       }
   }
+#endif
+
+#ifdef SWIGPYTHON
+    void IsArrowSchemaSupported(const struct ArrowSchema *schema, bool* pbRet, char **errorMsg, char** options = NULL)
+    {
+        *pbRet = OGR_L_IsArrowSchemaSupported(self, schema, options, errorMsg);
+    }
+#endif
+
+#ifdef SWIGPYTHON
+    OGRErr CreateFieldFromArrowSchema(const struct ArrowSchema *schema, char** options = NULL)
+    {
+        return OGR_L_CreateFieldFromArrowSchema(self, schema, options) ? OGRERR_NONE : OGRERR_FAILURE;
+    }
+#endif
+
+#ifdef SWIGPYTHON
+    OGRErr WriteArrowBatch(const struct ArrowSchema *schema, struct ArrowArray *array, char** options = NULL)
+    {
+        return OGR_L_WriteArrowBatch(self, schema, array, options) ? OGRERR_NONE : OGRERR_FAILURE;
+    }
+
+    OGRErr WriteArrowStreamCapsule(PyObject* capsule, int createFieldsFromSchema, char** options = NULL)
+    {
+        ArrowArrayStream* stream = (ArrowArrayStream*)PyCapsule_GetPointer(capsule, "arrow_array_stream");
+        if( !stream )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "PyCapsule_GetPointer(capsule, \"arrow_array_stream\") failed");
+            return OGRERR_FAILURE;
+        }
+        if( stream->release == NULL )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "stream->release == NULL");
+            return OGRERR_FAILURE;
+        }
+
+        ArrowSchema schema;
+        if( stream->get_schema(stream, &schema) != 0 )
+        {
+            stream->release(stream);
+            return OGRERR_FAILURE;
+        }
+
+        if( createFieldsFromSchema == TRUE ||
+            (createFieldsFromSchema == -1 && OGR_FD_GetFieldCount(OGR_L_GetLayerDefn(self)) == 0) )
+        {
+            if( !CreateFieldsFromArrowSchema(self, &schema, options) )
+            {
+                schema.release(&schema);
+                stream->release(stream);
+                return OGRERR_FAILURE;
+            }
+        }
+
+        while( true )
+        {
+            ArrowArray array;
+            if( stream->get_next(stream, &array) == 0 )
+            {
+                if( array.release == NULL )
+                    break;
+                if( !OGR_L_WriteArrowBatch(self, &schema, &array, options) )
+                {
+                    if( array.release )
+                        array.release(&array);
+                    schema.release(&schema);
+                    stream->release(stream);
+                    return OGRERR_FAILURE;
+                }
+                if( array.release )
+                    array.release(&array);
+            }
+            else
+            {
+                CPLError(CE_Failure, CPLE_AppDefined, "stream->get_next(stream, &array) failed");
+                schema.release(&schema);
+                stream->release(stream);
+                return OGRERR_FAILURE;
+            }
+        }
+        schema.release(&schema);
+        stream->release(stream);
+        return OGRERR_NONE;
+    }
+
+    OGRErr WriteArrowSchemaAndArrowArrayCapsule(PyObject* schemaCapsule, PyObject* arrayCapsule, int createFieldsFromSchema, char** options = NULL)
+    {
+        ArrowSchema* schema = (ArrowSchema*)PyCapsule_GetPointer(schemaCapsule, "arrow_schema");
+        if( !schema )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "PyCapsule_GetPointer(schemaCapsule, \"arrow_schema\") failed");
+            return OGRERR_FAILURE;
+        }
+        if( schema->release == NULL )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "schema->release == NULL");
+            return OGRERR_FAILURE;
+        }
+
+        if( createFieldsFromSchema == TRUE ||
+            (createFieldsFromSchema == -1 && OGR_FD_GetFieldCount(OGR_L_GetLayerDefn(self)) == 0) )
+        {
+            if( !CreateFieldsFromArrowSchema(self, schema, options) )
+            {
+                schema->release(schema);
+                return OGRERR_FAILURE;
+            }
+        }
+
+        ArrowArray* array = (ArrowArray*)PyCapsule_GetPointer(arrayCapsule, "arrow_array");
+        if( !array )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "PyCapsule_GetPointer(arrayCapsule, \"arrow_array\") failed");
+            schema->release(schema);
+            return OGRERR_FAILURE;
+        }
+        if( array->release == NULL )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "array->release == NULL");
+            schema->release(schema);
+            return OGRERR_FAILURE;
+        }
+
+        OGRErr eErr = OGRERR_NONE;
+        if( !OGR_L_WriteArrowBatch(self, schema, array, options) )
+        {
+            eErr = OGRERR_FAILURE;
+        }
+
+        if( schema->release )
+            schema->release(schema);
+        if( array->release )
+            array->release(array);
+        return eErr;
+    }
 #endif
 
 #ifdef SWIGPYTHON
@@ -1648,6 +1994,23 @@ public:
 	  CPLError(CE_Failure, 1, FIELD_NAME_ERROR_TMPL, field_name);
       else
 	  return (const char *) OGR_F_GetFieldAsString(self, i);
+      return NULL;
+  }
+
+  /* ------------------------------------------- */
+
+  /* ---- GetFieldAsISO8601DateTime ------------ */
+
+  const char* GetFieldAsISO8601DateTime(int id, char** options = 0) {
+    return OGR_F_GetFieldAsISO8601DateTime(self, id, options);
+  }
+
+  const char* GetFieldAsISO8601DateTime(const char* field_name, char** options = 0) {
+      int i = OGR_F_GetFieldIndex(self, field_name);
+      if (i == -1)
+          CPLError(CE_Failure, 1, FIELD_NAME_ERROR_TMPL, field_name);
+      else
+          return OGR_F_GetFieldAsISO8601DateTime(self, i, options);
       return NULL;
   }
 
@@ -1937,6 +2300,10 @@ public:
     OGR_F_DumpReadable(self, NULL);
   }
 
+  retStringAndCPLFree* DumpReadableAsString(char** options=NULL) {
+    return OGR_F_DumpReadableAsString(self, options);
+  }
+
   void UnsetField(int id) {
     OGR_F_UnsetField(self, id);
   }
@@ -2051,6 +2418,12 @@ public:
       OGR_F_SetFieldStringList(self, id, pList);
   }
 %clear char**pList;
+
+#if defined(SWIGPYTHON)
+  void _SetFieldBinary(int id, int nLen, char *pBuf) {
+      OGR_F_SetFieldBinary(self, id, nLen, pBuf);
+  }
+#endif
 
   void SetFieldBinaryFromHexString(int id, const char* pszValue)
   {
@@ -2455,6 +2828,13 @@ public:
         OGR_Fld_SetType(self, type);
   }
 
+#ifdef SWIGJAVA
+  // Alias for backward compatibility
+  OGRFieldType GetFieldType() {
+    return OGR_Fld_GetType(self);
+  }
+#endif
+
   OGRFieldSubType GetSubType() {
     return OGR_Fld_GetSubType(self);
   }
@@ -2486,6 +2866,14 @@ public:
 
   void SetPrecision(int precision) {
     OGR_Fld_SetPrecision(self, precision);
+  }
+
+  int GetTZFlag() {
+    return OGR_Fld_GetTZFlag(self);
+  }
+
+  void SetTZFlag(int tzflag) {
+    OGR_Fld_SetTZFlag(self, tzflag);
   }
 
   /* Interface method added for GDAL 1.7.0 */
@@ -2543,6 +2931,13 @@ public:
     OGR_Fld_SetDomainName( self, name );
   }
 
+  const char* GetComment() {
+    return OGR_Fld_GetComment(self);
+  }
+
+  void SetComment(const char* comment ) {
+    OGR_Fld_SetComment( self, comment );
+  }
 } /* %extend */
 
 
@@ -2623,6 +3018,17 @@ public:
   void SetNullable(int bNullable ) {
     return OGR_GFld_SetNullable( self, bNullable );
   }
+
+  OGRGeomCoordinatePrecisionShadow* GetCoordinatePrecision() {
+    return OGR_GFld_GetCoordinatePrecision(self);
+  }
+
+  %apply Pointer NONNULL {OGRGeomCoordinatePrecisionShadow* srs};
+  void SetCoordinatePrecision(OGRGeomCoordinatePrecisionShadow* coordPrec) {
+    OGR_GFld_SetCoordinatePrecision(self, coordPrec);
+  }
+  %clear OGRGeomCoordinatePrecisionShadow* srs;
+
 } /* %extend */
 
 
@@ -3065,6 +3471,14 @@ public:
     return OGR_G_Area(self);
   }
 
+  double GeodesicArea() {
+    return OGR_G_GeodesicArea(self);
+  }
+
+  bool IsClockwise() {
+    return OGR_G_IsClockwise(self);
+  }
+
   /* old, non-standard API */
   double GetArea() {
     return OGR_G_Area(self);
@@ -3275,6 +3689,11 @@ public:
     return (OGRGeometryShadow*) OGR_G_MakeValidEx(self, options);
   }
 
+  %newobject SetPrecision;
+  OGRGeometryShadow* SetPrecision(double gridSize, int flags = 0) {
+    return (OGRGeometryShadow*) OGR_G_SetPrecision(self, gridSize, flags);
+  }
+
   %newobject Normalize;
   OGRGeometryShadow* Normalize() {
     return (OGRGeometryShadow*) OGR_G_Normalize(self);
@@ -3286,11 +3705,15 @@ public:
   }
 
   %newobject Buffer;
-#ifndef SWIGJAVA
+#if !defined(SWIGJAVA) && !defined(SWIGPYTHON)
   %feature("kwargs") Buffer;
 #endif
   OGRGeometryShadow* Buffer( double distance, int quadsecs=30 ) {
     return (OGRGeometryShadow*) OGR_G_Buffer( self, distance, quadsecs );
+  }
+
+  OGRGeometryShadow* Buffer( double distance, char** options ) {
+    return (OGRGeometryShadow*) OGR_G_BufferEx( self, distance, options );
   }
 
 %apply Pointer NONNULL {OGRGeometryShadow* other};
@@ -3307,6 +3730,11 @@ public:
   %newobject UnionCascaded;
   OGRGeometryShadow* UnionCascaded() {
     return (OGRGeometryShadow*) OGR_G_UnionCascaded( self );
+  }
+
+  %newobject UnaryUnion;
+  OGRGeometryShadow* UnaryUnion() {
+    return (OGRGeometryShadow*) OGR_G_UnaryUnion( self );
   }
 
   %newobject Difference;
@@ -3658,7 +4086,7 @@ public:
     OGR_FldDomain_SetMergePolicy(self, policy);
   }
 
-#ifdef SWIGPYTHON
+#if defined(SWIGPYTHON) || defined(SWIGJAVA)
   const OGRCodedValue* GetEnumeration() {
     return OGR_CodedFldDomain_GetEnumeration(self);
   }
@@ -3676,6 +4104,28 @@ public:
       if( eType == OFTReal )
           return psVal->Real;
       return CPLAtof("-inf");
+  }
+
+  const char* GetMinAsString() {
+    const OGRField* psVal = OGR_RangeFldDomain_GetMin(self, NULL);
+      if( psVal == NULL || OGR_RawField_IsUnset(psVal) )
+          return NULL;
+      const OGRFieldType eType = OGR_FldDomain_GetFieldType(self);
+      if( eType == OFTInteger )
+          return CPLSPrintf("%d", psVal->Integer);
+      if( eType == OFTInteger64 )
+          return CPLSPrintf(CPL_FRMT_GIB, psVal->Integer64);
+      if( eType == OFTReal )
+          return CPLSPrintf("%.18g", psVal->Real);
+      if( eType == OFTDateTime )
+          return CPLSPrintf("%04d-%02d-%02dT%02d:%02d:%02d",
+                     psVal->Date.Year,
+                     psVal->Date.Month,
+                     psVal->Date.Day,
+                     psVal->Date.Hour,
+                     psVal->Date.Minute,
+                     static_cast<int>(psVal->Date.Second + 0.5));
+     return NULL;
   }
 
   bool IsMinInclusive() {
@@ -3698,6 +4148,28 @@ public:
       return CPLAtof("inf");
   }
 
+  const char* GetMaxAsString() {
+    const OGRField* psVal = OGR_RangeFldDomain_GetMax(self, NULL);
+      if( psVal == NULL || OGR_RawField_IsUnset(psVal) )
+          return NULL;
+      const OGRFieldType eType = OGR_FldDomain_GetFieldType(self);
+      if( eType == OFTInteger )
+          return CPLSPrintf("%d", psVal->Integer);
+      if( eType == OFTInteger64 )
+          return CPLSPrintf(CPL_FRMT_GIB, psVal->Integer64);
+      if( eType == OFTReal )
+          return CPLSPrintf("%.18g", psVal->Real);
+      if( eType == OFTDateTime )
+          return CPLSPrintf("%04d-%02d-%02dT%02d:%02d:%02d",
+                     psVal->Date.Year,
+                     psVal->Date.Month,
+                     psVal->Date.Day,
+                     psVal->Date.Hour,
+                     psVal->Date.Minute,
+                     static_cast<int>(psVal->Date.Second + 0.5));
+     return NULL;
+  }
+
   bool IsMaxInclusive() {
       bool isInclusive = false;
       (void)OGR_RangeFldDomain_GetMax(self, &isInclusive);
@@ -3712,7 +4184,7 @@ public:
 
 }; /* class OGRFieldDomainShadow */
 
-#ifdef SWIGPYTHON
+#if defined(SWIGPYTHON) || defined(SWIGJAVA)
 %newobject CreateCodedFieldDomain;
 %apply Pointer NONNULL {const char* name};
 %inline %{
@@ -3772,6 +4244,42 @@ OGRFieldDomainShadow* CreateRangeFieldDomain( const char *name,
                                                             maxIsInclusive );
 }
 %}
+
+%inline %{
+static
+OGRFieldDomainShadow* CreateRangeFieldDomainDateTime( const char *name,
+                                              const char* description,
+                                              const char* min,
+                                              bool minIsInclusive,
+                                              const char* max,
+                                              double maxIsInclusive) {
+  OGRField sMin;
+  OGRField sMax;
+  if( !OGRParseXMLDateTime(min, &sMin))
+  {
+    CPLError(CE_Failure, CPLE_AppDefined,
+             "Invalid min: %s",
+             min);
+    return NULL;
+  }
+  if( !OGRParseXMLDateTime(max, &sMax))
+  {
+    CPLError(CE_Failure, CPLE_AppDefined,
+             "Invalid max: %s",
+             max);
+    return NULL;
+  }
+  return (OGRFieldDomainShadow*) OGR_RangeFldDomain_Create( name,
+                                                            description,
+                                                            OFTDateTime,
+                                                            OFSTNone,
+                                                            &sMin,
+                                                            minIsInclusive,
+                                                            &sMax,
+                                                            maxIsInclusive );
+}
+%}
+
 %clear const char* name;
 
 %newobject CreateGlobFieldDomain;
@@ -3793,6 +4301,77 @@ OGRFieldDomainShadow* CreateGlobFieldDomain( const char *name,
 %}
 %clear const char* name;
 %clear const char* glob;
+
+/************************************************************************/
+/*                      OGRGeomCoordinatePrecision                      */
+/************************************************************************/
+
+%rename (GeomCoordinatePrecision) OGRGeomCoordinatePrecisionShadow;
+
+class OGRGeomCoordinatePrecisionShadow {
+  OGRGeomCoordinatePrecisionShadow();
+public:
+%extend {
+
+  ~OGRGeomCoordinatePrecisionShadow() {
+    OGRGeomCoordinatePrecisionDestroy(self);
+  }
+
+  void Set(double xyResolution, double zResolution, double mResolution) {
+      OGRGeomCoordinatePrecisionSet(self, xyResolution, zResolution, mResolution);
+  }
+
+  %apply Pointer NONNULL {OSRSpatialReferenceShadow* srs};
+  void SetFromMeter(OSRSpatialReferenceShadow* srs, double xyMeterResolution, double zMeterResolution, double mResolution) {
+      OGRGeomCoordinatePrecisionSetFromMeter(self, srs, xyMeterResolution, zMeterResolution, mResolution);
+  }
+  %clear OSRSpatialReferenceShadow* srs;
+
+  double GetXYResolution() {
+    return OGRGeomCoordinatePrecisionGetXYResolution(self);
+  }
+
+  double GetZResolution() {
+    return OGRGeomCoordinatePrecisionGetZResolution(self);
+  }
+
+  double GetMResolution() {
+    return OGRGeomCoordinatePrecisionGetMResolution(self);
+  }
+
+%apply (char **CSL) {(char **)};
+  char **GetFormats() {
+    return OGRGeomCoordinatePrecisionGetFormats(self);
+  }
+%clear char **;
+
+%apply (char **dict) {char **};
+%apply Pointer NONNULL {const char* formatName};
+  char ** GetFormatSpecificOptions(const char* formatName) {
+    return OGRGeomCoordinatePrecisionGetFormatSpecificOptions(self, formatName);
+  }
+%clear char **;
+%clear const char* formatName;
+
+%apply Pointer NONNULL {const char* formatName};
+%apply (char **dict) { char ** formatSpecificOptions };
+  void SetFormatSpecificOptions(const char* formatName, char **formatSpecificOptions) {
+    OGRGeomCoordinatePrecisionSetFormatSpecificOptions(self, formatName, formatSpecificOptions);
+  }
+%clear const char* formatName;
+%clear char **formatSpecificOptions;
+
+} /* %extend */
+
+}; /* class OGRGeomCoordinatePrecisionShadow */
+
+%newobject CreateGeomCoordinatePrecision;
+%inline %{
+static
+OGRGeomCoordinatePrecisionShadow* CreateGeomCoordinatePrecision() {
+  return OGRGeomCoordinatePrecisionCreate();
+}
+%}
 
 /************************************************************************/
 /*                        Other misc functions.                         */
@@ -3906,7 +4485,15 @@ int OGRGetNonLinearGeometriesEnabledFlag(void);
 %inline %{
   OGRDataSourceShadow* Open( const char *utf8_path, int update =0 ) {
     CPLErrorReset();
-    OGRDataSourceShadow* ds = (OGRDataSourceShadow*)OGROpen(utf8_path,update,NULL);
+    int nOpenFlags = GDAL_OF_VECTOR;
+    if( update )
+      nOpenFlags |= GDAL_OF_UPDATE;
+#ifdef SWIGPYTHON
+    if( GetUseExceptions() )
+      nOpenFlags |= GDAL_OF_VERBOSE_ERROR;
+#endif
+    OGRDataSourceShadow* ds = (OGRDataSourceShadow*)GDALOpenEx( utf8_path, nOpenFlags, NULL,
+                                      NULL, NULL );
 #ifndef SWIGPYTHON
     if( CPLGetLastErrorType() == CE_Failure && ds != NULL )
     {
@@ -3934,7 +4521,15 @@ int OGRGetNonLinearGeometriesEnabledFlag(void);
 %inline %{
   OGRDataSourceShadow* OpenShared( const char *utf8_path, int update =0 ) {
     CPLErrorReset();
-    OGRDataSourceShadow* ds = (OGRDataSourceShadow*)OGROpenShared(utf8_path,update,NULL);
+    int nOpenFlags = GDAL_OF_VECTOR | GDAL_OF_SHARED;
+    if( update )
+      nOpenFlags |= GDAL_OF_UPDATE;
+#ifdef SWIGPYTHON
+    if( GetUseExceptions() )
+      nOpenFlags |= GDAL_OF_VERBOSE_ERROR;
+#endif
+    OGRDataSourceShadow* ds = (OGRDataSourceShadow*)GDALOpenEx( utf8_path, nOpenFlags, NULL,
+                                      NULL, NULL );
 #ifndef SWIGPYTHON
     if( CPLGetLastErrorType() == CE_Failure && ds != NULL )
     {

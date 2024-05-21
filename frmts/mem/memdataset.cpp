@@ -504,11 +504,10 @@ CPLErr MEMRasterBand::CreateMaskBand(int nFlagsIn)
         return CE_Failure;
 
     nMaskFlags = nFlagsIn;
-    bOwnMask = true;
     auto poMemMaskBand =
         new MEMRasterBand(pabyMaskData, GDT_Byte, nRasterXSize, nRasterYSize);
-    poMask = poMemMaskBand;
     poMemMaskBand->m_bIsMask = true;
+    poMask.reset(poMemMaskBand, true);
     if ((nFlagsIn & GMF_PER_DATASET) != 0 && nBand == 1 && poMemDS != nullptr)
     {
         for (int i = 2; i <= poMemDS->GetRasterCount(); ++i)
@@ -517,8 +516,7 @@ CPLErr MEMRasterBand::CreateMaskBand(int nFlagsIn)
                 cpl::down_cast<MEMRasterBand *>(poMemDS->GetRasterBand(i));
             poOtherBand->InvalidateMaskBand();
             poOtherBand->nMaskFlags = nFlagsIn;
-            poOtherBand->bOwnMask = false;
-            poOtherBand->poMask = poMask;
+            poOtherBand->poMask.reset(poMask.get(), false);
         }
     }
     return CE_None;
@@ -544,9 +542,8 @@ bool MEMRasterBand::IsMaskBand() const
 /************************************************************************/
 
 MEMDataset::MEMDataset()
-    : GDALDataset(FALSE), bGeoTransformSet(FALSE), m_nGCPCount(0),
-      m_pasGCPs(nullptr), m_nOverviewDSCount(0), m_papoOverviewDS(nullptr),
-      m_poPrivate(new Private())
+    : GDALDataset(FALSE), bGeoTransformSet(FALSE), m_nOverviewDSCount(0),
+      m_papoOverviewDS(nullptr), m_poPrivate(new Private())
 {
     adfGeoTransform[0] = 0.0;
     adfGeoTransform[1] = 1.0;
@@ -568,9 +565,6 @@ MEMDataset::~MEMDataset()
     bSuppressOnClose = true;
     FlushCache(true);
     bSuppressOnClose = bSuppressOnCloseBackup;
-
-    GDALDeinitGCPs(m_nGCPCount, m_pasGCPs);
-    CPLFree(m_pasGCPs);
 
     for (int i = 0; i < m_nOverviewDSCount; ++i)
         delete m_papoOverviewDS[i];
@@ -676,6 +670,7 @@ void *MEMDataset::GetInternalHandle(const char *pszRequest)
 
     return nullptr;
 }
+
 /************************************************************************/
 /*                            GetGCPCount()                             */
 /************************************************************************/
@@ -683,7 +678,7 @@ void *MEMDataset::GetInternalHandle(const char *pszRequest)
 int MEMDataset::GetGCPCount()
 
 {
-    return m_nGCPCount;
+    return static_cast<int>(m_aoGCPs.size());
 }
 
 /************************************************************************/
@@ -703,7 +698,7 @@ const OGRSpatialReference *MEMDataset::GetGCPSpatialRef() const
 const GDAL_GCP *MEMDataset::GetGCPs()
 
 {
-    return m_pasGCPs;
+    return gdal::GCP::c_ptr(m_aoGCPs);
 }
 
 /************************************************************************/
@@ -714,15 +709,11 @@ CPLErr MEMDataset::SetGCPs(int nNewCount, const GDAL_GCP *pasNewGCPList,
                            const OGRSpatialReference *poSRS)
 
 {
-    GDALDeinitGCPs(m_nGCPCount, m_pasGCPs);
-    CPLFree(m_pasGCPs);
-
     m_oGCPSRS.Clear();
     if (poSRS)
         m_oGCPSRS = *poSRS;
 
-    m_nGCPCount = nNewCount;
-    m_pasGCPs = GDALDuplicateGCPs(m_nGCPCount, pasNewGCPList);
+    m_aoGCPs = gdal::GCP::fromC(pasNewGCPList, nNewCount);
 
     return CE_None;
 }
@@ -986,7 +977,7 @@ CPLErr MEMDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
         // for it
         MEMRasterBand *poMEMBand = cpl::down_cast<MEMRasterBand *>(poBand);
         const bool bMustGenerateMaskOvr =
-            ((poMEMBand->bOwnMask && poMEMBand->poMask != nullptr) ||
+            ((poMEMBand->poMask != nullptr && poMEMBand->poMask.IsOwned()) ||
              // Or if it is a per-dataset mask, in which case just do it for the
              // first band
              ((poMEMBand->nMaskFlags & GMF_PER_DATASET) != 0 && iBand == 0)) &&
@@ -998,8 +989,8 @@ CPLErr MEMDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
             {
                 MEMRasterBand *poMEMOvrBand =
                     cpl::down_cast<MEMRasterBand *>(papoOverviewBands[i]);
-                if (!(poMEMOvrBand->bOwnMask &&
-                      poMEMOvrBand->poMask != nullptr) &&
+                if (!(poMEMOvrBand->poMask != nullptr &&
+                      poMEMOvrBand->poMask.IsOwned()) &&
                     (poMEMOvrBand->nMaskFlags & GMF_PER_DATASET) == 0)
                 {
                     poMEMOvrBand->CreateMaskBand(poMEMBand->nMaskFlags);
@@ -1016,8 +1007,7 @@ CPLErr MEMDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
             // Make the mask band to be its own mask, similarly to what is
             // done for alpha bands in GDALRegenerateOverviews() (#5640)
             poMaskBand->InvalidateMaskBand();
-            poMaskBand->bOwnMask = false;
-            poMaskBand->poMask = poMaskBand;
+            poMaskBand->poMask.reset(poMaskBand, false);
             poMaskBand->nMaskFlags = 0;
             eErr = GDALRegenerateOverviewsEx(
                 (GDALRasterBandH)poMaskBand, nNewOverviews,
@@ -1214,6 +1204,20 @@ GDALDataset *MEMDataset::Open(GDALOpenInfo *poOpenInfo)
     }
 
     /* -------------------------------------------------------------------- */
+    /*      Set Projection Information                                      */
+    /* -------------------------------------------------------------------- */
+
+    pszOption = CSLFetchNameValue(papszOptions, "SPATIALREFERENCE");
+    if (pszOption != nullptr)
+    {
+        poDS->m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        if (poDS->m_oSRS.SetFromUserInput(pszOption) != OGRERR_NONE)
+        {
+            CPLError(CE_Warning, CPLE_AppDefined, "Unrecognized crs: %s",
+                     pszOption);
+        }
+    }
+    /* -------------------------------------------------------------------- */
     /*      Try to return a regular handle on the file.                     */
     /* -------------------------------------------------------------------- */
     CSLDestroy(papszOptions);
@@ -1267,44 +1271,31 @@ MEMDataset *MEMDataset::Create(const char * /* pszFilename */, int nXSize,
 #endif
 
     std::vector<GByte *> apbyBandData;
-    bool bAllocOK = true;
-
-    if (bPixelInterleaved)
+    if (nBandsIn > 0)
     {
-        apbyBandData.push_back(
-            static_cast<GByte *>(VSI_CALLOC_VERBOSE(1, nGlobalSize)));
-
-        if (apbyBandData[0] == nullptr)
-            bAllocOK = FALSE;
-        else
+        GByte *pabyData =
+            static_cast<GByte *>(VSI_CALLOC_VERBOSE(1, nGlobalSize));
+        if (!pabyData)
         {
-            for (int iBand = 1; iBand < nBandsIn; iBand++)
-                apbyBandData.push_back(apbyBandData[0] + iBand * nWordSize);
+            return nullptr;
         }
-    }
-    else
-    {
-        for (int iBand = 0; iBand < nBandsIn; iBand++)
+
+        if (bPixelInterleaved)
         {
-            apbyBandData.push_back(static_cast<GByte *>(VSI_CALLOC_VERBOSE(
-                1, static_cast<size_t>(nWordSize) * nXSize * nYSize)));
-            if (apbyBandData[iBand] == nullptr)
+            for (int iBand = 0; iBand < nBandsIn; iBand++)
             {
-                bAllocOK = FALSE;
-                break;
+                apbyBandData.push_back(pabyData + iBand * nWordSize);
             }
         }
-    }
-
-    if (!bAllocOK)
-    {
-        for (int iBand = 0; iBand < static_cast<int>(apbyBandData.size());
-             iBand++)
+        else
         {
-            if (apbyBandData[iBand])
-                VSIFree(apbyBandData[iBand]);
+            for (int iBand = 0; iBand < nBandsIn; iBand++)
+            {
+                apbyBandData.push_back(
+                    pabyData +
+                    (static_cast<size_t>(nWordSize) * nXSize * nYSize) * iBand);
+            }
         }
-        return nullptr;
     }
 
     /* -------------------------------------------------------------------- */
@@ -1331,12 +1322,12 @@ MEMDataset *MEMDataset::Create(const char * /* pszFilename */, int nXSize,
         MEMRasterBand *poNewBand = nullptr;
 
         if (bPixelInterleaved)
-            poNewBand =
-                new MEMRasterBand(poDS, iBand + 1, apbyBandData[iBand], eType,
-                                  nWordSize * nBandsIn, 0, iBand == 0);
+            poNewBand = new MEMRasterBand(
+                poDS, iBand + 1, apbyBandData[iBand], eType,
+                cpl::fits_on<int>(nWordSize * nBandsIn), 0, iBand == 0);
         else
             poNewBand = new MEMRasterBand(poDS, iBand + 1, apbyBandData[iBand],
-                                          eType, 0, 0, TRUE);
+                                          eType, 0, 0, iBand == 0);
 
         poDS->SetBand(iBand + 1, poNewBand);
     }
@@ -1355,11 +1346,44 @@ GDALDataset *MEMDataset::CreateBase(const char *pszFilename, int nXSize,
 }
 
 /************************************************************************/
+/*                        ~MEMAttributeHolder()                         */
+/************************************************************************/
+
+MEMAttributeHolder::~MEMAttributeHolder() = default;
+
+/************************************************************************/
+/*                          RenameAttribute()                           */
+/************************************************************************/
+
+bool MEMAttributeHolder::RenameAttribute(const std::string &osOldName,
+                                         const std::string &osNewName)
+{
+    if (m_oMapAttributes.find(osNewName) != m_oMapAttributes.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "An attribute with same name already exists");
+        return false;
+    }
+    auto oIter = m_oMapAttributes.find(osOldName);
+    if (oIter == m_oMapAttributes.end())
+    {
+        CPLAssert(false);
+        return false;
+    }
+    auto poAttr = std::move(oIter->second);
+    m_oMapAttributes.erase(oIter);
+    m_oMapAttributes[osNewName] = std::move(poAttr);
+    return true;
+}
+
+/************************************************************************/
 /*                           GetMDArrayNames()                          */
 /************************************************************************/
 
 std::vector<std::string> MEMGroup::GetMDArrayNames(CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return {};
     std::vector<std::string> names;
     for (const auto &iter : m_oMapMDArrays)
         names.push_back(iter.first);
@@ -1373,6 +1397,8 @@ std::vector<std::string> MEMGroup::GetMDArrayNames(CSLConstList) const
 std::shared_ptr<GDALMDArray> MEMGroup::OpenMDArray(const std::string &osName,
                                                    CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     auto oIter = m_oMapMDArrays.find(osName);
     if (oIter != m_oMapMDArrays.end())
         return oIter->second;
@@ -1385,6 +1411,8 @@ std::shared_ptr<GDALMDArray> MEMGroup::OpenMDArray(const std::string &osName,
 
 std::vector<std::string> MEMGroup::GetGroupNames(CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return {};
     std::vector<std::string> names;
     for (const auto &iter : m_oMapGroups)
         names.push_back(iter.first);
@@ -1398,10 +1426,28 @@ std::vector<std::string> MEMGroup::GetGroupNames(CSLConstList) const
 std::shared_ptr<GDALGroup> MEMGroup::OpenGroup(const std::string &osName,
                                                CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     auto oIter = m_oMapGroups.find(osName);
     if (oIter != m_oMapGroups.end())
         return oIter->second;
     return nullptr;
+}
+
+/************************************************************************/
+/*                              Create()                                */
+/************************************************************************/
+
+/*static*/
+std::shared_ptr<MEMGroup> MEMGroup::Create(const std::string &osParentName,
+                                           const char *pszName)
+{
+    auto newGroup(
+        std::shared_ptr<MEMGroup>(new MEMGroup(osParentName, pszName)));
+    newGroup->SetSelf(newGroup);
+    if (osParentName.empty())
+        newGroup->m_poRootGroupWeak = newGroup;
+    return newGroup;
 }
 
 /************************************************************************/
@@ -1411,6 +1457,8 @@ std::shared_ptr<GDALGroup> MEMGroup::OpenGroup(const std::string &osName,
 std::shared_ptr<GDALGroup> MEMGroup::CreateGroup(const std::string &osName,
                                                  CSLConstList /*papszOptions*/)
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     if (osName.empty())
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -1423,9 +1471,49 @@ std::shared_ptr<GDALGroup> MEMGroup::CreateGroup(const std::string &osName,
                  "A group with same name already exists");
         return nullptr;
     }
-    auto newGroup(std::make_shared<MEMGroup>(GetFullName(), osName.c_str()));
+    auto newGroup = MEMGroup::Create(GetFullName(), osName.c_str());
+    newGroup->m_pParent = std::dynamic_pointer_cast<MEMGroup>(m_pSelf.lock());
+    newGroup->m_poRootGroupWeak = m_poRootGroupWeak;
     m_oMapGroups[osName] = newGroup;
     return newGroup;
+}
+
+/************************************************************************/
+/*                             DeleteGroup()                            */
+/************************************************************************/
+
+bool MEMGroup::DeleteGroup(const std::string &osName,
+                           CSLConstList /*papszOptions*/)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    auto oIter = m_oMapGroups.find(osName);
+    if (oIter == m_oMapGroups.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Group %s is not a sub-group of this group", osName.c_str());
+        return false;
+    }
+
+    oIter->second->Deleted();
+    m_oMapGroups.erase(oIter);
+    return true;
+}
+
+/************************************************************************/
+/*                       NotifyChildrenOfDeletion()                     */
+/************************************************************************/
+
+void MEMGroup::NotifyChildrenOfDeletion()
+{
+    for (const auto &oIter : m_oMapGroups)
+        oIter.second->ParentDeleted();
+    for (const auto &oIter : m_oMapMDArrays)
+        oIter.second->ParentDeleted();
+    for (const auto &oIter : m_oMapAttributes)
+        oIter.second->ParentDeleted();
+    for (const auto &oIter : m_oMapDimensions)
+        oIter.second->ParentDeleted();
 }
 
 /************************************************************************/
@@ -1437,6 +1525,8 @@ std::shared_ptr<GDALMDArray> MEMGroup::CreateMDArray(
     const std::vector<std::shared_ptr<GDALDimension>> &aoDimensions,
     const GDALExtendedDataType &oType, void *pData, CSLConstList papszOptions)
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     if (osName.empty())
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -1476,6 +1566,15 @@ std::shared_ptr<GDALMDArray> MEMGroup::CreateMDArray(
     }
     if (!newArray->Init(pabyData, anStrides))
         return nullptr;
+
+    for (auto &poDim : newArray->GetDimensions())
+    {
+        const auto dim = std::dynamic_pointer_cast<MEMDimension>(poDim);
+        if (dim)
+            dim->RegisterUsingArray(newArray.get());
+    }
+
+    newArray->RegisterGroup(m_pSelf);
     m_oMapMDArrays[osName] = newArray;
     return newArray;
 }
@@ -1497,6 +1596,28 @@ std::shared_ptr<GDALMDArray> MEMGroup::CreateMDArray(
 }
 
 /************************************************************************/
+/*                           DeleteMDArray()                            */
+/************************************************************************/
+
+bool MEMGroup::DeleteMDArray(const std::string &osName,
+                             CSLConstList /*papszOptions*/)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    auto oIter = m_oMapMDArrays.find(osName);
+    if (oIter == m_oMapMDArrays.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Array %s is not an array of this group", osName.c_str());
+        return false;
+    }
+
+    oIter->second->Deleted();
+    m_oMapMDArrays.erase(oIter);
+    return true;
+}
+
+/************************************************************************/
 /*                      MEMGroupCreateMDArray()                         */
 /************************************************************************/
 
@@ -1507,8 +1628,15 @@ std::shared_ptr<GDALMDArray> MEMGroupCreateMDArray(
     const GDALExtendedDataType &oDataType, void *pData,
     CSLConstList papszOptions)
 {
-    return dynamic_cast<MEMGroup *>(poGroup)->CreateMDArray(
-        osName, aoDimensions, oDataType, pData, papszOptions);
+    auto poMemGroup = dynamic_cast<MEMGroup *>(poGroup);
+    if (!poMemGroup)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "MEMGroupCreateMDArray(): poGroup not of type MEMGroup");
+        return nullptr;
+    }
+    return poMemGroup->CreateMDArray(osName, aoDimensions, oDataType, pData,
+                                     papszOptions);
 }
 
 /************************************************************************/
@@ -1518,6 +1646,8 @@ std::shared_ptr<GDALMDArray> MEMGroupCreateMDArray(
 std::shared_ptr<GDALAttribute>
 MEMGroup::GetAttribute(const std::string &osName) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     auto oIter = m_oMapAttributes.find(osName);
     if (oIter != m_oMapAttributes.end())
         return oIter->second;
@@ -1531,6 +1661,8 @@ MEMGroup::GetAttribute(const std::string &osName) const
 std::vector<std::shared_ptr<GDALAttribute>>
 MEMGroup::GetAttributes(CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return {};
     std::vector<std::shared_ptr<GDALAttribute>> oRes;
     for (const auto &oIter : m_oMapAttributes)
     {
@@ -1546,6 +1678,8 @@ MEMGroup::GetAttributes(CSLConstList) const
 std::vector<std::shared_ptr<GDALDimension>>
 MEMGroup::GetDimensions(CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return {};
     std::vector<std::shared_ptr<GDALDimension>> oRes;
     for (const auto &oIter : m_oMapDimensions)
     {
@@ -1563,6 +1697,8 @@ MEMGroup::CreateAttribute(const std::string &osName,
                           const std::vector<GUInt64> &anDimensions,
                           const GDALExtendedDataType &oDataType, CSLConstList)
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     if (osName.empty())
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -1576,12 +1712,143 @@ MEMGroup::CreateAttribute(const std::string &osName,
         return nullptr;
     }
     auto newAttr(MEMAttribute::Create(
-        (GetFullName() == "/" ? "/" : GetFullName() + "/") + "_GLOBAL_", osName,
+        std::dynamic_pointer_cast<MEMGroup>(m_pSelf.lock()), osName,
         anDimensions, oDataType));
     if (!newAttr)
         return nullptr;
     m_oMapAttributes[osName] = newAttr;
     return newAttr;
+}
+
+/************************************************************************/
+/*                         DeleteAttribute()                            */
+/************************************************************************/
+
+bool MEMGroup::DeleteAttribute(const std::string &osName,
+                               CSLConstList /*papszOptions*/)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    auto oIter = m_oMapAttributes.find(osName);
+    if (oIter == m_oMapAttributes.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Attribute %s is not an attribute of this group",
+                 osName.c_str());
+        return false;
+    }
+
+    oIter->second->Deleted();
+    m_oMapAttributes.erase(oIter);
+    return true;
+}
+
+/************************************************************************/
+/*                              Rename()                                */
+/************************************************************************/
+
+bool MEMGroup::Rename(const std::string &osNewName)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    if (osNewName.empty())
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, "Empty name not supported");
+        return false;
+    }
+    if (m_osName == "/")
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, "Cannot rename root group");
+        return false;
+    }
+    auto pParent = m_pParent.lock();
+    if (pParent)
+    {
+        if (pParent->m_oMapGroups.find(osNewName) !=
+            pParent->m_oMapGroups.end())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "A group with same name already exists");
+            return false;
+        }
+        pParent->m_oMapGroups.erase(pParent->m_oMapGroups.find(m_osName));
+    }
+
+    BaseRename(osNewName);
+
+    if (pParent)
+    {
+        CPLAssert(m_pSelf.lock());
+        pParent->m_oMapGroups[m_osName] = m_pSelf.lock();
+    }
+
+    return true;
+}
+
+/************************************************************************/
+/*                       NotifyChildrenOfRenaming()                     */
+/************************************************************************/
+
+void MEMGroup::NotifyChildrenOfRenaming()
+{
+    for (const auto &oIter : m_oMapGroups)
+        oIter.second->ParentRenamed(m_osFullName);
+    for (const auto &oIter : m_oMapMDArrays)
+        oIter.second->ParentRenamed(m_osFullName);
+    for (const auto &oIter : m_oMapAttributes)
+        oIter.second->ParentRenamed(m_osFullName);
+    for (const auto &oIter : m_oMapDimensions)
+        oIter.second->ParentRenamed(m_osFullName);
+}
+
+/************************************************************************/
+/*                          RenameDimension()                           */
+/************************************************************************/
+
+bool MEMGroup::RenameDimension(const std::string &osOldName,
+                               const std::string &osNewName)
+{
+    if (m_oMapDimensions.find(osNewName) != m_oMapDimensions.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "A dimension with same name already exists");
+        return false;
+    }
+    auto oIter = m_oMapDimensions.find(osOldName);
+    if (oIter == m_oMapDimensions.end())
+    {
+        CPLAssert(false);
+        return false;
+    }
+    auto poDim = std::move(oIter->second);
+    m_oMapDimensions.erase(oIter);
+    m_oMapDimensions[osNewName] = std::move(poDim);
+    return true;
+}
+
+/************************************************************************/
+/*                          RenameArray()                               */
+/************************************************************************/
+
+bool MEMGroup::RenameArray(const std::string &osOldName,
+                           const std::string &osNewName)
+{
+    if (m_oMapMDArrays.find(osNewName) != m_oMapMDArrays.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "An array with same name already exists");
+        return false;
+    }
+    auto oIter = m_oMapMDArrays.find(osOldName);
+    if (oIter == m_oMapMDArrays.end())
+    {
+        CPLAssert(false);
+        return false;
+    }
+    auto poArray = std::move(oIter->second);
+    m_oMapMDArrays.erase(oIter);
+    m_oMapMDArrays[osNewName] = std::move(poArray);
+    return true;
 }
 
 /************************************************************************/
@@ -1603,6 +1870,15 @@ MEMAbstractMDArray::MEMAbstractMDArray(
 
 MEMAbstractMDArray::~MEMAbstractMDArray()
 {
+    FreeArray();
+}
+
+/************************************************************************/
+/*                              FreeArray()                             */
+/************************************************************************/
+
+void MEMAbstractMDArray::FreeArray()
+{
     if (m_bOwnArray)
     {
         if (m_oType.NeedsFreeDynamicMemory())
@@ -1617,6 +1893,9 @@ MEMAbstractMDArray::~MEMAbstractMDArray()
             }
         }
         VSIFree(m_pabyArray);
+        m_pabyArray = nullptr;
+        m_nTotalSize = 0;
+        m_bOwnArray = false;
     }
 }
 
@@ -1647,8 +1926,13 @@ bool MEMAbstractMDArray::Init(GByte *pData,
             --i;
             const auto &poDim = m_aoDims[i];
             auto nDimSize = poDim->GetSize();
-            if (nDimSize != 0 &&
-                nTotalSize > std::numeric_limits<GUInt64>::max() / nDimSize)
+            if (nDimSize == 0)
+            {
+                CPLError(CE_Failure, CPLE_IllegalArg,
+                         "Illegal dimension size 0");
+                return false;
+            }
+            if (nTotalSize > std::numeric_limits<GUInt64>::max() / nDimSize)
             {
                 CPLError(CE_Failure, CPLE_OutOfMemory, "Too big allocation");
                 return false;
@@ -1678,6 +1962,7 @@ bool MEMAbstractMDArray::Init(GByte *pData,
         m_pabyArray = static_cast<GByte *>(VSI_CALLOC_VERBOSE(1, m_nTotalSize));
         m_bOwnArray = true;
     }
+
     return m_pabyArray != nullptr;
 }
 
@@ -1923,6 +2208,9 @@ bool MEMAbstractMDArray::IRead(const GUInt64 *arrayStartIdx,
                                const GDALExtendedDataType &bufferDataType,
                                void *pDstBuffer) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+
     const auto nDims = m_aoDims.size();
     if (nDims == 0)
     {
@@ -1959,11 +2247,14 @@ bool MEMAbstractMDArray::IWrite(const GUInt64 *arrayStartIdx,
                                 const GDALExtendedDataType &bufferDataType,
                                 const void *pSrcBuffer)
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
     if (!m_bWritable)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Non updatable object");
         return false;
     }
+
     m_bModified = true;
 
     const auto nDims = m_aoDims.size();
@@ -2019,6 +2310,13 @@ MEMMDArray::~MEMMDArray()
         m_oType.FreeDynamicMemory(&m_pabyNoData[0]);
         CPLFree(m_pabyNoData);
     }
+
+    for (auto &poDim : GetDimensions())
+    {
+        const auto dim = std::dynamic_pointer_cast<MEMDimension>(poDim);
+        if (dim)
+            dim->UnRegisterUsingArray(this);
+    }
 }
 
 /************************************************************************/
@@ -2036,6 +2334,8 @@ const void *MEMMDArray::GetRawNoDataValue() const
 
 bool MEMMDArray::SetRawNoDataValue(const void *pNoData)
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
     if (m_pabyNoData)
     {
         m_oType.FreeDynamicMemory(&m_pabyNoData[0]);
@@ -2067,6 +2367,8 @@ bool MEMMDArray::SetRawNoDataValue(const void *pNoData)
 std::shared_ptr<GDALAttribute>
 MEMMDArray::GetAttribute(const std::string &osName) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     auto oIter = m_oMapAttributes.find(osName);
     if (oIter != m_oMapAttributes.end())
         return oIter->second;
@@ -2080,6 +2382,8 @@ MEMMDArray::GetAttribute(const std::string &osName) const
 std::vector<std::shared_ptr<GDALAttribute>>
 MEMMDArray::GetAttributes(CSLConstList) const
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return {};
     std::vector<std::shared_ptr<GDALAttribute>> oRes;
     for (const auto &oIter : m_oMapAttributes)
     {
@@ -2097,6 +2401,8 @@ MEMMDArray::CreateAttribute(const std::string &osName,
                             const std::vector<GUInt64> &anDimensions,
                             const GDALExtendedDataType &oDataType, CSLConstList)
 {
+    if (!CheckValidAndErrorOutIfNot())
+        return nullptr;
     if (osName.empty())
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -2109,12 +2415,448 @@ MEMMDArray::CreateAttribute(const std::string &osName,
                  "An attribute with same name already exists");
         return nullptr;
     }
-    auto newAttr(
-        MEMAttribute::Create(GetFullName(), osName, anDimensions, oDataType));
+    auto poSelf = std::dynamic_pointer_cast<MEMMDArray>(m_pSelf.lock());
+    CPLAssert(poSelf);
+    auto newAttr(MEMAttribute::Create(poSelf, osName, anDimensions, oDataType));
     if (!newAttr)
         return nullptr;
     m_oMapAttributes[osName] = newAttr;
     return newAttr;
+}
+
+/************************************************************************/
+/*                         DeleteAttribute()                            */
+/************************************************************************/
+
+bool MEMMDArray::DeleteAttribute(const std::string &osName,
+                                 CSLConstList /*papszOptions*/)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    auto oIter = m_oMapAttributes.find(osName);
+    if (oIter == m_oMapAttributes.end())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Attribute %s is not an attribute of this array",
+                 osName.c_str());
+        return false;
+    }
+
+    oIter->second->Deleted();
+    m_oMapAttributes.erase(oIter);
+    return true;
+}
+
+/************************************************************************/
+/*                      GetCoordinateVariables()                        */
+/************************************************************************/
+
+std::vector<std::shared_ptr<GDALMDArray>>
+MEMMDArray::GetCoordinateVariables() const
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return {};
+    std::vector<std::shared_ptr<GDALMDArray>> ret;
+    const auto poCoordinates = GetAttribute("coordinates");
+    if (poCoordinates &&
+        poCoordinates->GetDataType().GetClass() == GEDTC_STRING &&
+        poCoordinates->GetDimensionCount() == 0)
+    {
+        const char *pszCoordinates = poCoordinates->ReadAsString();
+        if (pszCoordinates)
+        {
+            auto poGroup = m_poGroupWeak.lock();
+            if (!poGroup)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Cannot access coordinate variables of %s has "
+                         "belonging group has gone out of scope",
+                         GetName().c_str());
+            }
+            else
+            {
+                const CPLStringList aosNames(
+                    CSLTokenizeString2(pszCoordinates, " ", 0));
+                for (int i = 0; i < aosNames.size(); i++)
+                {
+                    auto poCoordinateVar = poGroup->OpenMDArray(aosNames[i]);
+                    if (poCoordinateVar)
+                    {
+                        ret.emplace_back(poCoordinateVar);
+                    }
+                    else
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "Cannot find variable corresponding to "
+                                 "coordinate %s",
+                                 aosNames[i]);
+                    }
+                }
+            }
+        }
+    }
+
+    return ret;
+}
+
+/************************************************************************/
+/*                            Resize()                                  */
+/************************************************************************/
+
+bool MEMMDArray::Resize(const std::vector<GUInt64> &anNewDimSizes,
+                        CSLConstList /* papszOptions */)
+{
+    return Resize(anNewDimSizes, /*bResizeOtherArrays=*/true);
+}
+
+bool MEMMDArray::Resize(const std::vector<GUInt64> &anNewDimSizes,
+                        bool bResizeOtherArrays)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    if (!IsWritable())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Resize() not supported on read-only file");
+        return false;
+    }
+    if (!m_bOwnArray)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Resize() not supported on an array that does not own its memory");
+        return false;
+    }
+
+    const auto nDimCount = GetDimensionCount();
+    if (anNewDimSizes.size() != nDimCount)
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Not expected number of values in anNewDimSizes.");
+        return false;
+    }
+
+    auto &dims = GetDimensions();
+    std::vector<size_t> anDecreasedDimIdx;
+    std::vector<size_t> anGrownDimIdx;
+    std::map<GDALDimension *, GUInt64> oMapDimToSize;
+    for (size_t i = 0; i < nDimCount; ++i)
+    {
+        auto oIter = oMapDimToSize.find(dims[i].get());
+        if (oIter != oMapDimToSize.end() && oIter->second != anNewDimSizes[i])
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot resize a dimension referenced several times "
+                     "to different sizes");
+            return false;
+        }
+        if (anNewDimSizes[i] != dims[i]->GetSize())
+        {
+            if (anNewDimSizes[i] == 0)
+            {
+                CPLError(CE_Failure, CPLE_IllegalArg,
+                         "Illegal dimension size 0");
+                return false;
+            }
+            auto dim = std::dynamic_pointer_cast<MEMDimension>(dims[i]);
+            if (!dim)
+            {
+                CPLError(
+                    CE_Failure, CPLE_AppDefined,
+                    "Cannot resize a dimension that is not a MEMDimension");
+                return false;
+            }
+            oMapDimToSize[dim.get()] = anNewDimSizes[i];
+            if (anNewDimSizes[i] < dims[i]->GetSize())
+            {
+                anDecreasedDimIdx.push_back(i);
+            }
+            else
+            {
+                anGrownDimIdx.push_back(i);
+            }
+        }
+        else
+        {
+            oMapDimToSize[dims[i].get()] = dims[i]->GetSize();
+        }
+    }
+
+    const auto ResizeOtherArrays = [this, &anNewDimSizes, nDimCount, &dims]()
+    {
+        std::set<MEMMDArray *> oSetArrays;
+        std::map<GDALDimension *, GUInt64> oMapNewSize;
+        for (size_t i = 0; i < nDimCount; ++i)
+        {
+            if (anNewDimSizes[i] != dims[i]->GetSize())
+            {
+                auto dim = std::dynamic_pointer_cast<MEMDimension>(dims[i]);
+                if (!dim)
+                {
+                    CPLAssert(false);
+                }
+                else
+                {
+                    oMapNewSize[dims[i].get()] = anNewDimSizes[i];
+                    for (const auto &poArray : dim->GetUsingArrays())
+                    {
+                        if (poArray != this)
+                            oSetArrays.insert(poArray);
+                    }
+                }
+            }
+        }
+
+        bool bOK = true;
+        for (auto *poArray : oSetArrays)
+        {
+            const auto &apoOtherDims = poArray->GetDimensions();
+            std::vector<GUInt64> anOtherArrayNewDimSizes(
+                poArray->GetDimensionCount());
+            for (size_t i = 0; i < anOtherArrayNewDimSizes.size(); ++i)
+            {
+                auto oIter = oMapNewSize.find(apoOtherDims[i].get());
+                if (oIter != oMapNewSize.end())
+                    anOtherArrayNewDimSizes[i] = oIter->second;
+                else
+                    anOtherArrayNewDimSizes[i] = apoOtherDims[i]->GetSize();
+            }
+            if (!poArray->Resize(anOtherArrayNewDimSizes,
+                                 /*bResizeOtherArrays=*/false))
+            {
+                bOK = false;
+                break;
+            }
+        }
+        if (!bOK)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Resizing of another array referencing the same dimension "
+                     "as one modified on the current array failed. All arrays "
+                     "referencing that dimension will be invalidated.");
+            Invalidate();
+            for (auto *poArray : oSetArrays)
+            {
+                poArray->Invalidate();
+            }
+        }
+
+        return bOK;
+    };
+
+    // Decrease slowest varying dimension
+    if (anGrownDimIdx.empty() && anDecreasedDimIdx.size() == 1 &&
+        anDecreasedDimIdx[0] == 0)
+    {
+        CPLAssert(m_nTotalSize % dims[0]->GetSize() == 0);
+        const size_t nNewTotalSize = static_cast<size_t>(
+            (m_nTotalSize / dims[0]->GetSize()) * anNewDimSizes[0]);
+        if (m_oType.NeedsFreeDynamicMemory())
+        {
+            GByte *pabyPtr = m_pabyArray + nNewTotalSize;
+            GByte *pabyEnd = m_pabyArray + m_nTotalSize;
+            const auto nDTSize(m_oType.GetSize());
+            while (pabyPtr < pabyEnd)
+            {
+                m_oType.FreeDynamicMemory(pabyPtr);
+                pabyPtr += nDTSize;
+            }
+        }
+        // shrinking... cannot fail, and even if it does, that's ok
+        GByte *pabyArray = static_cast<GByte *>(
+            VSI_REALLOC_VERBOSE(m_pabyArray, nNewTotalSize));
+        if (pabyArray)
+            m_pabyArray = pabyArray;
+        m_nTotalSize = nNewTotalSize;
+
+        if (bResizeOtherArrays)
+        {
+            if (!ResizeOtherArrays())
+                return false;
+
+            auto dim = std::dynamic_pointer_cast<MEMDimension>(dims[0]);
+            if (dim)
+            {
+                dim->SetSize(anNewDimSizes[0]);
+            }
+            else
+            {
+                CPLAssert(false);
+            }
+        }
+        return true;
+    }
+
+    // Increase slowest varying dimension
+    if (anDecreasedDimIdx.empty() && anGrownDimIdx.size() == 1 &&
+        anGrownDimIdx[0] == 0)
+    {
+        CPLAssert(m_nTotalSize % dims[0]->GetSize() == 0);
+        GUInt64 nNewTotalSize64 = m_nTotalSize / dims[0]->GetSize();
+        if (nNewTotalSize64 >
+            std::numeric_limits<GUInt64>::max() / anNewDimSizes[0])
+        {
+            CPLError(CE_Failure, CPLE_OutOfMemory, "Too big allocation");
+            return false;
+        }
+        nNewTotalSize64 *= anNewDimSizes[0];
+        // We restrict the size of the allocation so that all elements can be
+        // indexed by GPtrDiff_t
+        if (nNewTotalSize64 >
+            static_cast<size_t>(std::numeric_limits<GPtrDiff_t>::max()))
+        {
+            CPLError(CE_Failure, CPLE_OutOfMemory, "Too big allocation");
+            return false;
+        }
+        const size_t nNewTotalSize = static_cast<size_t>(nNewTotalSize64);
+        GByte *pabyArray = static_cast<GByte *>(
+            VSI_REALLOC_VERBOSE(m_pabyArray, nNewTotalSize));
+        if (!pabyArray)
+            return false;
+        memset(pabyArray + m_nTotalSize, 0, nNewTotalSize - m_nTotalSize);
+        m_pabyArray = pabyArray;
+        m_nTotalSize = nNewTotalSize;
+
+        if (bResizeOtherArrays)
+        {
+            if (!ResizeOtherArrays())
+                return false;
+
+            auto dim = std::dynamic_pointer_cast<MEMDimension>(dims[0]);
+            if (dim)
+            {
+                dim->SetSize(anNewDimSizes[0]);
+            }
+            else
+            {
+                CPLAssert(false);
+            }
+        }
+        return true;
+    }
+
+    // General case where we modify other dimensions that the first one.
+
+    // Create dummy dimensions at the new sizes
+    std::vector<std::shared_ptr<GDALDimension>> aoNewDims;
+    for (size_t i = 0; i < nDimCount; ++i)
+    {
+        aoNewDims.emplace_back(std::make_shared<MEMDimension>(
+            std::string(), dims[i]->GetName(), std::string(), std::string(),
+            anNewDimSizes[i]));
+    }
+
+    // Create a temporary array
+    auto poTempMDArray =
+        Create(std::string(), std::string(), aoNewDims, GetDataType());
+    if (!poTempMDArray->Init())
+        return false;
+    std::vector<GUInt64> arrayStartIdx(nDimCount);
+    std::vector<size_t> count(nDimCount);
+    std::vector<GInt64> arrayStep(nDimCount, 1);
+    std::vector<GPtrDiff_t> bufferStride(nDimCount);
+    for (size_t i = nDimCount; i > 0;)
+    {
+        --i;
+        if (i == nDimCount - 1)
+            bufferStride[i] = 1;
+        else
+        {
+            bufferStride[i] = static_cast<GPtrDiff_t>(bufferStride[i + 1] *
+                                                      dims[i + 1]->GetSize());
+        }
+        const auto nCount = std::min(anNewDimSizes[i], dims[i]->GetSize());
+        count[i] = static_cast<size_t>(nCount);
+    }
+    // Copy the current content into the array with the new layout
+    if (!poTempMDArray->Write(arrayStartIdx.data(), count.data(),
+                              arrayStep.data(), bufferStride.data(),
+                              GetDataType(), m_pabyArray))
+    {
+        return false;
+    }
+
+    // Move content of the temporary array into the current array, and
+    // invalidate the temporary array
+    FreeArray();
+    m_bOwnArray = true;
+    m_pabyArray = poTempMDArray->m_pabyArray;
+    m_nTotalSize = poTempMDArray->m_nTotalSize;
+    m_anStrides = poTempMDArray->m_anStrides;
+
+    poTempMDArray->m_bOwnArray = false;
+    poTempMDArray->m_pabyArray = nullptr;
+    poTempMDArray->m_nTotalSize = 0;
+
+    if (bResizeOtherArrays && !ResizeOtherArrays())
+        return false;
+
+    // Update dimension size
+    for (size_t i = 0; i < nDimCount; ++i)
+    {
+        if (anNewDimSizes[i] != dims[i]->GetSize())
+        {
+            auto dim = std::dynamic_pointer_cast<MEMDimension>(dims[i]);
+            if (dim)
+            {
+                dim->SetSize(anNewDimSizes[i]);
+            }
+            else
+            {
+                CPLAssert(false);
+            }
+        }
+    }
+
+    return true;
+}
+
+/************************************************************************/
+/*                              Rename()                                */
+/************************************************************************/
+
+bool MEMMDArray::Rename(const std::string &osNewName)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    if (osNewName.empty())
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, "Empty name not supported");
+        return false;
+    }
+
+    if (auto poParentGroup =
+            std::dynamic_pointer_cast<MEMGroup>(m_poGroupWeak.lock()))
+    {
+        if (!poParentGroup->RenameArray(m_osName, osNewName))
+        {
+            return false;
+        }
+    }
+
+    BaseRename(osNewName);
+
+    return true;
+}
+
+/************************************************************************/
+/*                       NotifyChildrenOfRenaming()                     */
+/************************************************************************/
+
+void MEMMDArray::NotifyChildrenOfRenaming()
+{
+    for (const auto &oIter : m_oMapAttributes)
+        oIter.second->ParentRenamed(m_osFullName);
+}
+
+/************************************************************************/
+/*                       NotifyChildrenOfDeletion()                     */
+/************************************************************************/
+
+void MEMMDArray::NotifyChildrenOfDeletion()
+{
+    for (const auto &oIter : m_oMapAttributes)
+        oIter.second->ParentDeleted();
 }
 
 /************************************************************************/
@@ -2127,7 +2869,7 @@ BuildDimensions(const std::vector<GUInt64> &anDimensions)
     std::vector<std::shared_ptr<GDALDimension>> res;
     for (size_t i = 0; i < anDimensions.size(); i++)
     {
-        res.emplace_back(std::make_shared<MEMDimension>(
+        res.emplace_back(std::make_shared<GDALDimensionWeakIndexingVar>(
             std::string(), CPLSPrintf("dim%u", static_cast<unsigned>(i)),
             std::string(), std::string(), anDimensions[i]));
     }
@@ -2167,26 +2909,118 @@ MEMAttribute::Create(const std::string &osParentName, const std::string &osName,
 }
 
 /************************************************************************/
+/*                        MEMAttribute::Create()                        */
+/************************************************************************/
+
+std::shared_ptr<MEMAttribute> MEMAttribute::Create(
+    const std::shared_ptr<MEMGroup> &poParentGroup, const std::string &osName,
+    const std::vector<GUInt64> &anDimensions, const GDALExtendedDataType &oType)
+{
+    const std::string osParentName =
+        (poParentGroup && poParentGroup->GetName().empty())
+            ?
+            // Case of the ZarrAttributeGroup::m_oGroup fake group
+            poParentGroup->GetFullName()
+            : ((poParentGroup == nullptr || poParentGroup->GetFullName() == "/"
+                    ? "/"
+                    : poParentGroup->GetFullName() + "/") +
+               "_GLOBAL_");
+    auto attr(Create(osParentName, osName, anDimensions, oType));
+    if (!attr)
+        return nullptr;
+    attr->m_poParent = poParentGroup;
+    return attr;
+}
+
+/************************************************************************/
+/*                        MEMAttribute::Create()                        */
+/************************************************************************/
+
+std::shared_ptr<MEMAttribute> MEMAttribute::Create(
+    const std::shared_ptr<MEMMDArray> &poParentArray, const std::string &osName,
+    const std::vector<GUInt64> &anDimensions, const GDALExtendedDataType &oType)
+{
+    auto attr(
+        Create(poParentArray->GetFullName(), osName, anDimensions, oType));
+    if (!attr)
+        return nullptr;
+    attr->m_poParent = poParentArray;
+    return attr;
+}
+
+/************************************************************************/
+/*                              Rename()                                */
+/************************************************************************/
+
+bool MEMAttribute::Rename(const std::string &osNewName)
+{
+    if (!CheckValidAndErrorOutIfNot())
+        return false;
+    if (osNewName.empty())
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, "Empty name not supported");
+        return false;
+    }
+
+    if (auto poParent = m_poParent.lock())
+    {
+        if (!poParent->RenameAttribute(m_osName, osNewName))
+        {
+            return false;
+        }
+    }
+
+    BaseRename(osNewName);
+
+    m_bModified = true;
+
+    return true;
+}
+
+/************************************************************************/
 /*                             MEMDimension()                           */
 /************************************************************************/
 
 MEMDimension::MEMDimension(const std::string &osParentName,
                            const std::string &osName, const std::string &osType,
                            const std::string &osDirection, GUInt64 nSize)
-    : GDALDimension(osParentName, osName, osType, osDirection, nSize)
+    : GDALDimensionWeakIndexingVar(osParentName, osName, osType, osDirection,
+                                   nSize)
 {
 }
 
 /************************************************************************/
-/*                           SetIndexingVariable()                      */
+/*                        RegisterUsingArray()                          */
 /************************************************************************/
 
-// cppcheck-suppress passedByValue
-bool MEMDimension::SetIndexingVariable(
-    std::shared_ptr<GDALMDArray> poIndexingVariable)
+void MEMDimension::RegisterUsingArray(MEMMDArray *poArray)
 {
-    m_poIndexingVariable = poIndexingVariable;
-    return true;
+    m_oSetArrays.insert(poArray);
+}
+
+/************************************************************************/
+/*                        UnRegisterUsingArray()                        */
+/************************************************************************/
+
+void MEMDimension::UnRegisterUsingArray(MEMMDArray *poArray)
+{
+    m_oSetArrays.erase(poArray);
+}
+
+/************************************************************************/
+/*                                Create()                              */
+/************************************************************************/
+
+/* static */
+std::shared_ptr<MEMDimension>
+MEMDimension::Create(const std::shared_ptr<MEMGroup> &poParentGroup,
+                     const std::string &osName, const std::string &osType,
+                     const std::string &osDirection, GUInt64 nSize)
+{
+    auto newDim(std::make_shared<MEMDimension>(
+        poParentGroup->GetFullName(), osName, osType, osDirection, nSize));
+    newDim->m_poParentGroup = poParentGroup;
+    return newDim;
 }
 
 /************************************************************************/
@@ -2210,10 +3044,36 @@ MEMGroup::CreateDimension(const std::string &osName, const std::string &osType,
                  "A dimension with same name already exists");
         return nullptr;
     }
-    auto newDim(std::make_shared<MEMDimension>(GetFullName(), osName, osType,
-                                               osDirection, nSize));
+    auto newDim(MEMDimension::Create(
+        std::dynamic_pointer_cast<MEMGroup>(m_pSelf.lock()), osName, osType,
+        osDirection, nSize));
     m_oMapDimensions[osName] = newDim;
     return newDim;
+}
+
+/************************************************************************/
+/*                              Rename()                                */
+/************************************************************************/
+
+bool MEMDimension::Rename(const std::string &osNewName)
+{
+    if (osNewName.empty())
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, "Empty name not supported");
+        return false;
+    }
+
+    if (auto poParentGroup = m_poParentGroup.lock())
+    {
+        if (!poParentGroup->RenameDimension(m_osName, osNewName))
+        {
+            return false;
+        }
+    }
+
+    BaseRename(osNewName);
+
+    return true;
 }
 
 /************************************************************************/
@@ -2228,8 +3088,8 @@ MEMDataset::CreateMultiDimensional(const char *pszFilename,
     auto poDS = new MEMDataset();
 
     poDS->SetDescription(pszFilename);
-    poDS->m_poPrivate->m_poRootGroup.reset(
-        new MEMGroup(std::string(), nullptr));
+    auto poRootGroup = MEMGroup::Create(std::string(), nullptr);
+    poDS->m_poPrivate->m_poRootGroup = poRootGroup;
 
     return poDS;
 }

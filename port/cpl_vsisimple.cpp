@@ -34,6 +34,17 @@
  *
  ****************************************************************************/
 
+// Must be done before including cpl_port.h
+// We need __MSVCRT_VERSION__ >= 0x0700 to have "_aligned_malloc"
+// Latest versions of mingw32 define it, but with older ones,
+// we need to define it manually.
+#if defined(__MINGW32__)
+#include <windows.h>
+#ifndef __MSVCRT_VERSION__
+#define __MSVCRT_VERSION__ 0x0700
+#endif
+#endif
+
 #include "cpl_port.h"
 #include "cpl_vsi.h"
 
@@ -94,7 +105,7 @@ extern "C" GIntBig CPL_DLL CPL_STDCALL GDALGetCacheUsed64(void);
 #endif
 
 /* Unix or Windows NT/2000/XP */
-#if !defined(WIN32)
+#if !defined(_WIN32)
 #include <unistd.h>
 #else
 #include <io.h>
@@ -109,7 +120,7 @@ extern "C" GIntBig CPL_DLL CPL_STDCALL GDALGetCacheUsed64(void);
 FILE *VSIFOpen(const char *pszFilename, const char *pszAccess)
 
 {
-#if defined(WIN32)
+#if defined(_WIN32)
     FILE *fp = nullptr;
     if (CPLTestBool(CPLGetConfigOption("GDAL_FILENAME_IS_UTF8", "YES")))
     {
@@ -1194,6 +1205,7 @@ void *VSIMalloc3Verbose(size_t nSize1, size_t nSize2, size_t nSize3,
     }
     return pRet;
 }
+
 /************************************************************************/
 /*                          VSICallocVerbose()                          */
 /************************************************************************/
@@ -1255,7 +1267,7 @@ char *VSIStrdupVerbose(const char *pszStr, const char *pszFile, int nLine)
 int VSIStat(const char *pszFilename, VSIStatBuf *pStatBuf)
 
 {
-#if defined(WIN32)
+#if defined(_WIN32)
     if (CPLTestBool(CPLGetConfigOption("GDAL_FILENAME_IS_UTF8", "YES")))
     {
         wchar_t *pwszFilename =
@@ -1298,8 +1310,21 @@ const char *VSICTime(unsigned long nTime)
 
 {
     time_t tTime = static_cast<time_t>(nTime);
-
+#if HAVE_CTIME_R
+    // Cf https://linux.die.net/man/3/ctime_r:
+    // "The reentrant version ctime_r() does the same, but stores the string in
+    // a user-supplied buffer which should have room for at least 26 bytes"
+    char buffer[26];
+    char *ret = ctime_r(&tTime, buffer);
+    return ret ? CPLSPrintf("%s", ret) : nullptr;
+#elif defined(_WIN32)
+    char buffer[26];
+    return ctime_s(buffer, sizeof(buffer), &tTime) == 0
+               ? CPLSPrintf("%s", buffer)
+               : nullptr;
+#else
     return reinterpret_cast<const char *>(ctime(&tTime));
+#endif
 }
 
 /************************************************************************/
@@ -1311,12 +1336,14 @@ struct tm *VSIGMTime(const time_t *pnTime, struct tm *poBrokenTime)
 
 #if HAVE_GMTIME_R
     gmtime_r(pnTime, poBrokenTime);
+    return poBrokenTime;
+#elif defined(_WIN32)
+    return gmtime_s(poBrokenTime, pnTime) == 0 ? poBrokenTime : nullptr;
 #else
     struct tm *poTime = gmtime(pnTime);
     memcpy(poBrokenTime, poTime, sizeof(tm));
-#endif
-
     return poBrokenTime;
+#endif
 }
 
 /************************************************************************/
@@ -1328,12 +1355,14 @@ struct tm *VSILocalTime(const time_t *pnTime, struct tm *poBrokenTime)
 
 #if HAVE_LOCALTIME_R
     localtime_r(pnTime, poBrokenTime);
+    return poBrokenTime;
+#elif defined(_WIN32)
+    return localtime_s(poBrokenTime, pnTime) == 0 ? poBrokenTime : nullptr;
 #else
     struct tm *poTime = localtime(pnTime);
     memcpy(poBrokenTime, poTime, sizeof(tm));
-#endif
-
     return poBrokenTime;
+#endif
 }
 
 /************************************************************************/
@@ -1356,7 +1385,8 @@ char *VSIStrerror(int nErrno)
 /** Return the total physical RAM in bytes.
  *
  * In the context of a container using cgroups (typically Docker), this
- * will take into account that limitation (starting with GDAL 2.4.0)
+ * will take into account that limitation (starting with GDAL 2.4.0 and
+ * with extra fixes in GDAL 3.6.3)
  *
  * You should generally use CPLGetUsablePhysicalRAM() instead.
  *
@@ -1371,20 +1401,145 @@ GIntBig CPLGetPhysicalRAM(void)
         return 0;
     GIntBig nVal = static_cast<GIntBig>(nPhysPages) * nPageSize;
 
-    // In a Docker container the memory might be limited
-    // If no limitation, on 64 bit, 9223372036854771712 is returned.
-    FILE *f = fopen("/sys/fs/cgroup/memory/memory.limit_in_bytes", "rb");
-    if (f)
+#ifdef __linux
     {
-        char szBuffer[32];
-        const int nRead =
-            static_cast<int>(fread(szBuffer, 1, sizeof(szBuffer) - 1, f));
-        szBuffer[nRead] = 0;
+        // Take into account MemTotal in /proc/meminfo
+        // which seems to be necessary for some container solutions
+        // Cf https://lists.osgeo.org/pipermail/gdal-dev/2023-January/056784.html
+        FILE *f = fopen("/proc/meminfo", "rb");
+        char szLine[256];
+        while (fgets(szLine, sizeof(szLine), f))
+        {
+            // Find line like "MemTotal:       32525176 kB"
+            if (strncmp(szLine, "MemTotal:", strlen("MemTotal:")) == 0)
+            {
+                char *pszVal = szLine + strlen("MemTotal:");
+                pszVal += strspn(pszVal, " ");
+                char *pszEnd = strstr(pszVal, " kB");
+                if (pszEnd)
+                {
+                    *pszEnd = 0;
+                    if (CPLGetValueType(pszVal) == CPL_VALUE_INTEGER)
+                    {
+                        const GUIntBig nLimit =
+                            CPLScanUIntBig(pszVal,
+                                           static_cast<int>(strlen(pszVal))) *
+                            1024;
+                        nVal = static_cast<GIntBig>(
+                            std::min(static_cast<GUIntBig>(nVal), nLimit));
+                    }
+                }
+                break;
+            }
+        }
         fclose(f);
-        const GUIntBig nLimit = CPLScanUIntBig(szBuffer, nRead);
-        nVal =
-            static_cast<GIntBig>(std::min(static_cast<GUIntBig>(nVal), nLimit));
     }
+
+    char szGroupName[256];
+    bool bFromMemory = false;
+    szGroupName[0] = 0;
+    {
+        FILE *f = fopen("/proc/self/cgroup", "rb");
+        char szLine[256];
+        // Find line like "6:memory:/user.slice/user-1000.slice/user@1000.service"
+        // and store "/user.slice/user-1000.slice/user@1000.service" in
+        // szMemoryPath for cgroup V1 or single line "0::/...." for cgroup V2.
+        while (fgets(szLine, sizeof(szLine), f))
+        {
+            const char *pszMemory = strstr(szLine, ":memory:");
+            if (pszMemory)
+            {
+                bFromMemory = true;
+                snprintf(szGroupName, sizeof(szGroupName), "%s",
+                         pszMemory + strlen(":memory:"));
+                char *pszEOL = strchr(szGroupName, '\n');
+                if (pszEOL)
+                    *pszEOL = '\0';
+                break;
+            }
+            if (strncmp(szLine, "0::", strlen("0::")) == 0)
+            {
+                snprintf(szGroupName, sizeof(szGroupName), "%s",
+                         szLine + strlen("0::"));
+                char *pszEOL = strchr(szGroupName, '\n');
+                if (pszEOL)
+                    *pszEOL = '\0';
+                break;
+            }
+        }
+        fclose(f);
+    }
+    if (szGroupName[0])
+    {
+        char szFilename[256 + 64];
+        if (bFromMemory)
+        {
+            // cgroup V1
+            // Read memory.limit_in_byte in the whole szGroupName hierarchy
+            // Make sure to end up by reading
+            // /sys/fs/cgroup/memory/memory.limit_in_bytes itself, for
+            // scenarios like https://github.com/OSGeo/gdal/issues/8968
+            while (true)
+            {
+                snprintf(szFilename, sizeof(szFilename),
+                         "/sys/fs/cgroup/memory/%s/memory.limit_in_bytes",
+                         szGroupName);
+                FILE *f = fopen(szFilename, "rb");
+                if (f)
+                {
+                    // If no limitation, on 64 bit, 9223372036854771712 is returned.
+                    char szBuffer[32];
+                    const int nRead = static_cast<int>(
+                        fread(szBuffer, 1, sizeof(szBuffer) - 1, f));
+                    szBuffer[nRead] = 0;
+                    fclose(f);
+                    const GUIntBig nLimit = CPLScanUIntBig(szBuffer, nRead);
+                    nVal = static_cast<GIntBig>(
+                        std::min(static_cast<GUIntBig>(nVal), nLimit));
+                }
+                char *pszLastSlash = strrchr(szGroupName, '/');
+                if (!pszLastSlash)
+                    break;
+                *pszLastSlash = '\0';
+            }
+        }
+        else
+        {
+            // cgroup V2
+            // Read memory.max in the whole szGroupName hierarchy
+            while (true)
+            {
+                snprintf(szFilename, sizeof(szFilename),
+                         "/sys/fs/cgroup/%s/memory.max", szGroupName);
+                FILE *f = fopen(szFilename, "rb");
+                if (f)
+                {
+                    // If no limitation, "max" is returned.
+                    char szBuffer[32];
+                    int nRead = static_cast<int>(
+                        fread(szBuffer, 1, sizeof(szBuffer) - 1, f));
+                    szBuffer[nRead] = 0;
+                    if (nRead > 0 && szBuffer[nRead - 1] == '\n')
+                    {
+                        nRead--;
+                        szBuffer[nRead] = 0;
+                    }
+                    fclose(f);
+                    if (CPLGetValueType(szBuffer) == CPL_VALUE_INTEGER)
+                    {
+                        const GUIntBig nLimit = CPLScanUIntBig(szBuffer, nRead);
+                        nVal = static_cast<GIntBig>(
+                            std::min(static_cast<GUIntBig>(nVal), nLimit));
+                    }
+                }
+                char *pszLastSlash = strrchr(szGroupName, '/');
+                if (!pszLastSlash || pszLastSlash == szGroupName)
+                    break;
+                *pszLastSlash = '\0';
+            }
+        }
+    }
+#endif
 
     return nVal;
 }
@@ -1405,7 +1560,7 @@ GIntBig CPLGetPhysicalRAM(void)
     return nPhysMem;
 }
 
-#elif defined(WIN32)
+#elif defined(_WIN32)
 
 // GlobalMemoryStatusEx requires _WIN32_WINNT >= 0x0500.
 #ifndef _WIN32_WINNT

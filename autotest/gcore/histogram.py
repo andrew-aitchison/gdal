@@ -40,13 +40,30 @@ import pytest
 
 from osgeo import gdal
 
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+@pytest.fixture()
+def utmsmall_tif(tmp_path):
+    fname = str(tmp_path / "utmsmall.tif")
+
+    shutil.copyfile("data/utmsmall.tif", fname)
+
+    return fname
+
+
 ###############################################################################
 # Fetch simple histogram.
 
 
-def test_histogram_1():
+def test_histogram_1(utmsmall_tif):
 
-    ds = gdal.Open("data/utmsmall.tif")
+    ds = gdal.Open(utmsmall_tif)
     hist = ds.GetRasterBand(1).GetHistogram()
 
     exp_hist = [
@@ -315,9 +332,9 @@ def test_histogram_1():
 # Fetch histogram with specified sampling, using keywords.
 
 
-def test_histogram_2():
+def test_histogram_2(utmsmall_tif):
 
-    ds = gdal.Open("data/utmsmall.tif")
+    ds = gdal.Open(utmsmall_tif)
     hist = ds.GetRasterBand(1).GetHistogram(buckets=16, max=255.5, min=-0.5)
 
     exp_hist = [
@@ -346,10 +363,8 @@ def test_histogram_2():
 # try on a different data type with out of range values included.
 
 
+@pytest.mark.require_driver("AAIGRID")
 def test_histogram_3():
-
-    if gdal.GetDriverByName("AAIGRID") is None:
-        pytest.skip("AAIGRID driver missing")
 
     ds = gdal.Open("data/int32_withneg.grd")
     hist = ds.GetRasterBand(1).GetHistogram(
@@ -365,10 +380,8 @@ def test_histogram_3():
 # try on a different data type without out of range values included.
 
 
+@pytest.mark.require_driver("AAIGRID")
 def test_histogram_4():
-
-    if gdal.GetDriverByName("AAIGRID") is None:
-        pytest.skip("AAIGRID driver missing")
 
     ds = gdal.Open("data/int32_withneg.grd")
     hist = ds.GetRasterBand(1).GetHistogram(
@@ -388,9 +401,9 @@ def test_histogram_4():
 # Test GetDefaultHistogram() on the file.
 
 
-def test_histogram_5():
+def test_histogram_5(utmsmall_tif):
 
-    ds = gdal.Open("data/utmsmall.tif")
+    ds = gdal.Open(utmsmall_tif)
     hist = ds.GetRasterBand(1).GetDefaultHistogram(force=1)
 
     exp_hist = (
@@ -661,17 +674,13 @@ def test_histogram_5():
 
     ds = None
 
-    gdal.Unlink("data/utmsmall.tif.aux.xml")
-
 
 ###############################################################################
 # Test GetDefaultHistogram( force = 0 ) on a JPG file (#3304)
 
 
+@pytest.mark.require_driver("JPEG")
 def test_histogram_6():
-
-    if gdal.GetDriverByName("JPEG") is None:
-        pytest.skip("JPEG driver missing")
 
     shutil.copy("../gdrivers/data/jpeg/albania.jpg", "tmp/albania.jpg")
     ds = gdal.Open("tmp/albania.jpg")
@@ -738,7 +747,7 @@ def test_histogram_errors():
 def test_histogram_invalid_min_max(min, max):
 
     ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         ret = ds.GetRasterBand(1).GetHistogram(
             buckets=2, min=min, max=max, include_out_of_range=1, approx_ok=0

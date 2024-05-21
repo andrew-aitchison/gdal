@@ -63,30 +63,37 @@ class ValueRange
     ValueRange(double min, double max, double step);
     explicit ValueRange(const std::string &str);
     std::string ToString() const;
+
     ilwisStoreType get_NeededStoreType() const
     {
         return st;
     }
+
     double get_rLo() const
     {
         return _rLo;
     }
+
     double get_rHi() const
     {
         return _rHi;
     }
+
     double get_rStep() const
     {
         return _rStep;
     }
+
     double get_rRaw0() const
     {
         return _r0;
     }
+
     int get_iDec() const
     {
         return _iDec;
     }
+
     double rValue(int raw) const;
     int iRaw(double value) const;
 
@@ -111,6 +118,7 @@ struct ILWISInfo
     ILWISInfo() : bUseValueRange(false), vr(0, 0), stStoreType(stByte)
     {
     }
+
     bool bUseValueRange;
     ValueRange vr;
     ilwisStoreType stStoreType;
@@ -163,7 +171,7 @@ class ILWISDataset final : public GDALPamDataset
     std::string pszFileType;  // indicating the input dataset: Map/MapList
     CPLErr ReadProjection(const std::string &csyFileName);
     CPLErr WriteProjection();
-    CPLErr WriteGeoReference();
+    void WriteGeoReference();
     void CollectTransformCoef(std::string &pszRefFile);
 
   public:
@@ -188,7 +196,7 @@ class ILWISDataset final : public GDALPamDataset
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual void FlushCache(bool bAtClosing) override;
+    virtual CPLErr FlushCache(bool bAtClosing) override;
 };
 
 // IniFile.h: interface for the IniFile class.

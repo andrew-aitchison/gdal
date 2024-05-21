@@ -117,9 +117,8 @@ def test_ogr_fgdb_stress_1():
                 f.SetFID(fid)
                 f.SetField(0, "%d" % random.randrange(0, 1000))
                 f.SetGeometry(ogr.CreateGeometryFromWkt(wkt))
-                gdal.PushErrorHandler()
-                ret.append(lyr.CreateFeature(f))
-                gdal.PopErrorHandler()
+                with gdal.quiet_errors():
+                    ret.append(lyr.CreateFeature(f))
                 # So to ensure lyr_ref will use the same FID as the tested layer
                 fid = f.GetFID()
                 # print("created %d" % fid)
@@ -182,14 +181,10 @@ def test_ogr_fgdb_stress_2():
         )
         if f_test is None:
             break
-        if (
-            f_test.GetFID() != f_ref.GetFID()
-            or f_test["str"] != f_ref["str"]
-            or ogrtest.check_feature_geometry(f_test, f_ref.GetGeometryRef()) != 0
-        ):
-            f_test.DumpReadable()
-            f_ref.DumpReadable()
-            pytest.fail()
+
+        assert f_test.GetFID() == f_ref.GetFID()
+        assert f_test["str"] == f_ref["str"]
+        ogrtest.check_feature_geometry(f_test, f_ref.GetGeometryRef())
 
     for val in range(1000):
         lyr_test.SetAttributeFilter("str = '%d'" % val)

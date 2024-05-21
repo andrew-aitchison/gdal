@@ -6,7 +6,7 @@ ogrlineref
 
 .. only:: html
 
-    Create linear reference and provide some calculations using it.
+    Create linear reference and provide some calculations using it
 
 .. Index:: ogrlineref
 
@@ -15,23 +15,23 @@ Synopsis
 
 .. code-block::
 
-    ogrlineref [--help-general] [-progress] [-quiet]
-           [-f format_name] [[-dsco NAME=VALUE] ...] [[-lco NAME=VALUE]...]
-           [-create]
-           [-l src_line_datasource_name] [-ln layer_name] [-lf field_name]
-           [-p src_repers_datasource_name] [-pn layer_name] [-pm pos_field_name] [-pf field_name]
-           [-r src_parts_datasource_name] [-rn layer_name]
-           [-o dst_datasource_name] [-on layer_name]  [-of field_name] [-s step]
-           [-get_pos] [-x long] [-y lat]
-           [-get_coord] [-m position]
-           [-get_subline] [-mb position] [-me position]
+    ogrlineref [--help] [--help-general] [-progress] [-quiet]
+               [-f <format_name>] [-dsco <NAME>=<VALUE>]... [-lco <NAME>=<VALUE>]...
+               [-create]
+               [-l <src_line_datasource_name>] [-ln <layer_name>] [-lf <field_name>]
+               [-p <src_repers_datasource_name>] [-pn <layer_name>] [-pm <pos_field_name>] [-pf <field_name>]
+               [-r <src_parts_datasource_name>] [-rn <layer_name>]
+               [-o <dst_datasource_name>] [-on <layer_name>] [-of <field_name>] [-s <step>]
+               [-get_pos] [-x <long>] [-y <lat>]
+               [-get_coord] [-m <position>]
+               [-get_subline] [-mb <position>] [-me <position>]
 
 Description
 -----------
 
-The :program:`ogrlineref` program can be used for:
+The :program:`ogrlineref` program can be used to:
 
--  create linear reference file from input data
+-  create a linear reference file from input data
 
 -  return the "linear referenced" distance for the projection of the
    input coordinates (point) on the path
@@ -42,16 +42,14 @@ The :program:`ogrlineref` program can be used for:
 -  return the portion of the path according to the "linear referenced"
    begin and end distances
 
-The :program:`ogrlineref` creates a linear reference - a file containing
-a segments of special length (e.g. 1 km in reference units) and get coordinates,
+The :program:`ogrlineref` utility creates a linear reference - a file containing
+segments of a certain length (e.g. 1 km in reference units.) The user can get coordinates,
 linear referenced distances or sublines (subpaths) from this file.
-The utility not required the ``M`` or ``Z`` values in geometry.
+The utility does not require the ``M`` or ``Z`` components in the geometry.
 The results can be stored in any OGR supported format.
 Also some information is written to the stdout.
 
-.. option:: --help-general
-
-    Show the usage.
+.. include:: options/help_and_help_general.rst
 
 .. option:: -progress
 
@@ -65,11 +63,11 @@ Also some information is written to the stdout.
 
     Select an output format name. The default is to create a shapefile.
 
-.. option:: -dsco <NAME=VALUE>
+.. option:: -dsco <NAME>=<VALUE>
 
     Dataset creation option (format specific)
 
-.. option:: -lco <NAME=VALUE>
+.. option:: -lco <NAME>=<VALUE>
 
     Layer creation option (format specific).
 

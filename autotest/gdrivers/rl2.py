@@ -34,18 +34,25 @@ import pytest
 
 from osgeo import gdal, ogr
 
+pytestmark = [
+    pytest.mark.require_driver("SQLite"),
+    pytest.mark.skipif(
+        gdal.GetDriverByName("SQLite") is None
+        or gdal.GetDriverByName("SQLite").GetMetadataItem("DCAP_RASTER") is None,
+        reason="DCAP_RASTER missing in SQLite driver",
+    ),
+]
+
 ###############################################################################
-# Get the rl2 driver
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
-def test_rl2_1():
-
+@pytest.fixture(autouse=True, scope="module")
+def rl2_setup():
     gdaltest.rl2_drv = gdal.GetDriverByName("SQLite")
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-    if gdaltest.rl2_drv.GetMetadataItem("DCAP_RASTER") is None:
-        gdaltest.rl2_drv = None
-        pytest.skip()
 
 
 ###############################################################################
@@ -53,9 +60,6 @@ def test_rl2_1():
 
 
 def test_rl2_2():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     ds = gdal.Open("data/rasterlite2/byte.rl2")
 
@@ -86,9 +90,8 @@ def test_rl2_2():
     expected_subds = []
     assert subds == expected_subds
 
-    gdal.SetConfigOption("RL2_SHOW_ALL_PYRAMID_LEVELS", "YES")
-    ds = gdal.Open("data/rasterlite2/byte.rl2")
-    gdal.SetConfigOption("RL2_SHOW_ALL_PYRAMID_LEVELS", None)
+    with gdal.config_option("RL2_SHOW_ALL_PYRAMID_LEVELS", "YES"):
+        ds = gdal.Open("data/rasterlite2/byte.rl2")
 
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
     assert cs == 1087
@@ -99,9 +102,6 @@ def test_rl2_2():
 
 
 def test_rl2_3():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     ds = gdal.Open("data/rasterlite2/small_world.rl2")
 
@@ -152,9 +152,6 @@ def test_rl2_3():
 
 def test_rl2_4():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     ds = gdal.Open("data/rasterlite2/small_world_pct.rl2")
 
     assert ds.GetRasterBand(1).GetColorInterpretation() == gdal.GCI_PaletteIndex
@@ -178,9 +175,6 @@ def test_rl2_4():
 
 
 def test_rl2_5():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     ds = gdal.Open("data/rasterlite2/multi_type.rl2")
 
@@ -224,11 +218,8 @@ def test_rl2_5():
 
 def test_rl2_6():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "byte.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -237,13 +228,10 @@ def test_rl2_6():
 
 def test_rl2_7():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest(
         "SQLite", "small_world.tif", 1, 30111, options=["COMPRESS=PNG"]
     )
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -252,13 +240,10 @@ def test_rl2_7():
 
 def test_rl2_8():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest(
         "SQLite", "small_world_pct.tif", 1, 14890, options=["COMPRESS=PNG"]
     )
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -267,11 +252,8 @@ def test_rl2_8():
 
 def test_rl2_9():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/uint16.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -280,11 +262,8 @@ def test_rl2_9():
 
 def test_rl2_10():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/int16.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -292,9 +271,6 @@ def test_rl2_10():
 
 
 def test_rl2_11():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/uint32.tif", 1, 4672)
     return tst.testCreateCopy(vsimem=1)
@@ -306,11 +282,8 @@ def test_rl2_11():
 
 def test_rl2_12():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/int32.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -318,9 +291,6 @@ def test_rl2_12():
 
 
 def test_rl2_13():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/float32.tif", 1, 4672)
     return tst.testCreateCopy(vsimem=1)
@@ -332,24 +302,19 @@ def test_rl2_13():
 
 def test_rl2_14():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/float64.tif", 1, 4672)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
 # Test CreateCopy() on a 1 bit paletted
 
 
+@pytest.mark.require_driver("BMP")
 def test_rl2_15():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "../../gcore/data/1bit.bmp", 1, 200)
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -358,13 +323,10 @@ def test_rl2_15():
 
 def test_rl2_16():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest(
         "SQLite", "byte.tif", 1, 4873, options=["NBITS=1", "COMPRESS=CCITTFAX4"]
     )
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -373,13 +335,10 @@ def test_rl2_16():
 
 def test_rl2_17():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest(
         "SQLite", "byte.tif", 1, 4873, options=["NBITS=2", "COMPRESS=DEFLATE"]
     )
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -388,11 +347,8 @@ def test_rl2_17():
 
 def test_rl2_18():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest("SQLite", "byte.tif", 1, 2541, options=["NBITS=4"])
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -401,13 +357,10 @@ def test_rl2_18():
 
 def test_rl2_19():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     tst = gdaltest.GDALTest(
         "SQLite", "byte.tif", 1, 4873, options=["PIXEL_TYPE=MONOCHROME"]
     )
-    return tst.testCreateCopy(vsimem=1, check_minmax=False)
+    tst.testCreateCopy(vsimem=1, check_minmax=False)
 
 
 ###############################################################################
@@ -416,9 +369,6 @@ def test_rl2_19():
 
 
 def test_rl2_20():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     tests = [
         ("MONOCHROME", 2, gdal.GDT_Byte, "NONE", None, None),
@@ -453,7 +403,7 @@ def test_rl2_20():
         if nbits is not None:
             src_ds.GetRasterBand(1).SetMetadataItem("NBITS", nbits, "IMAGE_STRUCTURE")
         options = ["PIXEL_TYPE=" + pixel_type, "COMPRESS=" + compress]
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             out_ds = gdaltest.rl2_drv.CreateCopy(
                 "/vsimem/rl2_20.rl2", src_ds, options=options
             )
@@ -473,9 +423,6 @@ def test_rl2_20():
 
 
 def test_rl2_21():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
 
     tests = [
         ("DEFLATE", None),
@@ -525,9 +472,6 @@ def test_rl2_21():
 
 def test_rl2_22():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     src_ds = gdal.Open("data/byte.tif")
 
     ds = ogr.GetDriverByName("SQLite").CreateDataSource(
@@ -575,9 +519,6 @@ def test_rl2_22():
 
 def test_rl2_23():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
     src_ds = gdal.Open("data/byte.tif")
     src_ds = gdal.Translate("", src_ds, format="MEM", width=2048, height=2048)
     ds = gdaltest.rl2_drv.CreateCopy("/vsimem/rl2_23.rl2", src_ds)
@@ -599,16 +540,13 @@ def test_rl2_23():
 # Test opening a .rl2.sql file
 
 
+@pytest.mark.skipif(
+    gdal.GetDriverByName("SQLite") is None
+    or gdal.GetDriverByName("SQLite").GetMetadataItem("ENABLE_SQL_SQLITE_FORMAT")
+    != "YES",
+    reason="No support for ENABLE_SQL_SQLITE_FORMAT",
+)
 def test_rl2_24():
-
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
-    if (
-        gdal.GetDriverByName("SQLite").GetMetadataItem("ENABLE_SQL_SQLITE_FORMAT")
-        != "YES"
-    ):
-        pytest.skip()
 
     ds = gdal.Open("data/rasterlite2/byte.rl2.sql")
     assert ds.GetRasterBand(1).Checksum() == 4672, "validation failed"
@@ -620,8 +558,5 @@ def test_rl2_24():
 
 def test_rl2_error_create():
 
-    if gdaltest.rl2_drv is None:
-        pytest.skip()
-
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdaltest.rl2_drv.Create("/vsimem/out.db", 1, 1) is None

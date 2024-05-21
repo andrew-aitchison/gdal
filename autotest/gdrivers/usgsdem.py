@@ -46,7 +46,7 @@ def test_usgsdem_1():
     tst = gdaltest.GDALTest("USGSDEM", "usgsdem/022gdeme_truncated", 1, 1583)
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("NAD27")
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=srs.ExportToWkt(),
         check_gt=(-67.00041667, 0.00083333, 0.0, 50.000416667, 0.0, -0.00083333),
     )
@@ -63,7 +63,7 @@ def test_usgsdem_2():
     )
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("NAD27")
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=srs.ExportToWkt(),
         check_gt=(
             -136.25010416667,
@@ -86,7 +86,7 @@ def test_usgsdem_3():
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("WGS72")
     srs.SetUTM(17)
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=srs.ExportToWkt(),
         check_gt=(606855.0, 30.0, 0.0, 4414605.0, 0.0, -30.0),
     )
@@ -105,13 +105,14 @@ def test_usgsdem_4():
         61424,
         options=["RESAMPLE=Nearest"],
     )
-    return tst.testCreateCopy(check_gt=1, check_srs=1, vsimem=1)
+    tst.testCreateCopy(check_gt=1, check_srs=1, vsimem=1)
 
 
 ###############################################################################
 # Test CreateCopy() without any creation options
 
 
+@pytest.mark.require_driver("DTED")
 def test_usgsdem_5():
 
     ds = gdal.Open("data/n43.dt0")
@@ -147,6 +148,7 @@ def test_usgsdem_5():
 # creation option and check that both files are binary identical.
 
 
+@pytest.mark.require_driver("DTED")
 def test_usgsdem_6():
 
     ds = gdal.Open("data/n43.dt0")
@@ -188,24 +190,24 @@ def test_usgsdem_6():
 # Test CreateCopy() with CDED50K profile
 
 
+@pytest.mark.require_driver("DTED")
 def test_usgsdem_7():
 
     ds = gdal.Open("data/n43.dt0")
 
     # To avoid warning about 'Unable to find NTS mapsheet lookup file: NTS-50kindex.csv'
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds2 = gdal.GetDriverByName("USGSDEM").CreateCopy(
-        "tmp/000a00DEMz",
-        ds,
-        options=[
-            "PRODUCT=CDED50K",
-            "TOPLEFT=80w,44n",
-            "RESAMPLE=Nearest",
-            "ZRESOLUTION=1.1",
-            "INTERNALNAME=GDAL",
-        ],
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds2 = gdal.GetDriverByName("USGSDEM").CreateCopy(
+            "tmp/000a00DEMz",
+            ds,
+            options=[
+                "PRODUCT=CDED50K",
+                "TOPLEFT=80w,44n",
+                "RESAMPLE=Nearest",
+                "ZRESOLUTION=1.1",
+                "INTERNALNAME=GDAL",
+            ],
+        )
 
     assert ds2.RasterXSize == 1201 and ds2.RasterYSize == 1201, "Bad image dimensions."
 
@@ -243,7 +245,7 @@ def test_usgsdem_8():
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("NAD27")
     srs.SetUTM(12)
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=srs.ExportToWkt(),
         check_gt=(660055.0, 10.0, 0.0, 4429465.0, 0.0, -10.0),
     )
@@ -259,7 +261,7 @@ def test_usgsdem_9():
     tst = gdaltest.GDALTest("USGSDEM", "usgsdem/4619old_truncated.dem", 1, 10659)
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("NAD27")
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=srs.ExportToWkt(),
         check_gt=(18.99958333, 0.0008333, 0.0, 47.000416667, 0.0, -0.0008333),
     )
@@ -274,7 +276,7 @@ def test_usgsdem_with_extra_values_at_end_of_profile():
     tst = gdaltest.GDALTest(
         "USGSDEM", "usgsdem/usgsdem_with_extra_values_at_end_of_profile.dem", 1, 56679
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -286,7 +288,7 @@ def test_usgsdem_with_spaces_after_byte_864():
     tst = gdaltest.GDALTest(
         "USGSDEM", "usgsdem/usgsdem_with_spaces_after_byte_864.dem", 1, 61078
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -302,8 +304,8 @@ def test_usgsdem_with_header_of_918_bytes():
     srs = osr.SpatialReference()
     srs.SetWellKnownGeogCS("NAD83")
     srs.SetUTM(15)
-    with gdaltest.error_handler():
-        return tst.testOpen(
+    with pytest.raises(Exception):
+        tst.testOpen(
             check_prj=srs.ExportToWkt(),
             check_gt=(248500.0, 1.4, 0.0, 3252508.7, 0.0, -1.4),
         )
@@ -318,7 +320,7 @@ def test_usgsdem_record_1025_bytes_ending_with_linefeed():
     tst = gdaltest.GDALTest(
         "USGSDEM", "usgsdem/record_1025_ending_with_linefeed.dem", 1, 14172
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################

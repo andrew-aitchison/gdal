@@ -64,16 +64,21 @@ OGRMemDataSource::~OGRMemDataSource()
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRMemDataSource::ICreateLayer(const char *pszLayerName,
-                                         OGRSpatialReference *poSRSIn,
-                                         OGRwkbGeometryType eType,
-                                         char **papszOptions)
+OGRLayer *
+OGRMemDataSource::ICreateLayer(const char *pszLayerName,
+                               const OGRGeomFieldDefn *poGeomFieldDefn,
+                               CSLConstList papszOptions)
 {
     // Create the layer object.
-    OGRSpatialReference *poSRS = poSRSIn;
-    if (poSRS)
+
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRSIn =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+
+    OGRSpatialReference *poSRS = nullptr;
+    if (poSRSIn)
     {
-        poSRS = poSRS->Clone();
+        poSRS = poSRSIn->Clone();
         poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     OGRMemLayer *poLayer = new OGRMemLayer(pszLayerName, poSRS, eType);
@@ -84,6 +89,9 @@ OGRLayer *OGRMemDataSource::ICreateLayer(const char *pszLayerName,
 
     if (CPLFetchBool(papszOptions, "ADVERTIZE_UTF8", false))
         poLayer->SetAdvertizeUTF8(true);
+
+    poLayer->SetDataset(this);
+    poLayer->SetFIDColumn(CSLFetchNameValueDef(papszOptions, "FID", ""));
 
     // Add layer to data source layer list.
     papoLayers = static_cast<OGRMemLayer **>(
@@ -172,7 +180,7 @@ bool OGRMemDataSource::AddFieldDomain(std::unique_ptr<OGRFieldDomain> &&domain,
         failureReason = "A domain of identical name already exists";
         return false;
     }
-    const auto domainName = domain->GetName();
+    const std::string domainName(domain->GetName());
     m_oMapFieldDomains[domainName] = std::move(domain);
     return true;
 }
@@ -202,6 +210,7 @@ bool OGRMemDataSource::DeleteFieldDomain(const std::string &name,
                 poLayer->GetLayerDefn()->GetFieldDefn(j);
             if (poFieldDefn->GetDomainName() == name)
             {
+                auto oTemporaryUnsealer(poFieldDefn->GetTemporaryUnsealer());
                 poFieldDefn->SetDomainName(std::string());
             }
         }
@@ -217,7 +226,7 @@ bool OGRMemDataSource::DeleteFieldDomain(const std::string &name,
 bool OGRMemDataSource::UpdateFieldDomain(
     std::unique_ptr<OGRFieldDomain> &&domain, std::string &failureReason)
 {
-    const auto domainName = domain->GetName();
+    const std::string domainName(domain->GetName());
     const auto iter = m_oMapFieldDomains.find(domainName);
     if (iter == m_oMapFieldDomains.end())
     {

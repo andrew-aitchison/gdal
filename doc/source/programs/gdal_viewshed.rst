@@ -17,13 +17,13 @@ Synopsis
 
 .. code-block::
 
-   gdal_viewshed [-b <band>]
+   gdal_viewshed [--help] [--help-general] [-b <band>]
                  [-a_nodata <value>] [-f <formatname>]
                  [-oz <observer_height>] [-tz <target_height>] [-md <max_distance>]
                  -ox <observer_x> -oy <observer_y>
                  [-vv <visibility>] [-iv <invisibility>]
                  [-ov <out_of_range>] [-cc <curvature_coef>]
-                 [[-co NAME=VALUE] ...]
+                 [-co <NAME>=<VALUE>]...
                  [-q] [-om <output mode>]
                  <src_filename> <dst_filename>
 
@@ -39,6 +39,8 @@ Byte. With the -mode flag can also return a minimum visible height raster of typ
     if the georeferencing is in a projected coordinate reference system.
 
 .. program:: gdal_viewshed
+
+.. include:: options/help_and_help_general.rst
 
 .. include:: options/co.rst
 
@@ -155,19 +157,22 @@ Functionality of this utility can be done from C with :cpp:func:`GDALViewshedGen
 Example
 -------
 
-Compute the visibility of an elevation raster data source with defaults
+Screenshot of 2 combined viewshed analysis, with the yellow pixels showing the area that is
+visible from the both observation locations (the green dots), while the small green area is
+only visible from one location.
 
 
 .. figure:: ../../images/gdal_viewshed.png
 
-   A computed visibility for two separate `-ox` and `-oy` points on a DEM.
 
-.. code-block::
+Create a viewshed raster with a radius of 500 for a person standing at location (-10147017, 5108065).
+
+.. code-block:: bash
 
     gdal_viewshed -md 500 -ox -10147017 -oy 5108065 source.tif destination.tif
 
-
-
+Reference
+---------
 
 .. [Wang2000] Generating Viewsheds without Using Sightlines. Wang, Jianjun,
    Robinson, Gary J., and White, Kevin. Photogrammetric Engineering and Remote

@@ -84,27 +84,65 @@ table name will be base on the DB name itself.
 Creation options
 ~~~~~~~~~~~~~~~~
 
--  **WIPE** (=NO by default): Set to YES to erase all preexisting data
-   in the specified table
+|about-creation-options|
+The following creation options are supported:
 
--  **TILED** (=YES by default) : Set to NO if the source dataset must be
-   written as a single tile in the raster table
+-  .. co:: WIPE
 
--  **BLOCKXSIZE**\ =n: Sets tile width, defaults to 256.
+      Set to YES to erase all preexisting data
+      in the specified table
 
--  **BLOCKYSIZE**\ =n: Sets tile height, defaults to 256.
+-  .. co:: TILED
 
--  **DRIVER**\ =[GTiff/GIF/PNG/JPEG/...] : name of the GDAL
-   driver to use for storing tiles. Defaults to GTiff
+      Set to NO if the source dataset must be
+      written as a single tile in the raster table
 
--  **COMPRESS**\ =[LZW/JPEG/DEFLATE/...] : (GTiff driver) name of the
-   compression method
+-  .. co:: BLOCKXSIZE
+      :choices: <int>
+      :default: 256
 
--  **PHOTOMETRIC**\ =[RGB/YCbCr/...] : (GTiff driver) photometric
-   interpretation
+      Sets tile width.
 
--  **QUALITY** : (JPEG-compressed GTiff, JPEG and WEBP drivers)
-   JPEG/WEBP quality 1-100. Defaults to 75
+-  .. co:: BLOCKYSIZE
+      :choices: <int>
+      :default: 256
+
+      Sets tile height.
+
+-  .. co:: DRIVER
+      :default: GTiff
+
+      name of the GDAL
+      driver to use for storing tiles.
+
+-  .. co:: COMPRESS
+      :choices: LZW, JPEG, DEFLATE, ...
+
+      (GTiff driver) name of the
+      compression method
+
+-  .. co:: PHOTOMETRIC
+      :choices: RGB, YCbCr, ...
+
+      (GTiff driver) photometric interpretation
+
+-  .. co:: QUALITY
+      :choices: [1-100]
+      :default: 75
+
+      (JPEG-compressed GTiff, JPEG and WEBP drivers)
+      JPEG/WEBP quality.
+
+Configuration options
+~~~~~~~~~~~~~~~~~~~~~
+
+|about-config-options|
+The following configuration option is supported:
+
+-  .. config:: RASTERLITE_OVR_OPTIONS
+
+      Comma-separated list of creation options to be applied to overviews.
+      See `Overviews`_.
 
 Overviews
 ---------
@@ -116,7 +154,7 @@ If no internal overview is detected, the driver will try using external
 overviews (.ovr files).
 
 Options can be used for internal overviews
-building. They can be specified with the RASTERLITE_OVR_OPTIONS
+building. They can be specified with the :config:`RASTERLITE_OVR_OPTIONS`
 configuration option, as a comma separated list of the above creation
 options. See below examples.
 

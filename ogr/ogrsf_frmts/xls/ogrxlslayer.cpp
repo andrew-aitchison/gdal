@@ -26,7 +26,7 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-#include <freexl.h>
+#include "include_freexl.h"
 
 #include "ogr_xls.h"
 #include "cpl_conv.h"
@@ -337,4 +337,13 @@ int OGRXLSLayer::TestCapability(const char *pszCap)
         return TRUE;
 
     return FALSE;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRXLSLayer::GetDataset()
+{
+    return poDS;
 }

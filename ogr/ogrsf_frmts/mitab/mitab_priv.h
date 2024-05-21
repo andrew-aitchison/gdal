@@ -207,13 +207,15 @@ typedef enum
     TABFDate,
     TABFLogical,
     TABFTime,
-    TABFDateTime
+    TABFDateTime,
+    TABFLargeInt
 } TABFieldType;
 
 #define TABFIELDTYPE_2_STRING(type)                                            \
     (type == TABFChar       ? "Char"                                           \
      : type == TABFInteger  ? "Integer"                                        \
      : type == TABFSmallInt ? "SmallInt"                                       \
+     : type == TABFLargeInt ? "LargeInt"                                       \
      : type == TABFDecimal  ? "Decimal"                                        \
      : type == TABFFloat    ? "Float"                                          \
      : type == TABFDate     ? "Date"                                           \
@@ -229,7 +231,8 @@ typedef struct TABDATFieldDef_t
 {
     char szName[11];
     char cType;
-    GByte byLength;
+    GByte
+        byLength; /* caution: for a native .dat file, this is a binary width for most types */
     GByte byDecimals;
 
     TABFieldType eTABType;
@@ -262,7 +265,7 @@ typedef struct TABProjInfo_t
     GByte nProjId;  // See MapInfo Ref. Manual, App. F and G
     GByte nEllipsoidId;
     GByte nUnitsId;
-    double adProjParams[6];  // params in same order as in .MIF COORDSYS
+    double adProjParams[7];  // params in same order as in .MIF COORDSYS
 
     GInt16 nDatumId;      // Datum Id added in MapInfo 7.8+ (.map V500)
     double dDatumShiftX;  // Before that, we had to always lookup datum
@@ -425,6 +428,7 @@ class TABMAPObjHdr
           m_nMaxY(0)
     {
     }
+
     virtual ~TABMAPObjHdr()
     {
     }
@@ -466,6 +470,7 @@ class TABMAPObjNone final : public TABMAPObjHdr
     TABMAPObjNone()
     {
     }
+
     virtual ~TABMAPObjNone()
     {
     }
@@ -492,6 +497,7 @@ class TABMAPObjPoint : public TABMAPObjHdr
     TABMAPObjPoint() : m_nX(0), m_nY(0), m_nSymbolId(0)
     {
     }
+
     virtual ~TABMAPObjPoint()
     {
     }
@@ -518,6 +524,7 @@ class TABMAPObjFontPoint : public TABMAPObjPoint
           m_nAngle(0), m_nFontId(0)
     {
     }
+
     virtual ~TABMAPObjFontPoint()
     {
     }
@@ -538,6 +545,7 @@ class TABMAPObjCustomPoint final : public TABMAPObjPoint
     TABMAPObjCustomPoint() : m_nUnknown_(0), m_nCustomStyle(0), m_nFontId(0)
     {
     }
+
     virtual ~TABMAPObjCustomPoint()
     {
     }
@@ -560,6 +568,7 @@ class TABMAPObjLine final : public TABMAPObjHdr
     TABMAPObjLine() : m_nX1(0), m_nY1(0), m_nX2(0), m_nY2(0), m_nPenId(0)
     {
     }
+
     virtual ~TABMAPObjLine()
     {
     }
@@ -587,6 +596,7 @@ class TABMAPObjPLine final : public TABMAPObjHdrWithCoord
           m_nComprOrgY(0), m_nPenId(0), m_nBrushId(0), m_bSmooth(0)
     {
     }
+
     virtual ~TABMAPObjPLine()
     {
     }
@@ -609,6 +619,7 @@ class TABMAPObjRectEllipse final : public TABMAPObjHdr
         : m_nCornerWidth(0), m_nCornerHeight(0), m_nPenId(0), m_nBrushId(0)
     {
     }
+
     virtual ~TABMAPObjRectEllipse()
     {
     }
@@ -636,6 +647,7 @@ class TABMAPObjArc final : public TABMAPObjHdr
           m_nPenId(0)
     {
     }
+
     virtual ~TABMAPObjArc()
     {
     }
@@ -677,6 +689,7 @@ class TABMAPObjText final : public TABMAPObjHdrWithCoord
           m_nFontId(0), m_nPenId(0)
     {
     }
+
     virtual ~TABMAPObjText()
     {
     }
@@ -702,6 +715,7 @@ class TABMAPObjMultiPoint final : public TABMAPObjHdrWithCoord
           m_nLabelX(0), m_nLabelY(0)
     {
     }
+
     virtual ~TABMAPObjMultiPoint()
     {
     }
@@ -737,6 +751,7 @@ class TABMAPObjCollection final : public TABMAPObjHdrWithCoord
           m_nPolylinePenId(0)
     {
     }
+
     virtual ~TABMAPObjCollection()
     {
     }
@@ -785,6 +800,7 @@ class TABBinBlockManager
     ~TABBinBlockManager();
 
     void SetBlockSize(int nBlockSize);
+
     int GetBlockSize() const
     {
         return m_nBlockSize;
@@ -792,6 +808,7 @@ class TABBinBlockManager
 
     GInt32 AllocNewBlock(const char *pszReason = "");
     void Reset();
+
     void SetLastPtr(int nBlockPtr)
     {
         m_nLastAllocatedBlock = nBlockPtr;
@@ -851,6 +868,7 @@ class TABRawBinBlock
                              int nFileOffset = 0);
 
     int GetBlockType();
+
     virtual int GetBlockClass()
     {
         return TAB_RAWBIN_BLOCK;
@@ -883,6 +901,8 @@ class TABRawBinBlock
     // cppcheck-suppress functionStatic
     GInt32 ReadInt32();
     // cppcheck-suppress functionStatic
+    GInt64 ReadInt64();
+    // cppcheck-suppress functionStatic
     float ReadFloat();
     // cppcheck-suppress functionStatic
     double ReadDouble();
@@ -893,6 +913,8 @@ class TABRawBinBlock
     int WriteInt16(GInt16 n16Value);
     // cppcheck-suppress functionStatic
     int WriteInt32(GInt32 n32Value);
+    // cppcheck-suppress functionStatic
+    int WriteInt64(GInt64 n64Value);
     // cppcheck-suppress functionStatic
     int WriteFloat(float fValue);
     // cppcheck-suppress functionStatic
@@ -1044,7 +1066,7 @@ class TABMAPIndexBlock final : public TABRawBinBlock
     TABBinBlockManager *m_poBlockManagerRef;
 
     // Info about child currently loaded
-    TABMAPIndexBlock *m_poCurChild;
+    std::unique_ptr<TABMAPIndexBlock> m_poCurChild{};
     int m_nCurChildIndex;
     // Also need to know about its parent
     TABMAPIndexBlock *m_poParentRef;
@@ -1076,10 +1098,12 @@ class TABMAPIndexBlock final : public TABRawBinBlock
     void UnsetCurChild();
 
     int GetNumFreeEntries();
+
     int GetNumEntries()
     {
         return m_numEntries;
     }
+
     TABMAPIndexEntry *GetEntry(int iIndex);
     int AddEntry(GInt32 XMin, GInt32 YMin, GInt32 XMax, GInt32 YMax,
                  GInt32 nBlockPtr, GBool bAddInThisNodeOnly = FALSE);
@@ -1094,16 +1118,19 @@ class TABMAPIndexBlock final : public TABRawBinBlock
 
     void SetMAPBlockManagerRef(TABBinBlockManager *poBlockMgr);
     void SetParentRef(TABMAPIndexBlock *poParent);
-    void SetCurChildRef(TABMAPIndexBlock *poChild, int nChildIndex);
+    void SetCurChild(std::unique_ptr<TABMAPIndexBlock> &&poChild,
+                     int nChildIndex);
 
     int GetCurChildIndex()
     {
         return m_nCurChildIndex;
     }
+
     TABMAPIndexBlock *GetCurChild()
     {
-        return m_poCurChild;
+        return m_poCurChild.get();
     }
+
     TABMAPIndexBlock *GetParentRef()
     {
         return m_poParentRef;
@@ -1201,10 +1228,12 @@ class TABMAPObjectBlock final : public TABRawBinBlock
     int CommitNewObject(TABMAPObjHdr *poObjHdr);
 
     void AddCoordBlockRef(GInt32 nCoordBlockAddress);
+
     GInt32 GetFirstCoordBlockAddress()
     {
         return m_nFirstCoordBlock;
     }
+
     GInt32 GetLastCoordBlockAddress()
     {
         return m_nLastCoordBlock;
@@ -1218,14 +1247,17 @@ class TABMAPObjectBlock final : public TABRawBinBlock
     void LockCenter();
     void SetCenterFromOtherBlock(TABMAPObjectBlock *poOtherObjBlock);
     int AdvanceToNextObject(TABMAPHeaderBlock *);
+
     int GetCurObjectOffset()
     {
         return m_nCurObjectOffset;
     }
+
     int GetCurObjectId()
     {
         return m_nCurObjectId;
     }
+
     TABGeomType GetCurObjectType()
     {
         return m_nCurObjectType;
@@ -1236,6 +1268,7 @@ class TABMAPObjectBlock final : public TABRawBinBlock
     {
         Dump(fpOut, FALSE);
     }
+
     void Dump(FILE *fpOut, GBool bDetails);
 #endif
 };
@@ -1303,6 +1336,7 @@ class TABMAPCoordBlock final : public TABRawBinBlock
                           TABMAPCoordSecHdr *pasHdrs, GBool bCompressed);
 
     void SetNextCoordBlock(GInt32 nNextCoordBlockAddress);
+
     GInt32 GetNextCoordBlock()
     {
         return m_nNextCoordBlock;
@@ -1319,6 +1353,7 @@ class TABMAPCoordBlock final : public TABRawBinBlock
     {
         m_nTotalDataSize = 0;
     }
+
     int GetTotalDataSize()
     {
         return m_nTotalDataSize;
@@ -1326,10 +1361,12 @@ class TABMAPCoordBlock final : public TABRawBinBlock
 
     void SeekEnd();
     void StartNewFeature();
+
     int GetFeatureDataSize()
     {
         return m_nFeatureDataSize;
     }
+
     //__TODO__ Can we flush GetFeatureMBR() and all MBR tracking in this
     // class???
     void GetFeatureMBR(GInt32 &nXMin, GInt32 &nYMin, GInt32 &nXMax,
@@ -1384,6 +1421,7 @@ class TABMAPToolBlock final : public TABRawBinBlock
     void SetNextToolBlock(GInt32 nNextCoordBlockAddress);
 
     GBool EndOfChain();
+
     int GetNumBlocksInChain()
     {
         return m_numBlocksInChain;
@@ -1649,6 +1687,7 @@ class TABINDNode
                  int nNextNodePtr = 0);
 
     int SetFieldType(TABFieldType eType);
+
     TABFieldType GetFieldType()
     {
         return m_eFieldType;
@@ -1658,6 +1697,7 @@ class TABINDNode
     {
         m_bUnique = bUnique;
     }
+
     GBool IsUnique()
     {
         return m_bUnique;
@@ -1667,18 +1707,22 @@ class TABINDNode
     {
         return m_nKeyLength;
     }
+
     int GetSubTreeDepth()
     {
         return m_nSubTreeDepth;
     }
+
     GInt32 GetNodeBlockPtr()
     {
         return m_nCurDataBlockPtr;
     }
+
     int GetNumEntries()
     {
         return m_numEntriesInNode;
     }
+
     int GetMaxNumEntries()
     {
         return (512 - 12) / (m_nKeyLength + 4);
@@ -1749,9 +1793,11 @@ class TABINDFile
     {
         return m_numIndexes;
     }
+
     int SetIndexFieldType(int nIndexNumber, TABFieldType eType);
     int SetIndexUnique(int nIndexNumber, GBool bUnique = TRUE);
     GByte *BuildKey(int nIndexNumber, GInt32 nValue);
+    GByte *BuildKey(int nIndexNumber, GInt64 nValue);
     GByte *BuildKey(int nIndexNumber, const char *pszStr);
     GByte *BuildKey(int nIndexNumber, double dValue);
     GInt32 FindFirst(int nIndexNumber, GByte *pKeyValue);
@@ -1831,16 +1877,19 @@ class TABDATFile
 
     int DeleteField(int iField);
     int ReorderFields(int *panMap);
-    int AlterFieldDefn(int iField, OGRFieldDefn *poNewFieldDefn, int nFlags);
+    int AlterFieldDefn(int iField, const OGRFieldDefn *poSrcFieldDefn,
+                       OGRFieldDefn *poNewFieldDefn, int nFlags);
 
     int SyncToDisk();
 
     GInt32 GetNumRecords();
     TABRawBinBlock *GetRecordBlock(int nRecordId);
+
     GBool IsCurrentRecordDeleted()
     {
         return m_bCurRecordDeletedFlag;
     }
+
     int CommitRecordToFile();
 
     int MarkAsDeleted();
@@ -1849,9 +1898,10 @@ class TABDATFile
     const char *ReadCharField(int nWidth);
     GInt32 ReadIntegerField(int nWidth);
     GInt16 ReadSmallIntField(int nWidth);
+    GInt64 ReadLargeIntField(int nWidth);
     double ReadFloatField(int nWidth);
     double ReadDecimalField(int nWidth);
-    const char *ReadLogicalField(int nWidth);
+    bool ReadLogicalField(int nWidth);
     const char *ReadDateField(int nWidth);
     int ReadDateField(int nWidth, int *nYear, int *nMonth, int *nDay);
     const char *ReadTimeField(int nWidth);
@@ -1865,11 +1915,11 @@ class TABDATFile
                        int nIndexNo);
     int WriteIntegerField(GInt32 nValue, TABINDFile *poINDFile, int nIndexNo);
     int WriteSmallIntField(GInt16 nValue, TABINDFile *poINDFile, int nIndexNo);
+    int WriteLargeIntField(GInt64 nValue, TABINDFile *poINDFile, int nIndexNo);
     int WriteFloatField(double dValue, TABINDFile *poINDFile, int nIndexNo);
     int WriteDecimalField(double dValue, int nWidth, int nPrecision,
                           TABINDFile *poINDFile, int nIndexNo);
-    int WriteLogicalField(const char *pszValue, TABINDFile *poINDFile,
-                          int nIndexNo);
+    int WriteLogicalField(bool bValue, TABINDFile *poINDFile, int nIndexNo);
     int WriteDateField(const char *pszValue, TABINDFile *poINDFile,
                        int nIndexNo);
     int WriteDateField(int nYear, int nMonth, int nDay, TABINDFile *poINDFile,
@@ -1953,6 +2003,7 @@ class TABRelation
     {
         return m_poDefn;
     }
+
     TABFieldType GetNativeFieldType(int nFieldId);
     TABFeature *GetFeature(int nFeatureId);
 
@@ -1973,6 +2024,7 @@ class TABRelation
     {
         return m_pszMainFieldName;
     }
+
     const char *GetRelFieldName()
     {
         return m_pszRelFieldName;
@@ -2010,14 +2062,17 @@ class MIDDATAFile
     void SetTranslation(double, double, double, double);
     double GetXTrans(double);
     double GetYTrans(double);
+
     double GetXMultiplier()
     {
         return m_dfXMultiplier;
     }
+
     const char *GetDelimiter()
     {
         return m_pszDelimiter;
     }
+
     void SetDelimiter(const char *pszDelimiter)
     {
         m_pszDelimiter = pszDelimiter;
