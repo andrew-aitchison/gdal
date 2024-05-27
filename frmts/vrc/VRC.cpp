@@ -141,9 +141,6 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
                    pVRCpng_callback->vData.data() + pVRCpng_callback->nCurrent,
                    static_cast<size_t>(nSpare));
         }
-        else
-        {
-        }
         pVRCpng_callback->nCurrent = pVRCpng_callback->vData.size();
         return;
     }
@@ -542,9 +539,6 @@ CPLErr VRCRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     {
         read_VRC_Tile_Metres(poGDS->fp, nBlockXOff, nBlockYOff, pImage);
         // return CE_None;  // I cannot yet confirm no errors
-    }
-    else if (poGDS->nMagic == vrc_magic36)
-    {
     }
 
     return CE_None;
@@ -1072,10 +1066,11 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
             continue;
         }
 
-        // VR tiles start at the bottom left and count up then right;
         // GDAL tiles start at the top left and count across then down.
+        // VR tiles start at the bottom left and count up then right;
+        // but the PNG tiles within each VR tile count right and down !
         const unsigned int nVRow = nTileFound % tileYcount;
-        // int nGRow = tileYcount-1 - nVRow;
+        // const int nGRow = tileYcount-1 - nVRow;
         // int nVCol = (nTileFound-nVRow) / tileYcount;
         // int nGCol = nVCol;
         // int nGdalTile = nGCol + nGRow * tileXcount;
@@ -1417,7 +1412,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         return nullptr;
     }
 
-    {  // block with no name, werdna Christmas Day 2022
+    {  // Block to calculate size of raster
         const double dfRasterXSize =
             ((10000.0) * (poDS->nRight - poDS->nLeft)) / poDS->nScale;
         poDS->nRasterXSize = static_cast<int>(dfRasterXSize);
@@ -1452,7 +1447,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
-    }  // block with no name
+    }  // Block to calculate size of raster
 
     {  // Unnamed block two
         poDS->tileSizeMax = VRGetUInt(poDS->abyHeader, nNextString + 20);
@@ -1529,38 +1524,52 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 
         const unsigned int nTileIndexAddr = nNextString + 44;
 
-        if (poDS->nMapID != 8)
+        if (nTileIndexAddr >= poDS->oStatBufL.st_size)
         {
-            // Read the index of tile addresses
-
-            poDS->anTileIndex = poDS->VRCGetTileIndex(nTileIndexAddr);
-            if (poDS->anTileIndex == nullptr)
-            {
-                CPLDebug("Viewranger", "VRCGetTileIndex(%u=0x%08x) failed",
-                         nTileIndexAddr, nTileIndexAddr);
-            }
-        }
-        else  // So poDS->nMapID == 8
-        {
-            if (VSIFSeekL(poDS->fp, nTileIndexAddr, SEEK_SET))
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "cannot seek to nTileIndexAddr %u=x%08x",
-                         nTileIndexAddr, nTileIndexAddr);
-                return nullptr;
-            }
             CPLDebug("Viewranger",
-                     "Pay-by-tile: skipping %u x %u values after tile count:",
-                     poDS->tileXcount, poDS->tileYcount);
-            for (unsigned int ii = 0; ii < poDS->tileXcount; ii++)
+                     "Tile index %u=0x%08x points outside the file. Ignored\n",
+                     nTileIndexAddr, nTileIndexAddr);
+        }
+        else
+        {
+
+            if (poDS->nMapID != 8)
             {
-                for (unsigned int jj = 0; jj < poDS->tileYcount; jj++)
+                // Read the index of tile addresses
+
+                poDS->anTileIndex = poDS->VRCGetTileIndex(nTileIndexAddr);
+                if (poDS->anTileIndex == nullptr)
                 {
-                    const unsigned int nValue = VRReadUInt(poDS->fp);
-                    CPLDebug("Viewranger", "\t(%u,%u) = 0x%08x=%u", ii, jj,
-                             nValue, nValue);
-                    (void)
-                        nValue;  // CPLDebug doesn't count as "using" a variable
+                    CPLDebug("Viewranger", "VRCGetTileIndex(%u=0x%08x) failed",
+                             nTileIndexAddr, nTileIndexAddr);
+                }
+            }
+            else  // So poDS->nMapID == 8 - Pay-by-tile
+            {
+                // Pay-by-tile files have two (maybe even three?) tile indexes.
+
+                // Report but otherwise ignore the index at nTileIndexAddr
+                if (VSIFSeekL(poDS->fp, nTileIndexAddr, SEEK_SET))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "cannot seek to nTileIndexAddr %u=x%08x",
+                             nTileIndexAddr, nTileIndexAddr);
+                    return nullptr;
+                }
+                CPLDebug(
+                    "Viewranger",
+                    "Pay-by-tile: skipping %u x %u values after tile count:",
+                    poDS->tileXcount, poDS->tileYcount);
+                for (unsigned int ii = 0; ii < poDS->tileXcount; ii++)
+                {
+                    for (unsigned int jj = 0; jj < poDS->tileYcount; jj++)
+                    {
+                        const unsigned int nValue = VRReadUInt(poDS->fp);
+                        CPLDebug("Viewranger", "\t(%u,%u) = 0x%08x=%u", ii, jj,
+                                 nValue, nValue);
+                        (void)
+                            nValue;  // CPLDebug doesn't count as "using" a variable
+                    }
                 }
             }
         }
@@ -1612,12 +1621,18 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             (poDS->nTop - poDS->nBottom) / poDS->dfPixelMetres;
 
         int nFullHeightPix = 0;
-        if (poDS->tileSizeMax > 0)
+        if (poDS->tileSizeMax < 1)
         {
-            nFullHeightPix =
-                static_cast<signed int>(poDS->tileSizeMax) *
-                static_cast<signed int>(dfHeightPix / poDS->tileSizeMax);
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "tileSizeMax has changed to zero and is now invalid");
+            GDALClose(poDS);
+            // poDS = nullptr; // Was I being paranoid ?
+            return nullptr;
         }
+        nFullHeightPix =
+            static_cast<signed int>(poDS->tileSizeMax) *
+            static_cast<signed int>(dfHeightPix / poDS->tileSizeMax);
+
         if ((poDS->nTop - poDS->nBottom) != (anCorners[3] - anCorners[1]) ||
             static_cast<signed long long>(poDS->nTop - poDS->nBottom) !=
                 static_cast<signed long long>(poDS->nRasterYSize *
@@ -1627,6 +1642,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             // if (dfHeightPix!=dfheight2 || dfHeightPix!=poDS->nRasterYSize)
             // {
             // but without the division and floating-point equality test.
+
             // Appease cppcheck.
             // It ignores CPLDebug then deduces that dfheight2 is not used.
             // double dfheight2 =
@@ -1733,7 +1749,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLDebug("Viewranger", "nMagic x%08x unknown", poDS->nMagic);
         }
-    }  // poDS->dfPixelMetres
+    }  // Unnamed block two
 
     /********************************************************************/
     /*                              Set CRS                             */
@@ -1836,7 +1852,7 @@ void dumpPPM(unsigned int width, unsigned int height,
     }
     char const *pszPPMname = osPPMname.c_str();
 
-    if (nPPMcount > 10 && nPPMcount > nMaxPPM)
+    if (nMaxPPM > 10 && nPPMcount > nMaxPPM)
     {
         CPLDebug("Viewranger PPM", "... too many PPM files; skipping  %s",
                  pszPPMname);
@@ -1946,20 +1962,55 @@ void dumpPPM(unsigned int width, unsigned int height,
 
 }  // dumpPPM
 
+static void dumpWLD(char const *pszWLDname, const CPLString osWLDparams)
+{
+
+    char pszErrStr[256] = "";
+    VSILFILE *fpWLD = VSIFOpenL(pszWLDname, "w");
+    if (fpWLD == nullptr)
+    {
+        const int nFileErr = errno;
+        VRC_file_strerror_r(nFileErr, pszErrStr, 255);
+        CPLDebug("Viewranger PNG", "WLD data dump file %s failed; errno=%d %s",
+                 pszWLDname, nFileErr, pszErrStr);
+    }
+    else
+    {
+        const size_t nWriteResult =
+            VSIFWriteL(osWLDparams.c_str(), 1, osWLDparams.size(), fpWLD);
+        if (osWLDparams.size() != nWriteResult)
+        {
+            const int nFileErr = errno;
+            VRC_file_strerror_r(nFileErr, pszErrStr, 255);
+            return;
+        }
+        if (0 != VSIFCloseL(fpWLD))
+        {
+            const int nFileErr = errno;
+            VRC_file_strerror_r(nFileErr, pszErrStr, 255);
+            CPLDebug("Viewranger PNG",
+                     "Failed to close WLD data dump file %s; errno=%d %s",
+                     pszWLDname, nFileErr, pszErrStr);
+        }
+        else
+        {
+            CPLDebug("Viewranger PNG", "WLD data dumped to file %s",
+                     pszWLDname);
+        }
+    }
+
+}  // dumpWLD()
+
 static void dumpPNG(
-    // unsigned int width,
-    // unsigned int height,
     const unsigned char *const data,  // pre-prepared PNG data, *not* raw image.
-    int nDataLen, CPLString osBaseLabel, unsigned int nMaxPNG)
+    int nDataLen, CPLString osBaseLabel, CPLString osWLDparams,
+    unsigned int nMaxPNG)
 {
     // Is static the best way to count the PNGs ?
     static unsigned int nPNGcount = 0;
 
-    CPLDebug("Viewranger PNG",
-             // "dumpPNG(%d %d %p %d %s) count %u",
-             "dumpPNG(%p %d %s) count %u",
-             // width, height,
-             data, nDataLen, osBaseLabel.c_str(), nPNGcount);
+    CPLDebug("Viewranger PNG", "dumpPNG(%p %d %s\n%s) count %u", data, nDataLen,
+             osBaseLabel.c_str(), osWLDparams.c_str(), nPNGcount);
     if (osBaseLabel == nullptr)
     {
         CPLDebug("Viewranger PNG", "dumpPNG: null osBaseLabel\n");
@@ -1969,14 +2020,23 @@ static void dumpPNG(
     // At least on unix, spaces make filenames harder to work with.
     osBaseLabel.replaceAll(' ', '_');
 
-    const CPLString osPPMname =
+    const CPLString osPNGname =
         CPLString().Printf("%s.%05u.png", osBaseLabel.c_str(), nPNGcount);
-    if (osPPMname == nullptr)
+    if (osPNGname == nullptr)
     {
-        CPLDebug("Viewranger PNG", "osPPMname truncated %s %u",
+        CPLDebug("Viewranger PNG", "osPNGname truncated %s %u",
                  osBaseLabel.c_str(), nPNGcount);
     }
-    char const *pszPNGname = osPPMname.c_str();
+    char const *pszPNGname = osPNGname.c_str();
+
+    const CPLString osWLDname =
+        CPLString().Printf("%s.%05u.wld", osBaseLabel.c_str(), nPNGcount);
+    if (osWLDname == nullptr)
+    {
+        CPLDebug("Viewranger PNG", "osWLDname truncated %s %u",
+                 osBaseLabel.c_str(), nPNGcount);
+    }
+    char const *pszWLDname = osWLDname.c_str();
 
     if (nPNGcount > 10 && nPNGcount > nMaxPNG)
     {
@@ -2017,8 +2077,9 @@ static void dumpPNG(
         }
         else
         {
-            CPLDebug("Viewranger PNG", "PNG data dumped to file %s",
-                     pszPNGname);
+            CPLDebug("Viewranger PNG", "PNG data\n%sdumped to file %s",
+                     osWLDparams.c_str(), pszPNGname);
+            dumpWLD(pszWLDname, osWLDparams);
         }
     }
 
@@ -2521,23 +2582,38 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     vector_append(VRCpng_callback.vData, IEND_chunk);
 
     const char *szDumpPNG = CPLGetConfigOption("VRC_DUMP_PNG", "");
-    if (szDumpPNG != nullptr && *szDumpPNG != 0)
+    if (szDumpPNG != nullptr && *szDumpPNG != 0 && nBand == 1)
     {
+        // The PNG data covers all bands, so only dump the first one.
+        auto *poVRCDS = static_cast<VRCDataset *>(poDS);
         auto nEnvPNGDump =
             static_cast<unsigned int>(strtol(szDumpPNG, nullptr, 10));
         const CPLString osBaseLabel = CPLString().Printf(
             "/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03u.%03u.%02d.x%012x",
             // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
-            static_cast<VRCDataset *>(poDS)->sFileName.c_str(),
-            // static_cast<VRCDataset *>(poDS)->sLongTitle.c_str(),
+            poVRCDS->sFileName.c_str(),
+            // poVRCDS->sLongTitle.c_str(),
             nThisOverview, nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy,
             nBand, nVRCHeader);
-        dumpPNG(
-            // static_cast<unsigned int>(nPNGwidth),
-            // static_cast<unsigned int>(nPNGheight),
-            VRCpng_callback.vData.data(),
-            static_cast<int>(VRCpng_callback.vData.size()), osBaseLabel,
-            nEnvPNGDump);
+        const CPLString osWLDparams = CPLString().Printf(
+            "%8.8g\n%8.8g\n%8.8g\n%8.8g\n%8.8g\n%8.8g\n",
+            // multiply next four values by overview scale
+            poVRCDS->dfPixelMetres, 0.0, 0.0, -1.0 * poVRCDS->dfPixelMetres,
+            // not these two ?
+            poVRCDS->nLeft +
+                (poVRCDS->dfPixelMetres *
+                 ((nGDtile_xx * nBlockXSize) + (nVRtile_xx * nPNGwidth))),
+            poVRCDS->nBottom +
+                (
+                    // Not sure this is right - 2024-05-22
+                    // - in /DE_25_W867170_E882510_S5635610_N5645830.VRC
+                    // we need to swap the rows.
+                    poVRCDS->dfPixelMetres *
+                    (static_cast<signed long>(nGDtile_yy * nBlockYSize) -
+                     (nVRtile_yy * nPNGheight))));
+        dumpPNG(VRCpng_callback.vData.data(),
+                static_cast<int>(VRCpng_callback.vData.size()), osBaseLabel,
+                osWLDparams, nEnvPNGDump);
     }
 
     //******************************************************************/
@@ -2917,7 +2993,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
         {
             for (int i = 0; i < nBlockXSize; i++)
             {
-                const int pixelnum = i = (j * nBlockXSize);
+                const int pixelnum = i + (j * nBlockXSize);
                 if (nBand == 4)
                 {
                     static_cast<GByte *>(pImage)[pixelnum] =
@@ -2954,8 +3030,9 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
         // No data for this tile
         CPLDebug("Viewranger",
                  "VRCRasterBand::read_VRC_Tile_Metres(.. %d %d ..) "
-                 "tileIndex %u beyond end of file",
-                 block_xx, block_yy, nTileIndex);
+                 "tileIndex %u %s end of file",
+                 block_xx, block_yy, nTileIndex,
+                 nTileIndex == poVRCDS->oStatBufL.st_size ? "at" : "beyond");
         return;
     }  // nTileIndex >= oStatBufL.st_size
 
