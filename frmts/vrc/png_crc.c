@@ -14,16 +14,14 @@ CPL_C_START
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-// #include <unistd.h>
 
-// #include <stdio.h>
 #include <errno.h>
 #include <string.h>
 
 const uint32_t nBitsPerByte = 8;
 
 //  Table of CRCs of all 8-bit messages.
-// #define ncrc_table_size 256
+
 // - gives clang-tidy warning [modernize-macro-to-enum]
 // and constexpr requires C++ :-(
 enum eTABLESIZE
