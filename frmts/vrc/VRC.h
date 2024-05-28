@@ -37,13 +37,11 @@
 
 #include <gdal_pam.h>
 #include <ogr_spatialref.h>
-// #include <cpl_string.h>
 
 // We have not fully deciphered the data format
 // of VRC files with magic=0x01ce6336.
 // Set *one* of these definitions (to 1)
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
-// #define VRC36_PIXEL_IS_PIXEL 1
 
 #include <cinttypes>
 #include <cstdio>
@@ -73,6 +71,7 @@ static const unsigned int vrc_magic36 = 0x01ce6336;  // 0x3663ce01; //
 // Try:
 static const unsigned int nVRCNoData = 1;
 // 1 doesn't work for Map ID 3038 :-(
+// ... or DE_50_W943960_S5441040_E1061720_N5451280.VRC
 
 class VRCRasterBand;
 
@@ -152,7 +151,7 @@ class VRCDataset : public GDALDataset
     VRCDataset() = default;  // This does not initialize abyHeader
 #ifdef EXPLICIT_DELETE
     ~VRCDataset() override;
-#endif  // def EXPLICIT_DELETE
+#endif
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -170,7 +169,7 @@ class VRCDataset : public GDALDataset
     CPLErr GetGeoTransform(double *padfTransform) override;
 
     static char *VRCGetString(VSILFILE *fp, unsigned int byteaddr);
-};  // class VRCDataset
+};
 
 /************************************************************************/
 /* ==================================================================== */
@@ -229,7 +228,7 @@ class VRCRasterBand : public GDALRasterBand
 
 #ifdef EXPLICIT_DELETE
     ~VRCRasterBand() override;
-#endif  // def EXPLICIT_DELETE
+#endif
 
     GDALColorInterp GetColorInterpretation() override;
     CPLErr SetColorInterpretation(GDALColorInterp eColorInterp) override;
@@ -245,6 +244,6 @@ class VRCRasterBand : public GDALRasterBand
 
     int IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize, int nYSize,
                                int nMaskFlagStop, double *pdfDataPct) override;
-};  // class VRCRasterBand
+};
 
-#endif  // VRC_H_INCLUDED
+#endif

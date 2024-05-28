@@ -1,8 +1,6 @@
 /*
  */
 
-// #ifdef FRMT_vrc
-
 #include "VRC.h"
 
 #include <array>
@@ -232,7 +230,7 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
     }
 
     return poSRS;
-}  // CRSfromCountry()
+}
 
 #undef VRC_EPSG
 #undef VRC_SWAP_AXES
@@ -284,6 +282,4 @@ extern const char *CharsetFromCountry(int16_t nCountry)
         default:
             return "UTF-8";
     }
-}  // CharsetFromCountry(int nCountry)
-
-// #endif // ifdef FRMT_vrc
+}
