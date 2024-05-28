@@ -25,8 +25,6 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-// #ifdef FRMT_vrc
-
 #include "VRC.h"
 
 // Like strncmp but null bytes don't terminate.
@@ -116,7 +114,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                      eDataType);
         }
         return;
-    }  // nTileIndex == 0 No data for this tile
+    }
 
     if (VSIFSeekL(fp, nTileIndex, SEEK_SET))
     {
@@ -292,8 +290,8 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                          nBand, block_xx, block_yy, nThisOverview);
             }
             return;
-        }  // end else clause of if(bTileShrink == false)
-    }      // nMapID != 8
+        }
+    }
 
     // We have reached the start of the tile
     // ... but it is split into subtiles (of a format yet to be determined)
@@ -380,7 +378,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                 "OVERheight tile nRawYcount %d x nRawYsize %d > blocksize %d)",
                 nRawYcount, nRawYsize, nBlockYSize);
         }
-    }  // Finished allowing for under-height tiles
+    }
 
     CPLDebug("Viewranger",
              "nRawXcount %d nRawYcount %d nRawXsize %d nRawYsize %d",
@@ -548,9 +546,9 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                     "Viewranger",
                     "skipping %s: expected 0 <= x%lx <= x%lx <= x%lx filesize",
                     osBaseLabel.c_str(), nStart, nFinish, nFileSize);
-            }  // end range check
-        }      // for loopY
-    }          // for loopX
+            }
+        }
+    }
 
     const char *szDumpTile = CPLGetConfigOption("VRC_DUMP_TILE", "");
     if (szDumpTile != nullptr && *szDumpTile != 0 && 1 == nBand)
@@ -569,8 +567,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                 static_cast<unsigned int>(nBlockXSize), osBaseLabel, band,
                 static_cast<unsigned int>(nDumpCount));
     }
-
-}  // VRCRasterBand::read_VRC_Tile_36
+}
 
 int VRCRasterBand::verifySubTileFile(VSILFILE *fp, unsigned long start,
                                      unsigned long finish, int nGDtile_xx,
@@ -612,7 +609,7 @@ int VRCRasterBand::verifySubTileFile(VSILFILE *fp, unsigned long start,
 
     return verifySubTileMem(abyRawSubtileData.data(), start, finish, nGDtile_xx,
                             nGDtile_yy, nVRtile_xx, nVRtile_yy);
-}  // VRCRasterBand::verifySubTileFile()
+}
 
 int VRCRasterBand::verifySubTileMem(GByte abyRawStartData[],
                                     unsigned long start, unsigned long finish,
@@ -696,6 +693,4 @@ int VRCRasterBand::verifySubTileMem(GByte abyRawStartData[],
         bytesmatch(abyRawStartData, kacExpectedValues, nHeadLen);
 
     return 0x0100 | static_cast<int>(nBytesMatched);
-}  // VRCRasterBand::verifySubTileMem()
-
-// #endif // def FRMT_vrc
+}

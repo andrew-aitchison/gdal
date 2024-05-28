@@ -19,4 +19,4 @@ extern uint32_t pngcrc_for_VRC(const unsigned char *buf, unsigned int len);
 
 CPL_C_END
 
-#endif  // PNG_CRC_H_INCLUDED
+#endif
