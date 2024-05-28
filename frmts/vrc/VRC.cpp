@@ -33,12 +33,10 @@
 
 /* -*- tab-width: 4 ; indent-tabs-mode: nil ; c-basic-offset 'tab-width -*- */
 
-// #ifdef FRMT_vrc
-
 #include "VRC.h"
-#include "png_crc.h"  // for crc pngcrc_for_VRC, used in: PNGCRCcheck
+#include "png_crc.h"
 
-#include <algorithm>  // for std::max, std::min and std::copy
+#include <algorithm>
 #include <array>
 #include <cinttypes>
 
@@ -59,7 +57,7 @@ void VRC_file_strerror_r(int nFileErr, char *const buf, size_t buflen)
     STRERR_DEBUG("Viewranger", "%s", VSIStrerror(nFileErr));
     (void)CPLsnprintf(buf, buflen, "%s", VSIStrerror(nFileErr));
 #undef STRERR_DEBUG
-}  // VRC_file_strerror_r()
+}
 
 typedef struct
 {
@@ -156,7 +154,7 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
                  ") reached end of data",
                  png_read_ptr, data, length);
     }
-}  // VRC_png_read_data_fn
+}
 
 static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
 {
@@ -172,7 +170,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
 
     if (sizeof(size_t) != sizeof(std::vector<png_byte>::size_type))
     {
-        //      #warning "sizeof(size_t) != sizeof(std::vector<png_byte>::size_type)"
+
         CPLDebug("Viewranger",
                  "sizeof(size_t) = %" PRI_SIZET " != %" PRI_SIZET
                  "sizeof(std::vector<png_byte>::size_type)",
@@ -219,7 +217,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
     }
 
     return ret;
-}  // PNGCRCcheck
+}
 
 // -------------------------------------------------------------------------
 // Returns a (null-terminated) string allocated from VSIMalloc.
@@ -267,7 +265,7 @@ char *VRCDataset::VRCGetString(VSILFILE *fp, unsigned int byteaddr)
     // CPLDebug("Viewranger", "read string %s at %08x - length %d",
     //         pszNewString, byteaddr, ustring_length);
     return pszNewString;
-}  // VRCDataset::VRCGetString( VSILFILE *fp, unsigned int byteaddr )
+}
 
 /************************************************************************/
 /*                           VRCRasterBand()                            */
@@ -380,7 +378,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
         CPLError(CE_Warning, CPLE_AppDefined,
                  "Sorry, .VRC files with magic %08x not yet understood\n",
                  vrc_magic36);
-    }  // else if (poVRCDS->nMagic == vrc_magic36)
+    }
 
     VRCRasterBand::SetColorInterpretation(eBandInterp);
 
@@ -432,7 +430,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
                      // poVRCDS->sLongTitle.c_str(),
                      this, poVRCDS, nBandIn, nThisOverview, nOverviewCount,
                      papoOverviewBands);
-            // #pragma unroll
+
             for (int i = 0; i < nOverviewCount; i++)
             {
                 if (papoOverviewBands[i])
@@ -450,7 +448,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
                                       // not: nOverviewCount, papoOverviewBands
                         );
                 }
-            }  // for (int i=0; i<nOverviewCount; i++) {
+            }
         }
     }
     else
@@ -472,8 +470,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
              // poVRCDS->sLongTitle.c_str(),
              this, poVRCDS, nBand, nThisOverview, nOverviewCount,
              papoOverviewBands);
-
-}  // VRCRasterBand::VRCRasterBand()
+}
 
 /************************************************************************/
 /*                          ~VRCRasterBand()                            */
@@ -501,7 +498,7 @@ VRCRasterBand::~VRCRasterBand()
         {
             const int nC = nOverviewCount;
             nOverviewCount = 0;
-            // #pragma unroll
+
             for (int i = 0; i < nC; i++)
             {
                 if (papo[i])
@@ -517,8 +514,8 @@ VRCRasterBand::~VRCRasterBand()
         CPLFree(papoOverviewBands);
         papoOverviewBands = nullptr;
     }
-}  // VRCRasterBand::~VRCRasterBand()
-#endif  // def EXPLICIT_DELETE
+}
+#endif
 
 /************************************************************************/
 /*                             IReadBlock()                             */
@@ -542,7 +539,7 @@ CPLErr VRCRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     }
 
     return CE_None;
-}  // VRCRasterBand::IReadBlock()
+}
 
 /************************************************************************/
 /*                           GetNoDataValue()                           */
@@ -650,7 +647,7 @@ int VRCRasterBand::IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize,
                 return nStatus;
             }
         }
-    }  // for y
+    }
 
     const double dfDataPct =
         100.0 * static_cast<double>(nPixelsData) /
@@ -667,7 +664,7 @@ int VRCRasterBand::IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize,
              dfDataPct);
 
     return nStatus;
-}  // VRCRasterBand::IGetDataCoverageStatus()
+}
 
 /************************************************************************/
 /*                       GetColorInterpretation()                       */
@@ -751,8 +748,8 @@ VRCDataset::~VRCDataset()
         poSRS->Release();
         poSRS = nullptr;
     }
-}  // VRCDataset::~VRCDataset()
-#endif  // def EXPLICIT_DELETE
+}
+#endif
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
@@ -845,7 +842,7 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
     CPLDebug("Viewranger", "padfTransform %g %g %g", padfTransform[3],
              padfTransform[4], padfTransform[5]);
     return CE_None;
-}  // GetGeoTransform()
+}
 
 /************************************************************************/
 /*                              Identify()                              */
@@ -903,7 +900,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
     }
 
     return GDAL_IDENTIFY_FALSE;
-}  // VRCDataset::Identify()
+}
 
 /************************************************************************/
 /*                              VRCGetTileIndex()                       */
@@ -994,7 +991,7 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
         }
     }
     return anNewTileIndex;
-}  // VRCDataset::VRCGetTileIndex()
+}
 
 // MapId==8 files may have more than one tile.
 // When this is so there is no tile index (that I can find),
@@ -1137,7 +1134,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
                      nGdalTile, nTileFound);
         }
         nTileFound++;
-    }  // while (nTileFound < tileXcount * tileYcount)
+    }
 
     for (unsigned int y = 0; y < tileYcount; y++)
     {
@@ -1159,7 +1156,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
     VSIFree(anFirstTileIndex);
 
     return anNewTileIndex;
-}  // VRCDataset::VRCBuildTileIndex()
+}
 
 /************************************************************************/
 /*                                Open()                                */
@@ -1232,12 +1229,10 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
              szInCharset);
 
     poDS->nMapID = VRGetInt(poDS->abyHeader, 14);
-    if (poDS->nMapID != -10      // Demo_{Hemsedal,Oslo}.VRC IrelandTrial50K.VRC
-        && poDS->nMapID != 0     // overviews and some demos
-        && poDS->nMapID != 8     // pay-by-tile
-        && poDS->nMapID != 16    // GreatBritain-250k-{FarNorth,North,South}.VRC
-        && poDS->nMapID != 22    // Finland1M.VRC
-        && poDS->nMapID != 255   // Valle Antrona.VRC
+    if (poDS->nMapID != -10 && poDS->nMapID != 0     // overviews and some demos
+        && poDS->nMapID != 8                         // pay-by-tile
+        && poDS->nMapID != 16 && poDS->nMapID != 22  // Finland1M.VRC
+        && poDS->nMapID != 255                       // Valle Antrona.VRC
         && poDS->nMapID != 293   // SouthTyrol50k/SouthTyro50k.VRC
         && poDS->nMapID != 294   // TrentinoGarda50k.VRC
         && poDS->nMapID != 588   // Danmark50k-*.VRC
@@ -1342,7 +1337,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             poDS->SetMetadataItem("TIFFTAG_IMAGEDESCRIPTION",
                                   poDS->sLongTitle.c_str(), "");
             // CPLPopErrorHandler();
-        }  // for ii
+        }
 
         if (nStringCount > 1)
         {
@@ -1378,7 +1373,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             }
         }
         VSIFree(paszStrings);
-    }  // if (nStringCount > 0)
+    }
 
     poDS->nLeft = VRGetInt(poDS->abyHeader, nNextString);
     poDS->nTop = VRGetInt(poDS->abyHeader, nNextString + 4);
@@ -1447,7 +1442,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
-    }  // Block to calculate size of raster
+    }
 
     {  // Unnamed block two
         poDS->tileSizeMax = VRGetUInt(poDS->abyHeader, nNextString + 20);
@@ -1749,7 +1744,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLDebug("Viewranger", "nMagic x%08x unknown", poDS->nMagic);
         }
-    }  // Unnamed block two
+    }
 
     /********************************************************************/
     /*                              Set CRS                             */
@@ -1811,7 +1806,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->SetDescription(poOpenInfo->pszFilename);
 
     return (poDS);
-}  // VRCDataset::Open()
+}
 
 void dumpPPM(unsigned int width, unsigned int height,
              const unsigned char *const data, unsigned int rowlength,
@@ -1936,8 +1931,8 @@ void dumpPPM(unsigned int width, unsigned int height,
                     break;
                 }
                 pRow += rowlength;
-            }  // pixel or band interleaved ?
-        }      // for row r
+            }
+        }
     }
     else
     {  // nHeaderSize!=nHeaderWriteResult
@@ -1959,8 +1954,7 @@ void dumpPPM(unsigned int width, unsigned int height,
     nPPMcount++;
 
     // return;
-
-}  // dumpPPM
+}
 
 static void dumpWLD(char const *pszWLDname, const CPLString osWLDparams)
 {
@@ -1998,8 +1992,7 @@ static void dumpWLD(char const *pszWLDname, const CPLString osWLDparams)
                      pszWLDname);
         }
     }
-
-}  // dumpWLD()
+}
 
 static void dumpPNG(
     const unsigned char *const data,  // pre-prepared PNG data, *not* raw image.
@@ -2084,7 +2077,7 @@ static void dumpPNG(
     }
 
     nPNGcount++;
-}  // dumpPNG()
+}
 
 png_byte *
 VRCRasterBand::read_PNG(VSILFILE *fp,
@@ -2183,7 +2176,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     // clang-format on
 
     VRCpng_callback_t VRCpng_callback = {0UL, std::vector<png_byte>{}};
-    // auto vVRCpng_data = std::vector<png_byte>{};
+
     VRCpng_callback.vData.reserve(
         sizeof(PNG_sig) + sizeof(IHDR_head) + 13 + 4 +
         (3L * 256) +   // enough for 256x3 entry palette
@@ -2286,7 +2279,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             CPLDebug("Viewranger PNG", "PNG height: neither case");
         }
     }
-#endif  // defined UseCountFull
+#endif
 
     // pbyPNGbuffer needs freeing in lots of places, before we return
     // nullptr
@@ -2603,14 +2596,16 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             poVRCDS->nLeft +
                 (poVRCDS->dfPixelMetres *
                  ((nGDtile_xx * nBlockXSize) + (nVRtile_xx * nPNGwidth))),
-            poVRCDS->nBottom +
+            poVRCDS->nTop -
                 (
                     // Not sure this is right - 2024-05-22
                     // - in /DE_25_W867170_E882510_S5635610_N5645830.VRC
                     // we need to swap the rows.
+                    // 2024-05-27 - Switzerland1M.VRC need to adjust
+                    // top row as it is less tall than others
                     poVRCDS->dfPixelMetres *
-                    (static_cast<signed long>(nGDtile_yy * nBlockYSize) -
-                     (nVRtile_yy * nPNGheight))));
+                    ((static_cast<signed long>(nGDtile_yy) * nBlockYSize) +
+                     (static_cast<signed long>(nVRtile_yy) * nPNGheight))));
         dumpPNG(VRCpng_callback.vData.data(),
                 static_cast<int>(VRCpng_callback.vData.size()), osBaseLabel,
                 osWLDparams, nEnvPNGDump);
@@ -2659,8 +2654,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     png_destroy_read_struct(&png_ptr, &info_ptr, &end_info);
 
     return pbyPNGbuffer;
-
-}  // VRCRasterBand::read_PNG
+}
 
 //***********************************************************************/
 //                          GDALRegister_VRC()                          */
@@ -2710,7 +2704,7 @@ void CPL_DLL GDALRegister_VRC()
     poDriver->pfnIdentify = VRCDataset::Identify;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
-}  // GDALRegister_VRC()
+}
 
 // -------------------------------------------------------------------------
 
@@ -2771,8 +2765,7 @@ int VRCRasterBand::GetOverviewCount()
     }
 
     return 0;
-
-}  // VRCRasterBand::GetOverviewCount
+}
 
 //***********************************************************************/
 //                            GetOverview()                             */
@@ -2867,7 +2860,7 @@ GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
     }
 
     return pThisOverview;
-}  // VRCRasterBand::GetOverview
+}
 
 extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
                                unsigned int nOverviewCount,
@@ -2925,7 +2918,7 @@ extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
                  "byteOffset %llu=x%08llx",
                  byteOffset, byteOffset);
     }
-}  // dumpTileHeaderData()
+}
 
 // -------------------------------------------------------------------------
 // -------------------------------------------------------------------------
@@ -3023,7 +3016,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                  block_xx, block_yy);
 
         return;
-    }  // nTileIndex==0 No data for this tile
+    }
 
     if (nTileIndex >= poVRCDS->oStatBufL.st_size)
     {
@@ -3034,7 +3027,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                  block_xx, block_yy, nTileIndex,
                  nTileIndex == poVRCDS->oStatBufL.st_size ? "at" : "beyond");
         return;
-    }  // nTileIndex >= oStatBufL.st_size
+    }
 
     if (VSIFSeekL(fp, nTileIndex, SEEK_SET))
     {
@@ -3166,7 +3159,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
         CPLDebug("Viewranger OVRV",
                  "Band %d block %d,%d overview %d will be downsampled", nBand,
                  block_xx, block_yy, nThisOverview);
-    }  // end bTileShrink == true
+    }
 
     // We have reached the start of the tile
     // ... but it is split into (essentially .png file) subtiles
@@ -3464,12 +3457,12 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                                  "empty %u x %u tile ... prev was %u x %u",
                                  nPNGwidth, nPNGheight, nPrevPNGwidth,
                                  nPrevPNGheight);
-                    }  // if (pbyPNGbuffer)
+                    }
                     CPLDebug("Viewranger",
                              "... read PNG tile (%u %u) overview "
                              "%d block (%d %d) completed",
                              loopX, loopY, nThisOverview, block_xx, block_yy);
-                }  // case vrc_magic
+                }
                 break;
 
                 default:
@@ -3477,12 +3470,11 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
                              "We should not be here with magic=x%08x",
                              poVRCDS->nMagic);
                     return;
-            }  // switch (poVRCDS->nMagic)
-        }      // for (loopY
+            }
+        }
         nLeftCol = nRightCol;
-    }  // for (loopX
-
-}  // VRCRasterBand::read_VRC_Tile_Metres
+    }
+}
 
 int VRCRasterBand::Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
                                         int nPNGheight, int nLeftCol,
@@ -3566,7 +3558,7 @@ int VRCRasterBand::Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
         }
 
         pGImage += nBlockXSize;
-    }  // for ii < nCopyStopRow
+    }
 
     CPLDebug("Viewranger PNG",
              "copied PNG buffer %p %d x %d into pImage %p %d x %d",
@@ -3574,8 +3566,7 @@ int VRCRasterBand::Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
              nRasterYSize);
 
     return 0;
-
-}  // VRCRasterBand::Copy_Tile_into_Block
+}
 
 int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
                                           int nPNGheight, int nLeftCol,
@@ -3691,10 +3682,10 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
                 temp += (pbyPNGbuffer + i2)[jjj + 3];
 
                 pGImage[jj] = static_cast<GByte>(temp >> 2);
-            }  // for jj,jjj
+            }
         }
         pGImage += nBlockXSize;
-    }  // for ii < nCopyStopRow
+    }
 
     CPLDebug("Viewranger PNG",
              "shrunk PNG buffer %p %d x %d into pImage %p %d x %d "
@@ -3703,6 +3694,4 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
              nBlockYSize, nRasterXSize, nRasterYSize);
 
     return 0;
-}  // VRCRasterBand::Shrink_Tile_into_Block
-
-//  #endif  // def FRMT_vrc
+}

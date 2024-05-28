@@ -26,17 +26,13 @@
  ****************************************************************************/
 
 // Everything declared here is also declared in VRC.h
-// #ifndef VRC_H_INCLUDED
 
 #pragma once
 #ifndef VRC_UTILS_H_INCLUDED
 #define VRC_UTILS_H_INCLUDED
 
-// #if defined(__clang__)
-// #endif // defined(__clang__)
 #include <gdal_pam.h>
 #include <ogr_spatialref.h>
-// #include <cpl_string.h>
 
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
@@ -59,6 +55,4 @@ extern int32_t VRReadInt(VSILFILE *fp, unsigned int byteOffset);
 extern uint32_t VRReadUInt(VSILFILE *fp);
 extern uint32_t VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 
-#endif  // ndef VRC_UTILS_H_INCLUDED
-
-// #endif // ndef VRC_H_INCLUDED
+#endif

@@ -29,13 +29,9 @@
 
 /* -*- tab-width: 4 ; indent-tabs-mode: nil ; c-basic-offset 'tab-width -*- */
 
-// #ifdef FRMT_vrc
-// #ifdef FRMT_vrhv
-
-// #include "VRCutils.h"
 #include "VRC.h"
 
-#include <algorithm>  // for std::max and std::min
+#include <algorithm>
 
 CPL_C_START
 void GDALRegister_VRHV(void);
@@ -55,8 +51,6 @@ static const unsigned int nVMCYesData = 255;
 
 static const unsigned int nVRNoData = 255;
 static const unsigned int nVRVNoData = 255;
-
-// typedef struct {double lat; double lon; } latlon;
 
 /************************************************************************/
 /* ==================================================================== */
@@ -92,7 +86,7 @@ class VRHVDataset : public GDALDataset
     VRHVDataset() = default;
 #ifdef EXPLICIT_DELETE
     ~VRHVDataset() override;
-#endif  // def EXPLICIT_DELETE
+#endif
 
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static int Identify(GDALOpenInfo *poOpenInfo);
@@ -263,7 +257,7 @@ VRHRasterBand::VRHRasterBand(VRHVDataset *poDSIn, int nBandIn, int iOverviewIn)
             eBandInterp = GCI_GrayIndex;
             break;
     }
-}  // VRHRasterBand()
+}
 
 /************************************************************************/
 /*                          ~VRHRasterBand()                            */
@@ -277,7 +271,7 @@ VRHRasterBand::~VRHRasterBand()
         pVRHVData = nullptr;
     }
 }
-#endif  // def EXPLICIT_DELETE
+#endif
 
 /************************************************************************/
 /*                             IReadBlock()                             */
@@ -342,7 +336,7 @@ CPLErr VRHRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
         return CE_None;  // all OK
     }
     return CE_None;
-}  // VRHRasterBand::IReadBlock
+}
 
 /************************************************************************/
 /*                           GetNoDataValue()                           */
@@ -410,7 +404,7 @@ VRHVDataset::~VRHVDataset()
         VSIFree(anTileIndex);
         anTileIndex = nullptr;
     }
-#endif  // USE_TILE_INDEX
+#endif
     if (pszLongTitle != nullptr)
     {
         VSIFree(pszLongTitle);
@@ -427,7 +421,7 @@ VRHVDataset::~VRHVDataset()
         poSRS = nullptr;
     }
 }
-#endif  // def EXPLICIT_DELETE
+#endif
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
@@ -637,7 +631,7 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
         return TRUE;
     }
     return FALSE;
-}  // VRHVDataset::Identify()
+}
 
 /************************************************************************/
 /*                                Open()                                */
@@ -889,7 +883,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
                      poDS->nMagic);
             delete poDS;
             return nullptr;
-    }  // switch poDS->nMagic
+    }
 
     if (poDS->nRasterXSize <= 0 || poDS->nRasterYSize <= 0)
     {
@@ -898,8 +892,8 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         delete poDS;
         return nullptr;
     }
-#define MAX_X 2711  // Danmark/GermanyCH.VRH
-#define MAX_Y 3267  // AllFranceVRHs/Corsica.VRH
+#define MAX_X 2711
+#define MAX_Y 3267
     if (poDS->nRasterXSize > MAX_X || poDS->nRasterYSize > MAX_Y)
     {
         if (poDS->nMagic != vrh_magic)
@@ -985,7 +979,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
 
     return (poDS);
-}  // VRHVDataset::Open()
+}
 
 /************************************************************************/
 /*                       GDALRegister_VRHV()                      */
@@ -1086,7 +1080,7 @@ void VRHRasterBand::read_VRH_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
             }
         }
     }
-}  // end VRHRasterBand::read_VRH_Tile()
+}
 
 /* -------------------------------------------------------------------------
  */
@@ -1166,7 +1160,7 @@ void VRHRasterBand::read_VMC_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
              "read_VMC_Tile: x%02x %d/%d - pnBottomPixel %p furthest pix %d",
              0xff & nCurrentData, nBytesRead, nBitsLeft, pnBottomPixel,
              nMaxPix);
-}  // VRHRasterBand::read_VMC_Tile()
+}
 
 /* -------------------------------------------------------------------------
  */
@@ -1232,7 +1226,7 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
              pixelnum, nBlockXSize, nBlockYSize);
     (void)pixelnum;  // cppcheck ignores CPLDebug args.
                      // Don't complain that pixelnum is never used.
-}  // VRHRasterBand::read_VMC_Tile()
+}
 
 /************************************************************************/
 /*                            GetFileList()                             */
@@ -1247,6 +1241,3 @@ char **VRHVDataset::GetFileList()
     // GDALReadWorldFile2 (gdal_misc.cpp) has code we need to copy
     return papszFileList;
 }
-
-// #endif // def FRMT_vrhv
-// #endif // def FRMT_vrc
