@@ -33,10 +33,12 @@
 
 /* -*- tab-width: 4 ; indent-tabs-mode: nil ; c-basic-offset 'tab-width -*- */
 
-#include "VRC.h"
-#include "png_crc.h"
+// #ifdef FRMT_vrc
 
-#include <algorithm>
+#include "VRC.h"
+#include "png_crc.h"  // for crc pngcrc_for_VRC, used in: PNGCRCcheck
+
+#include <algorithm>  // for std::max, std::min and std::copy
 #include <array>
 #include <cinttypes>
 
@@ -170,7 +172,7 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
 
     if (sizeof(size_t) != sizeof(std::vector<png_byte>::size_type))
     {
-
+        //      #warning "sizeof(size_t) != sizeof(std::vector<png_byte>::size_type)"
         CPLDebug("Viewranger",
                  "sizeof(size_t) = %" PRI_SIZET " != %" PRI_SIZET
                  "sizeof(std::vector<png_byte>::size_type)",
@@ -430,7 +432,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
                      // poVRCDS->sLongTitle.c_str(),
                      this, poVRCDS, nBandIn, nThisOverview, nOverviewCount,
                      papoOverviewBands);
-
+            // #pragma unroll
             for (int i = 0; i < nOverviewCount; i++)
             {
                 if (papoOverviewBands[i])
@@ -498,7 +500,7 @@ VRCRasterBand::~VRCRasterBand()
         {
             const int nC = nOverviewCount;
             nOverviewCount = 0;
-
+            // #pragma unroll
             for (int i = 0; i < nC; i++)
             {
                 if (papo[i])
@@ -515,7 +517,7 @@ VRCRasterBand::~VRCRasterBand()
         papoOverviewBands = nullptr;
     }
 }
-#endif
+#endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
 /*                             IReadBlock()                             */
@@ -749,7 +751,7 @@ VRCDataset::~VRCDataset()
         poSRS = nullptr;
     }
 }
-#endif
+#endif  // def EXPLICIT_DELETE
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
@@ -1352,7 +1354,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                                   "");
             // CPLPopErrorHandler();
 
-            // This is Digital Right Management (DRM), but not encyption.
+            // This is Digital Right Management (DRM), but not encryption.
             // Explicitly put the file's DeviceID into the metadata so that
             // it can be preserved if the data is saved in another format.
             // We are *not* filing off the serial numbers.
@@ -2279,7 +2281,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             CPLDebug("Viewranger PNG", "PNG height: neither case");
         }
     }
-#endif
+#endif  // defined UseCountFull
 
     // pbyPNGbuffer needs freeing in lots of places, before we return
     // nullptr
@@ -2593,9 +2595,9 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             // multiply next four values by overview scale
             poVRCDS->dfPixelMetres, 0.0, 0.0, -1.0 * poVRCDS->dfPixelMetres,
             // not these two ?
-            poVRCDS->nLeft +
-                (poVRCDS->dfPixelMetres *
-                 ((nGDtile_xx * nBlockXSize) + (nVRtile_xx * nPNGwidth))),
+            poVRCDS->nLeft + (poVRCDS->dfPixelMetres *
+                              ((static_cast<double>(nGDtile_xx) * nBlockXSize) +
+                               (static_cast<double>(nVRtile_xx) * nPNGwidth))),
             poVRCDS->nTop -
                 (
                     // Not sure this is right - 2024-05-22
@@ -2604,8 +2606,8 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                     // 2024-05-27 - Switzerland1M.VRC need to adjust
                     // top row as it is less tall than others
                     poVRCDS->dfPixelMetres *
-                    ((static_cast<signed long>(nGDtile_yy) * nBlockYSize) +
-                     (static_cast<signed long>(nVRtile_yy) * nPNGheight))));
+                    ((static_cast<double>(nGDtile_yy) * nBlockYSize) +
+                     (static_cast<double>(nVRtile_yy) * nPNGheight))));
         dumpPNG(VRCpng_callback.vData.data(),
                 static_cast<int>(VRCpng_callback.vData.size()), osBaseLabel,
                 osWLDparams, nEnvPNGDump);
@@ -3266,7 +3268,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
 
         // unsigned>=0 always true, so a standard for loop
         // for (unsigned int loopY=nYlimit; loopY >= 0; loopY--)
-        // wont work:
+        // will not work:
         for (unsigned int loopY = nYlimit; loopY >= 1; /* see comments */)
         {
             // decrement at *start* of loop
@@ -3695,3 +3697,5 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
 
     return 0;
 }
+
+//  #endif  // def FRMT_vrc
