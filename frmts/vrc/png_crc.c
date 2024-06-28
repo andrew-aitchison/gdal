@@ -21,7 +21,7 @@ CPL_C_START
 const uint32_t nBitsPerByte = 8;
 
 //  Table of CRCs of all 8-bit messages.
-
+// #define ncrc_table_size 256
 // - gives clang-tidy warning [modernize-macro-to-enum]
 // and constexpr requires C++ :-(
 enum eTABLESIZE
