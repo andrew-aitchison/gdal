@@ -42,7 +42,7 @@
 #include <array>
 #include <cinttypes>
 
-template <class T, class U> void vector_append(T &a, U &b)
+template <class T, class U> void static vector_append(T &a, U &b)
 {
     // a.insert(std::end(a),std::begin(b),std::end(b));
     std::copy(b.begin(), b.end(), std::back_inserter(a));
@@ -517,7 +517,7 @@ VRCRasterBand::~VRCRasterBand()
         papoOverviewBands = nullptr;
     }
 }
-#endif  // def EXPLICIT_DELETE
+#endif
 
 /************************************************************************/
 /*                             IReadBlock()                             */
@@ -751,7 +751,7 @@ VRCDataset::~VRCDataset()
         poSRS = nullptr;
     }
 }
-#endif  // def EXPLICIT_DELETE
+#endif
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
@@ -2281,7 +2281,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             CPLDebug("Viewranger PNG", "PNG height: neither case");
         }
     }
-#endif  // defined UseCountFull
+#endif
 
     // pbyPNGbuffer needs freeing in lots of places, before we return
     // nullptr
@@ -3698,4 +3698,4 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
     return 0;
 }
 
-//  #endif  // def FRMT_vrc
+//  #endif
