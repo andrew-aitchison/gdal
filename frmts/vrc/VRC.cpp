@@ -2855,10 +2855,13 @@ GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
     {
         static int nCount = 0;
         nCount++;
-        CPLDebug("VRC",
-                 "%p->VRCRasterBand::GetOverview(%d) returns itself - "
-                 "called %d times",
-                 this, iOverviewIn, nCount);
+        if (0 == (nCount & nCount - 1))
+        {  // ie if nCount is a power of 2
+            CPLDebug("VRC",
+                     "%p->VRCRasterBand::GetOverview(%d) returns itself - "
+                     "called %d times",
+                     this, iOverviewIn, nCount);
+        }
     }
 
     return pThisOverview;
