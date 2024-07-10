@@ -31,17 +31,17 @@
 #ifndef VRC_H_INCLUDED
 #define VRC_H_INCLUDED
 
-#ifdef FRMT_vrc
 #define FRMT_viewranger
-#endif
 
 #include <gdal_pam.h>
 #include <ogr_spatialref.h>
+// #include <cpl_string.h>
 
 // We have not fully deciphered the data format
 // of VRC files with magic=0x01ce6336.
 // Set *one* of these definitions (to 1)
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
+// #define VRC36_PIXEL_IS_PIXEL 1
 
 #include <cinttypes>
 #include <cstdio>
@@ -203,17 +203,11 @@ class VRCRasterBand : public GDALRasterBand
 
     int Copy_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth, int nPNGheight,
                              int nLeftCol, int nRightCol, int nTopRow,
-                             int nBottomRow, void *pImage
-                             // , int nBlockXSize,
-                             // , int nBlockYSize
-    );
+                             int nBottomRow, void *pImage);
 
     int Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
                                int nPNGheight, int nLeftCol, int nRightCol,
-                               int nTopRow, int nBottomRow, void *pImage
-                               // , int nBlockXSize,
-                               // , int nBlockYSize
-    );
+                               int nTopRow, int nBottomRow, void *pImage);
 
     int verifySubTileFile(VSILFILE *fp, unsigned long start,
                           unsigned long finish, int nGDtile_xx, int nGDtile_yy,
