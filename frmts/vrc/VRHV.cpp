@@ -29,9 +29,12 @@
 
 /* -*- tab-width: 4 ; indent-tabs-mode: nil ; c-basic-offset 'tab-width -*- */
 
+// #ifdef FRMT_vrc
+// #ifdef FRMT_vrhv
+
 #include "VRC.h"
 
-#include <algorithm>
+#include <algorithm>  // for std::max and std::min
 
 CPL_C_START
 void GDALRegister_VRHV(void);
@@ -104,8 +107,6 @@ class VRHVDataset : public GDALDataset
     char **GetFileList() override;
 
     static char *VRHGetString(VSILFILE *fp, unsigned long long byteaddr);
-    // static void xy_to_latlon(VRHVDataset *poDS,
-    //               int pixel_x, int pixel_y, latlon *latlon);
 };
 
 /* -------------------------------------------------------------------------
@@ -429,28 +430,30 @@ VRHVDataset::~VRHVDataset()
 CPLErr VRHVDataset::GetGeoTransform(double *padfTransform)
 
 {
+    const double tenMillion = 10.0 * 1000 * 1000;
+
     double dLeft = nLeft;
     double dRight = nRight;
     double dTop = nTop;
     double dBottom = nBottom;
 
-    const double tenMillion = 10.0 * 1000 * 1000;
     if (nCountry == 17)
     {
         // This may not be correct
         // USA, Discovery (Spain,Greece) and some Belgium (VRH height) maps
-        // have coordinate unit of something like  1 degree/ten million
+        // have coordinate unit of something like 1 degree/ten million
         CPLDebug("ViewrangerHV",
-                 "country/srs 17 USA?Belgium?Discovery(Spain) grid is unknown. "
+                 "country/srs 17 USA?Belgium?Discovery(Spain,Greece) grid is "
+                 "unknown. "
                  "Current guess is unlikely to be correct.");
         CPLDebug("ViewrangerHV", "raw position: TL: %d %d BR: %d %d", nTop,
                  nLeft, nBottom, nRight);
-        const double nineMillion = 9.0 * 1000 * 1000;
-        dLeft /= nineMillion;
-        dRight /= nineMillion;
-        dTop /= nineMillion;
-        dBottom /= nineMillion;
-        CPLDebug("ViewrangerHV", "scaling by 9 million: TL: %g %g BR: %g %g",
+        const double factor = 9.0 * 1000 * 1000;
+        dLeft /= factor;
+        dRight /= factor;
+        dTop /= factor;
+        dBottom /= factor;
+        CPLDebug("ViewrangerHV", "scaling by %g TL: %g %g BR: %g %g", factor,
                  dTop, dLeft, dBottom, dRight);
     }
     else if (nCountry == 155)
@@ -892,8 +895,8 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         delete poDS;
         return nullptr;
     }
-#define MAX_X 2711
-#define MAX_Y 3267
+#define MAX_X 2711  // Danmark/GermanyCH.VRH
+#define MAX_Y 3267  // AllFranceVRHs/Corsica.VRH
     if (poDS->nRasterXSize > MAX_X || poDS->nRasterYSize > MAX_Y)
     {
         if (poDS->nMagic != vrh_magic)
@@ -942,10 +945,6 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         CPLDebug("ViewrangerHV", "Scale: 1: %u", poDS->nScale);
     }
     CPLDebug("ViewrangerHV", "Datum: %s", poDS->sDatum.c_str());
-
-    /********************************************************************/
-    /*                       Set coordinate model                       */
-    /********************************************************************/
 
     /* -------------------------------------------------------------------- */
     /*      Create copyright information.                                   */
@@ -1241,3 +1240,6 @@ char **VRHVDataset::GetFileList()
     // GDALReadWorldFile2 (gdal_misc.cpp) has code we need to copy
     return papszFileList;
 }
+
+// #endif
+// #endif
