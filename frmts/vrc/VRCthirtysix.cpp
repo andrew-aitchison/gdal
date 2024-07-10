@@ -25,6 +25,8 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
+// #ifdef FRMT_vrc
+
 #include "VRC.h"
 
 // Like strncmp but null bytes don't terminate.
@@ -694,3 +696,5 @@ int VRCRasterBand::verifySubTileMem(GByte abyRawStartData[],
 
     return 0x0100 | static_cast<int>(nBytesMatched);
 }
+
+// #endif
