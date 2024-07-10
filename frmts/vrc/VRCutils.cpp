@@ -1,6 +1,8 @@
 /*
  */
 
+// #ifdef FRMT_vrc
+
 #include "VRC.h"
 
 #include <array>
@@ -176,7 +178,7 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
             switch (nMapID)
             {
                 case 0:
-                    VRC_EPSG(4267);
+                    VRC_EPSG(4269);
                     VRC_SWAP_AXES;
                     break;
                 default:
@@ -283,3 +285,5 @@ extern const char *CharsetFromCountry(int16_t nCountry)
             return "UTF-8";
     }
 }
+
+// #endif
