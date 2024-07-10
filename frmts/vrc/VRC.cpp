@@ -767,7 +767,7 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
 
     if (nCountry == 17)
     {
-        // This may not be correct
+        // This is unlikely to be correct.
         // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps
         // have coordinate unit which is not metres.
         // It might be some part of a degree, eg 1 degree/ten million.
@@ -779,12 +779,12 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
         CPLDebug("Viewranger",
                  "raw corner positions: TL: %.10g %.10g BR: %.10g %.10g", dTop,
                  dLeft, dBottom, dRight);
-        const double nineMillion = 9.0 * 1000 * 1000;
-        dLeft /= nineMillion;
-        dRight /= nineMillion;
-        dTop /= nineMillion;
-        dBottom /= nineMillion;
-        CPLDebug("Viewranger", "scaling by 9 million: TL: %g %g BR: %g %g",
+        const double factor = 9.0 * 1000 * 1000;
+        dLeft /= factor;
+        dRight /= factor;
+        dTop /= factor;
+        dBottom /= factor;
+        CPLDebug("ViewrangerHV", "scaling by %g TL: %g %g BR: %g %g", factor,
                  dTop, dLeft, dBottom, dRight);
     }
     else if (nCountry == 155)
@@ -802,39 +802,22 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
 
     // Xgeo = padfTransform[0] + pixel*padfTransform[1] + line*padfTransform[2];
     // Ygeo = padfTransform[3] + pixel*padfTransform[4] + line*padfTransform[5];
-    if (nMagic == vrc_magic)
+
+    padfTransform[0] = dLeft;
+    padfTransform[1] = 1.0 * dRight - dLeft;
+    padfTransform[2] = 0.0;
+    padfTransform[3] = dTop;
+    padfTransform[4] = 0.0;
+    padfTransform[5] = 1.0 * dBottom - dTop;
+
     {
-        padfTransform[0] = dLeft;
-        padfTransform[1] =
-            (1.0 * dRight - dLeft) / (GetRasterXSize() /* -1.0 */);
-        padfTransform[2] = 0.0;
-        padfTransform[3] = dTop;
-        padfTransform[4] = 0.0;
-        padfTransform[5] =
-            (1.0 * dBottom - dTop) / (GetRasterYSize() /* -1.0 */);
-    }
-    else if (nMagic == vrc_magic36)
-    {
-        padfTransform[0] = dLeft;
-        padfTransform[1] = (1.0 * dRight - dLeft);
-        padfTransform[2] = 0.0;
-        padfTransform[3] = dTop;
-        padfTransform[4] = 0.0;
-        padfTransform[5] = (1.0 * dBottom - dTop);
         padfTransform[1] /= (GetRasterXSize());
         padfTransform[5] /= (GetRasterYSize());
     }
-    else
+
+    if (nMagic != vrc_magic && nMagic != vrc_magic36)
     {
         CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
-        padfTransform[0] = dLeft;
-        padfTransform[1] =
-            (1.0 * dRight - dLeft) / (GetRasterXSize() /* -1.0 */);
-        padfTransform[2] = 0.0;
-        padfTransform[3] = dTop;
-        padfTransform[4] = 0.0;
-        padfTransform[5] =
-            (1.0 * dBottom - dTop) / (GetRasterYSize() /* -1.0 */);
     }
 
     CPLDebug("Viewranger", "padfTransform raster %d x %d", GetRasterXSize(),
@@ -877,16 +860,16 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
 
     const unsigned int nb64k1 = VRGetUInt(poOpenInfo->pabyHeader, 8);
     const bool b64k1 = (nb64k1 == 0x00010001);
-
     if (nMagic == vrc_magic)
     {
         CPLDebug("Viewranger", "VRC file %s supported",
                  poOpenInfo->pszFilename);
+
         if (!b64k1)
         {
             CPLDebug("Viewranger",
                      "VRC file %s - limited support for unusual third long "
-                     "0x%08x (expected 0x00010001)",
+                     "0x%08x - expected 0x00010001",
                      poOpenInfo->pszFilename, nb64k1);
         }
         return GDAL_IDENTIFY_TRUE;
@@ -898,6 +881,15 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
             CE_Warning, CPLE_AppDefined,
             "%s: image data for .VRC magic 0x3663ce01 files not yet understood",
             poOpenInfo->pszFilename);
+
+        if (!b64k1)
+        {
+            CPLDebug("Viewranger",
+                     "VRC file %s - limited support for unusual third long"
+                     "0x%08x - expected 0x00010001",
+                     poOpenInfo->pszFilename, nb64k1);
+        }
+
         return GDAL_IDENTIFY_FALSE;
     }
 
@@ -2855,7 +2847,7 @@ GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
     {
         static int nCount = 0;
         nCount++;
-        if (0 == (nCount & nCount - 1))
+        if (0 == (nCount & (nCount - 1)))
         {  // ie if nCount is a power of 2
             CPLDebug("VRC",
                      "%p->VRCRasterBand::GetOverview(%d) returns itself - "
@@ -3042,6 +3034,7 @@ void VRCRasterBand::read_VRC_Tile_Metres(VSILFILE *fp, int block_xx,
     }
 
     nOverviewCount = VRReadInt(fp);
+
     if (nOverviewCount != 7)
     {
         CPLDebug("Viewranger OVRV",
