@@ -123,7 +123,8 @@ uint32_t VRReadUInt(VSILFILE *fp, unsigned int byteOffset)
     nEPSG = (A);                                                               \
     errImport = poSRS->importFromEPSGA(nEPSG)
 
-extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
+extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
+                                           const char *szCountry)
 {
     OGRErr errImport = OGRERR_NONE;
     int nEPSG = 0;
@@ -175,6 +176,16 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
             // This "country" code uses a different, unknown, unit - not metres.
             // USA, Discovery(Spain/Canaries/Greece)
             // and US + Belgium .VRH (height) files
+            if (szCountry && szCountry[0])
+            {
+                if ((szCountry[0] == 'e' && szCountry[1] == 's') ||
+                    (szCountry[0] == 'g' && szCountry[1] == 'r'))
+                {
+                    VRC_EPSG(4326);
+                    VRC_SWAP_AXES;
+                    break;
+                }
+            }
             switch (nMapID)
             {
                 case 0:
@@ -214,9 +225,10 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID)
             VRC_EPSG(28355);  // not VRC_EPSG(4283);
             break;
         default:
-            CPLDebug("Viewranger",
-                     "CRSfromCountry(country %hd unknown) assuming WGS 84",
-                     nCountry);
+            CPLDebug(
+                "Viewranger",
+                "CRSfromCountry(country %hd unknown, %d, %s) assuming WGS 84",
+                nCountry, nMapID, szCountry);
             VRC_EPSG(4326);
             break;
     }

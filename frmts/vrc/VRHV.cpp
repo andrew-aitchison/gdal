@@ -924,7 +924,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         char *pszSRS = nullptr;
         if (!poDS->poSRS)
         {
-            poDS->poSRS = CRSfromCountry(poDS->nCountry, 0);
+            poDS->poSRS = CRSfromCountry(poDS->nCountry, 0, nullptr);
         }
         poDS->poSRS->exportToWkt(&pszSRS);
         if (pszSRS)

@@ -102,7 +102,8 @@ void dumpPPM(unsigned int width, unsigned int height, const unsigned char *data,
              unsigned int rowlength, CPLString osBaseLabel,
              VRCinterleave eInterleave, unsigned int nMaxPPM);
 
-extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID);
+extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
+                                           const char *szCountry);
 extern const char *CharsetFromCountry(int16_t nCountry);
 
 /************************************************************************/
@@ -136,7 +137,6 @@ class VRCDataset : public GDALDataset
     std::string sFileName;
     std::string sLongTitle;
     std::string sCopyright;
-    // std::string sDatum;
 
     unsigned int tileSizeMax = 0, tileSizeMin = INT_MAX;
     unsigned int tileXcount = 0, tileYcount = 0;

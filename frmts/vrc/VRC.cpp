@@ -750,6 +750,11 @@ VRCDataset::~VRCDataset()
         poSRS->Release();
         poSRS = nullptr;
     }
+    if (pszSRS != nullptr)
+    {
+        VSIFree(pszSRS);
+        pszSRS = nullptr;
+    }
 }
 #endif
 
@@ -1269,9 +1274,10 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLDebug("Viewranger", "VRC Map ID %d with %u strings", poDS->nMapID,
              nStringCount);
 
+    char **paszStrings = nullptr;
     if (nStringCount > 0)
     {
-        auto **paszStrings =
+        paszStrings =
             static_cast<char **>(VSIMalloc2(nStringCount, sizeof(char *)));
         if (paszStrings == nullptr)
         {
@@ -1356,17 +1362,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                                       CPLString(paszStrings[5]).c_str(), "");
             }
         }
-
-        // Free the strings of the array before it goes out of scope.
-        for (unsigned int ii = 0; ii < nStringCount; ++ii)
-        {
-            if (paszStrings[ii])
-            {
-                VSIFree(paszStrings[ii]);
-                paszStrings[ii] = nullptr;
-            }
-        }
-        VSIFree(paszStrings);
     }
 
     poDS->nLeft = VRGetInt(poDS->abyHeader, nNextString);
@@ -1745,8 +1740,23 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     /********************************************************************/
     if (!poDS->poSRS)
     {
-        poDS->poSRS = CRSfromCountry(poDS->nCountry, poDS->nMapID);
+        const char *szCountry = nullptr;
+        if (paszStrings && paszStrings[8])
+        {
+            szCountry = paszStrings[8];
+        }
+        poDS->poSRS = CRSfromCountry(poDS->nCountry, poDS->nMapID, szCountry);
     }
+
+    for (unsigned int ii = 0; ii < nStringCount; ++ii)
+    {
+        if (paszStrings[ii])
+        {
+            VSIFree(paszStrings[ii]);
+            paszStrings[ii] = nullptr;
+        }
+    }
+    VSIFree(paszStrings);
 
     /********************************************************************/
     /*             Report some strings found in the file                */
@@ -2582,10 +2592,17 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             // poVRCDS->sLongTitle.c_str(),
             nThisOverview, nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy,
             nBand, nVRCHeader);
+        const double dTopHeightAdjust =
+            (nGDtile_yy == 0) ? poVRCDS->nTopSkipPix : 0.0;
+        if (nGDtile_yy == 0 || poVRCDS->nTopSkipPix != 0)
+        {
+            CPLDebug("Viewranger", "nGDtile_yy %d, dTopHeightAdjust %g",
+                     nGDtile_yy, dTopHeightAdjust);
+        }
         const CPLString osWLDparams = CPLString().Printf(
             "%8.8g\n%8.8g\n%8.8g\n%8.8g\n%8.8g\n%8.8g\n",
             // multiply next four values by overview scale
-            poVRCDS->dfPixelMetres, 0.0, 0.0, -1.0 * poVRCDS->dfPixelMetres,
+            poVRCDS->dfPixelMetres, 0.0, 0.0, -poVRCDS->dfPixelMetres,
             // not these two ?
             poVRCDS->nLeft + (poVRCDS->dfPixelMetres *
                               ((static_cast<double>(nGDtile_xx) * nBlockXSize) +
@@ -2593,13 +2610,12 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             poVRCDS->nTop -
                 (
                     // Not sure this is right - 2024-05-22
-                    // - in /DE_25_W867170_E882510_S5635610_N5645830.VRC
+                    // - in DE_25_W867170_E882510_S5635610_N5645830.VRC
                     // we need to swap the rows.
-                    // 2024-05-27 - Switzerland1M.VRC need to adjust
-                    // top row as it is less tall than others
                     poVRCDS->dfPixelMetres *
                     ((static_cast<double>(nGDtile_yy) * nBlockYSize) +
-                     (static_cast<double>(nVRtile_yy) * nPNGheight))));
+                     (static_cast<double>(nVRtile_yy) * nPNGheight) +
+                     dTopHeightAdjust)));
         dumpPNG(VRCpng_callback.vData.data(),
                 static_cast<int>(VRCpng_callback.vData.size()), osBaseLabel,
                 osWLDparams, nEnvPNGDump);
