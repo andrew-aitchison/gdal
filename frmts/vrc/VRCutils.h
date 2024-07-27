@@ -40,7 +40,8 @@
 
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
-extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID);
+extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
+                                           const char *szCountry);
 extern const char *CharsetFromCountry(int16_t nCountry);
 
 extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
