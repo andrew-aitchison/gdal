@@ -561,8 +561,9 @@ double VRCRasterBand::GetNoDataValue(int *pbSuccess)
 /************************************************************************/
 CPLErr VRCRasterBand::SetNoDataValue(double dfNoDataValue)
 {
-    // GDALDataset *poGDS = cpl::down_cast<GDALRasterBand *>(poDS);
-    return GDALRasterBand::SetNoDataValue(dfNoDataValue);
+    (void)dfNoDataValue;
+    // Users cannot set NoDataValue; this is read-only data.
+    return CE_Failure;
 }
 
 /************************************************************************/
@@ -1258,8 +1259,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLDebug("Viewranger",
                      "Could not set MapID Metadata - CPLsnprintf( , "
-                     "VRCpszMapIDlen, %d) returned %d",
-                     poDS->nMapID, ret);
+                     "VRCpszMapIDlen, %d) returned %d - expected %zu",
+                     poDS->nMapID, ret, VRCpszMapIDlen - 1);
         }
     }
 
@@ -1741,7 +1742,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     if (!poDS->poSRS)
     {
         const char *szCountry = nullptr;
-        if (paszStrings && paszStrings[8])
+        if (nStringCount > 8 && paszStrings && paszStrings[8])
         {
             szCountry = paszStrings[8];
         }
