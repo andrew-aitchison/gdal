@@ -12,7 +12,7 @@ VRC -- ViewRanger Chart Image File Format
  
 The VRC driver currently supports reading VRC files with magic
 (first four bytes) 7e 1f 2e 00 but not 36 63 ce 01.
-Files with geolocation (bytes 6 and 7) 17 00 are mis-located.
+Files with geolocation 17 (bytes 6-7: x11 x00) are mis-located.
 These include some US/BE/ES/GR and many Discovery maps.
 
 The following metadata items may be reported:
