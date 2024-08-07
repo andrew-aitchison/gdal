@@ -138,8 +138,8 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
             VRC_EPSG(27700);
             break;
         case 2:  // Ireland.
-            VRC_EPSG(29901);
-            //  Could be 29901, 2 or 3
+            VRC_EPSG(29903);
+            // EPSG:29901 Northern Ireland,  EPSG:29902 Republic of Ireland,  EPSG:29903 Both
             break;
         case 5:  // Finland
             VRC_EPSG(2393);
