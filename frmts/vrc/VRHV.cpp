@@ -106,7 +106,7 @@ class VRHVDataset : public GDALDataset
 
     char **GetFileList() override;
 
-    static char *VRHGetString(VSILFILE *fp, unsigned long long byteaddr);
+    static char *VRHGetString(VSILFILE *fp, size_t byteaddr);
 };
 
 /* -------------------------------------------------------------------------
@@ -117,44 +117,65 @@ class VRHVDataset : public GDALDataset
  * If index pointer is nul then an empty string is returned
  * (rather than a null pointer).
  */
-char *VRHVDataset::VRHGetString(VSILFILE *fp, unsigned long long byteaddr)
+char *VRHVDataset::VRHGetString(VSILFILE *fp, size_t byteaddr)
 {
     if (byteaddr == 0)
-        return (CPLStrdup(""));
-
-    const int seekres = VSIFSeekL(fp, byteaddr, SEEK_SET);
-    if (seekres)
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRH string");
-        return nullptr;
+        return (VSIStrdup(""));
     }
-    const int string_length = VRReadInt(fp);
+
+    // const
+    int32_t string_length = 0;
+
+    if ((fp)->HasPRead())
+    {
+        if (fp->PRead(&string_length, sizeof(string_length), byteaddr) <
+            sizeof(string_length))
+        {
+            CPLError(CE_Failure, CPLE_FileIO,
+                     "error reading length of VRC string");
+            return (VSIStrdup(""));
+        }
+    }
+    else
+    {
+        const int nSeekResult = VSIFSeekL(fp, byteaddr, SEEK_SET);
+        if (nSeekResult)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRC string");
+            return (VSIStrdup(""));
+        }
+        string_length = VRReadInt(fp);
+    }
+
     if (string_length <= 0)
     {
-        return (CPLStrdup(""));
+        if (string_length < 0)
+        {
+            CPLDebug("Viewranger", "odd length for string %012zx - length %d",
+                     byteaddr, string_length);
+        }
+        return (VSIStrdup(""));
     }
-    auto ustring_length = static_cast<size_t>(string_length);
+    const size_t ustring_length = static_cast<unsigned>(string_length);
 
-    auto *pszNewString = static_cast<char *>(VSIMalloc(1 + ustring_length));
-    if (pszNewString == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_OutOfMemory,
-                 "Cannot allocate %d bytes for string", 1 + string_length);
-        return nullptr;
-    }
+    char *pszNewString = static_cast<char *>(CPLMalloc(1 + ustring_length));
 
-    const size_t bytesread = VSIFReadL(pszNewString, 1, ustring_length, fp);
+    const size_t bytesread =
+        ((fp)->HasPRead()) ? fp->PRead(pszNewString, ustring_length,
+                                       byteaddr + sizeof(string_length))
+                           : VSIFReadL(pszNewString, 1, ustring_length, fp);
 
     if (bytesread < ustring_length)
     {
         VSIFree(pszNewString);
         CPLError(CE_Failure, CPLE_AppDefined, "problem reading string\n");
-        return nullptr;
+        return (VSIStrdup(""));
     }
 
-    pszNewString[string_length] = 0;
-    // CPLDebug("ViewrangerHV", "read string %s at %08x - length %d",
-    //         pszNewString, byteaddr, string_length);
+    pszNewString[ustring_length] = 0;
+    // CPLDebug("Viewranger", "read string %s at %012x - length %d",
+    //         pszNewString, byteaddr, ustring_length);
     return pszNewString;
 }
 
