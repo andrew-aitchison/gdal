@@ -35,7 +35,12 @@
 
 #include <gdal_pam.h>
 #include <ogr_spatialref.h>
+
 // #include <cpl_string.h>
+
+// These are only enabled by -Weverything
+// ... which is not appropriate for production.
+#include <cpl_vsi_virtual.h>  // for HasPRead() and PRead()
 
 // We have not fully deciphered the data format
 // of VRC files with magic=0x01ce6336.
@@ -168,7 +173,7 @@ class VRCDataset : public GDALDataset
 
     CPLErr GetGeoTransform(double *padfTransform) override;
 
-    static char *VRCGetString(VSILFILE *fp, unsigned int byteaddr);
+    static char *VRCGetString(VSILFILE *fp, size_t byteaddr);
 };
 
 /************************************************************************/
