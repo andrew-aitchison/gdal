@@ -36,6 +36,7 @@
 // #ifdef FRMT_vrc
 
 #include "VRC.h"
+
 #include "png_crc.h"  // for crc pngcrc_for_VRC, used in: PNGCRCcheck
 
 #include <algorithm>  // for std::max, std::min and std::copy
@@ -229,23 +230,42 @@ static int PNGCRCcheck(const std::vector<png_byte> &vData, uint32_t nGiven)
 // If index pointer is nul then an empty string is returned
 // (rather than a null pointer).
 //
-char *VRCDataset::VRCGetString(VSILFILE *fp, unsigned int byteaddr)
+char *VRCDataset::VRCGetString(VSILFILE *fp, size_t byteaddr)
 {
     if (byteaddr == 0)
-        return (VSIStrdup(""));
-
-    const int nSeekResult = VSIFSeekL(fp, byteaddr, SEEK_SET);
-    if (nSeekResult)
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRC string");
         return (VSIStrdup(""));
     }
-    const int string_length = VRReadInt(fp);
+
+    // const
+    int32_t string_length = 0;
+
+    if ((fp)->HasPRead())
+    {
+        if (fp->PRead(&string_length, sizeof(string_length), byteaddr) <
+            sizeof(string_length))
+        {
+            CPLError(CE_Failure, CPLE_FileIO,
+                     "error reading length of VRC string");
+            return (VSIStrdup(""));
+        }
+    }
+    else
+    {
+        const int nSeekResult = VSIFSeekL(fp, byteaddr, SEEK_SET);
+        if (nSeekResult)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRC string");
+            return (VSIStrdup(""));
+        }
+        string_length = VRReadInt(fp);
+    }
+
     if (string_length <= 0)
     {
         if (string_length < 0)
         {
-            CPLDebug("Viewranger", "odd length for string %08x - length %d",
+            CPLDebug("Viewranger", "odd length for string %012zx - length %d",
                      byteaddr, string_length);
         }
         return (VSIStrdup(""));
@@ -254,7 +274,10 @@ char *VRCDataset::VRCGetString(VSILFILE *fp, unsigned int byteaddr)
 
     char *pszNewString = static_cast<char *>(CPLMalloc(1 + ustring_length));
 
-    const size_t bytesread = VSIFReadL(pszNewString, 1, ustring_length, fp);
+    const size_t bytesread =
+        ((fp)->HasPRead()) ? fp->PRead(pszNewString, ustring_length,
+                                       byteaddr + sizeof(string_length))
+                           : VSIFReadL(pszNewString, 1, ustring_length, fp);
 
     if (bytesread < ustring_length)
     {
@@ -891,7 +914,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
         if (!b64k1)
         {
             CPLDebug("Viewranger",
-                     "VRC file %s - limited support for unusual third long"
+                     "VRC file %s - limited support for unusual third long "
                      "0x%08x - expected 0x00010001",
                      poOpenInfo->pszFilename, nb64k1);
         }
