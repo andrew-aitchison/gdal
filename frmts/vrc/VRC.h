@@ -195,8 +195,8 @@ class VRCRasterBand : public GDALRasterBand
 
     void read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
                           void *pImage);
-    void read_VRC_Tile_Metres(VSILFILE *fp, int block_xx, int block_yy,
-                              void *pImage);
+    void read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
+                           void *pImage);
     GByte *read_PNG(VSILFILE *fp,
                     // void *pImage,
                     unsigned int *pPNGwidth, unsigned int *pPNGheight,
