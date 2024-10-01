@@ -131,7 +131,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         if (nOverviewCount != 7)
         {
             CPLDebug("Viewranger OVRV",
-                     "read_VRC_Tile_Metres: nOverviewCount is %d "
+                     "read_VRC_Tile_36: nOverviewCount is %d "
                      "- expected seven - MapID %d",
                      nOverviewCount, poGDS->nMapID);
             return;
@@ -170,10 +170,9 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
 
         if (nOverviewCount < 1 || anTileOverviewIndex[0] == 0)
         {
-            CPLDebug(
-                "Viewranger",
-                "VRCRasterBand::read_VRC_Tile_Metres(.. %d %d ..) empty tile",
-                block_xx, block_yy);
+            CPLDebug("Viewranger",
+                     "VRCRasterBand::read_VRC_Tile_36(.. %d %d ..) empty tile",
+                     block_xx, block_yy);
             return;
         }
 
