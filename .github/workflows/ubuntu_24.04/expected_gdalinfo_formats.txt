@@ -143,6 +143,7 @@ Supported Formats: (ro:read-only, rw:read-write, +:update, v:virtual-I/O s:subda
   STACTA -raster- (rovs): Spatio-Temporal Asset Catalog Tiled Assets (*.json)
   STACIT -raster- (rovs): Spatio-Temporal Asset Catalog Items
   JPEGXL -raster- (rwv): JPEG-XL (*.jxl)
+  ViewrangerVRC -raster- (rov): ViewRanger (.VRC) (*.VRC)
   GPKG -raster,vector- (rw+vs): GeoPackage (*.gpkg, *.gpkg.zip)
   SQLite -raster,vector- (rw+v): SQLite / Spatialite / RasterLite2 (*.sqlite, *.db)
   OpenFileGDB -raster,vector- (rw+v): ESRI FileGeodatabase (using OpenFileGDB) (*.gdb)
