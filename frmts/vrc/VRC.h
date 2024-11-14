@@ -56,11 +56,14 @@
 #ifdef _WIN32
 #ifdef _WIN64
 #define PRI_SIZET PRIu64
+#define PRI_SIZETx PRIu64x
 #else
 #define PRI_SIZET PRIu32
+#define PRI_SIZETx PRIu32x
 #endif
 #else
 #define PRI_SIZET "zu"
+#define PRI_SIZETx "zx"
 #endif
 
 static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //
