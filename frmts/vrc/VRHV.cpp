@@ -152,7 +152,9 @@ char *VRHVDataset::VRHGetString(VSILFILE *fp, size_t byteaddr)
     {
         if (string_length < 0)
         {
-            CPLDebug("Viewranger", "odd length for string %012zx - length %d",
+            CPLDebug("Viewranger",
+                     "odd length for string %012" PRI_SIZETx
+                     " - length %" PRId32,
                      byteaddr, string_length);
         }
         return (VSIStrdup(""));
