@@ -1,4 +1,4 @@
-.. _raster.vrc:
+.. _raster.vrhv:
 
 ================================================================================
 VRHV -- ViewRanger Height and "Vendor" Image File Formats
@@ -11,14 +11,14 @@ VRHV -- ViewRanger Height and "Vendor" Image File Formats
 .. built_in_by_default:: ???
  
 The VRHV driver currently supports reading .VRH and .VRV files.
-Some, but not all,  .VRH have first four bytes (magic) hex
-4F 80 C6 FA, but others do not.
-Height files with geolocation (bytes 8 and 9) 11 00 are mis-located.
+Some .VRH have first four bytes (magic) hex
+4F-80-C6-FA, but others do not.
+Height files with geolocation 17 (bytes 8-9: 11-00) are mis-located.
 These include some US/BE/ES/GR and many Discovery maps.
 
 The following metadata items may be reported:
 "VRC ViewRanger MapID" - should this change to IMAGE_ID ?
-LICENSE_POLICY:  NONRECIPROCAL - please check
+LICENSE_POLICY:  NONRECIPROCAL
 GDALMD_AREA_OR_POINT: GDALMD_AOP_AREA  - please check
 
 AUTHOR_NAME and
