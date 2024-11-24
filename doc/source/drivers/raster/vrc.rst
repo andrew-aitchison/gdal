@@ -11,8 +11,8 @@ VRC -- ViewRanger Chart Image File Format
 .. built_in_by_default:: ??? Uses the same png and zlib libraries as the PNG driver.
  
 The VRC driver currently supports reading VRC files with magic
-(first four bytes) 7e 1f 2e 00 but not 36 63 ce 01.
-Files with geolocation 17 (bytes 6-7: x11 x00) are mis-located.
+(first four bytes) 7E-1F-2E-00 but not 36-63-CE-01.
+Files with geolocation 17 (bytes 6-7: 11-00) are mis-located.
 These include some US/BE/ES/GR and many Discovery maps.
 
 The following metadata items may be reported:
@@ -20,7 +20,7 @@ The following metadata items may be reported:
 String0 ... StringN - could this be moved to COMMENTS, or is the structure too useful ?
 TIFFTAG_COPYRIGHT
 TIFFTAG_IMAGEDESCRIPTION
-"VRC ViewRanger Device ID" - related to Digital Right Management (DRM), but not encyption
+"VRC ViewRanger Device ID" - related to Digital Right Management (DRM), but not encryption
 VRCchecksum
 GDAL_DMD_LONGNAME
 GDAL_DMD_HELPTOPIC
