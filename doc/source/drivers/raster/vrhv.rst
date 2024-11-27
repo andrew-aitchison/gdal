@@ -21,8 +21,7 @@ The following metadata items may be reported:
 LICENSE_POLICY:  NONRECIPROCAL
 GDALMD_AREA_OR_POINT: GDALMD_AOP_AREA  - please check
 
-AUTHOR_NAME and
-COMMENTS.
+# AUTHOR_NAME and COMMENTS.
 
 The extended area is used to determine if the fourth band is an alpha
 channel or not.
