@@ -1013,6 +1013,9 @@ constexpr static const char* const apszKnownConfigOptions[] =
    "USER", // from gdalwmscache.cpp, isis3dataset.cpp, ogrgmlasconf.cpp, wcsutils.cpp
    "USERNAME", // from gdalwmscache.cpp, isis3dataset.cpp, ogrgmlasconf.cpp, wcsutils.cpp
    "USERPROFILE", // from cpl_aws.cpp, cpl_azure.cpp, cpl_conv.cpp, cpl_google_cloud.cpp, cpl_path.cpp, gdalwmscache.cpp, ogrgmlasconf.cpp, wcsutils.cpp
+   "VRC_DUMP_PNG", // from VRC.cpp
+   "VRC_DUMP_TILE", // from VRC.cpp, VRCthirtysix.cpp
+   "VRC_MAX_SIZE", // from VRC.cpp
    "VRT_ALLOW_MEM_DRIVER", // from vrtrasterband.cpp
    "VRT_MIN_MAX_FROM_SOURCES", // from vrtsourcedrasterband.cpp
    "VRT_NUM_THREADS", // from vrtdataset.cpp
