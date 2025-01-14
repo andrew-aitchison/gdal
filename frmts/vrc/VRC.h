@@ -56,10 +56,10 @@
 #ifdef _WIN32
 #ifdef _WIN64
 #define PRI_SIZET PRIu64
-#define PRI_SIZETx PRIu64x
+#define PRI_SIZETx PRIx64
 #else
 #define PRI_SIZET PRIu32
-#define PRI_SIZETx PRIu32x
+#define PRI_SIZETx PRIx32
 #endif
 #else
 #define PRI_SIZET "zu"
