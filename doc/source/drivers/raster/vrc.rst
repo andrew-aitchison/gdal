@@ -17,7 +17,7 @@ These include some US/BE/ES/GR and many Discovery maps.
 
 The following metadata items may be reported:
 "VRC ViewRanger MapID" - should this change to IMAGE_ID ?
-String0 ... StringN - could this be moved to COMMENTS, or is the structure too useful ?
+String_0 ... String_N - could this be moved to COMMENTS, or is the structure too useful ?
 TIFFTAG_COPYRIGHT
 TIFFTAG_IMAGEDESCRIPTION
 "VRC ViewRanger Device ID" - related to Digital Right Management (DRM), but not encryption
