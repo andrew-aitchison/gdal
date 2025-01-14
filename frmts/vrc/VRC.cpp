@@ -1284,7 +1284,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLDebug("Viewranger",
                      "Could not set MapID Metadata - CPLsnprintf( , "
-                     "VRCpszMapIDlen, %d) returned %d - expected %zu",
+                     "VRCpszMapIDlen, %d) returned %d - expected %" PRI_SIZET,
                      poDS->nMapID, ret, VRCpszMapIDlen - 1);
         }
     }
