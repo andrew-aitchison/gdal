@@ -48,5 +48,5 @@ Overviews
 Links
 -----
 
-NOTE: Implemented as VRVH.cpp
+NOTE: Implemented as :source_file:`VRVH.cpp`.
 
