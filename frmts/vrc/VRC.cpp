@@ -876,7 +876,11 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
     {
         return GDAL_IDENTIFY_FALSE;
     }
+#if HAS_SAFE311
+    if (poOpenInfo->IsExtensionEqualToCI("VRC"))
+#else
     if (!EQUAL(CPLGetExtension(pszFileName), "VRC"))
+#endif
     {
         return GDAL_IDENTIFY_FALSE;
     }
@@ -1238,7 +1242,11 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
 
+#if HAS_SAFE311
+    poDS->sFileName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
+#else
     poDS->sFileName = CPLGetBasename(poOpenInfo->pszFilename);
+#endif
 
     /* -------------------------------------------------------------------- */
     /*      Read the header.                                                */
@@ -2613,7 +2621,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             static_cast<unsigned int>(strtol(szDumpPNG, nullptr, 10));
         const CPLString osBaseLabel = CPLString().Printf(
             "/tmp/werdna/vrc2tif/%s.%01d.%03d.%03d.%03u.%03u.%02d.x%012x",
-            // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work
+            // CPLGetBasenameSafe(poOpenInfo->pszFilename) doesn't quite work
             poVRCDS->sFileName.c_str(),
             // poVRCDS->sLongTitle.c_str(),
             nThisOverview, nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy,
@@ -3366,7 +3374,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
                                 "/tmp/werdna/vrc2tif/"
                                 "%s.%01d.%03d.%03d.%03u.%03u.%02da."
                                 "x%012x.rvtm_pngsize",
-                                // CPLGetBasename(poOpenInfo->pszFilename)
+                                // CPLGetBasenameSafe(poOpenInfo->pszFilename)
                                 // doesn't quite work
                                 poVRCDS->sFileName.c_str(),
                                 // poVRCDS->sLongTitle.c_str(),
