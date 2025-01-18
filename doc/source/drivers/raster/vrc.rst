@@ -56,7 +56,7 @@ Overviews
 Links
 -----
 
-NOTE: Implemented as :source_file:`VRC.cpp`.
+NOTE: Implemented as :source_file:`frmts/vrc/VRC.cpp`.
 
 PNG support is implemented based on the libpng reference library. More
 information is available at http://www.libpng.org/pub/png.
