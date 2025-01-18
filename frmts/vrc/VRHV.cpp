@@ -549,9 +549,12 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
         // http://lists.osgeo.org/pipermail/gdal-dev/2013-February/035530.html
         // suggests that file extension is a bad way to detect file format
         // but if the header is not present we don't have a choice
-
+#if HAS_SAFE311
+        if (poOpenInfo->IsExtensionEqualToCI("VRH"))
+#else
         if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "VRH") ||
             EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "vrh"))
+#endif
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "VRH identify given %d byte header - needs 0x60 (file %s)",
@@ -574,8 +577,12 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
         // so we require the correct extension even though
         // http://lists.osgeo.org/pipermail/gdal-dev/2013-February/035530.html
         // suggests that file extension is a bad way to detect file format.
+#if HAS_SAFE311
+        if (poOpenInfo->IsExtensionEqualToCI("VMC"))
+#else
         if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "VMC") &&
             !EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "vmc"))
+#endif
         {
             return FALSE;
         }
@@ -613,8 +620,12 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
         return FALSE;
     }
 
+#if HAS_SAFE311
+    if (poOpenInfo->IsExtensionEqualToCI("VRH"))
+#else
     if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "VRH") ||
         EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "vrh"))
+#endif
     {
         // *some* .VRH files have no magic.
         // http://lists.osgeo.org/pipermail/gdal-dev/2013-February/035530.html
@@ -706,8 +717,12 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poDS->nMagic != vrh_magic && poDS->nMagic != vmc_magic)
     {
+#if HAS_SAFE311
+        if (poOpenInfo->IsExtensionEqualToCI("VRH"))
+#else
         if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "VRH") ||
             EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "vrh"))
+#endif
         {
             // early .VRH files have no magic signature
             poDS->nMagic = vrh_magic;
