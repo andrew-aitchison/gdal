@@ -48,6 +48,10 @@
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
 // #define VRC36_PIXEL_IS_PIXEL 1
 
+#ifndef HAS_SAFE311
+#define HAS_SAFE311 (GDAL_VERSION_NUM >= 3110000)
+#endif
+
 #include <cinttypes>
 #include <cstdio>
 
