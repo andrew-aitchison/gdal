@@ -691,9 +691,7 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The VRH driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("VRHV");
         return nullptr;
     }
 
