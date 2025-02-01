@@ -1203,9 +1203,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The VRC driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("VRC");
         return nullptr;
     }
 
