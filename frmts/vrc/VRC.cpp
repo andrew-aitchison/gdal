@@ -1195,8 +1195,20 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 {
     CPLDebug("Viewranger", "VRCDataset::Open( %p )", poOpenInfo);
 
-    if (poOpenInfo == nullptr || !Identify(poOpenInfo))
+    if (poOpenInfo == nullptr)
         return nullptr;
+
+    {
+        int nIdentified = Identify(poOpenInfo);
+        if (GDAL_IDENTIFY_TRUE != nIdentified)
+        {
+            if (GDAL_IDENTIFY_UNKNOWN == nIdentified)
+                CPLDebug("Viewranger", "VRC driver could not identify %s",
+                         poOpenInfo->pszFilename);
+
+            return nullptr;
+        }
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Confirm the requested access is supported.                      */
@@ -1404,7 +1416,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poDS->nScale == 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "Cannot locate a VRC map with zero scale");
+                 "VRC file %s zero scale, so cannot geo-locate",
+                 poOpenInfo->pszFilename);
         delete poDS;
         return nullptr;
     }
