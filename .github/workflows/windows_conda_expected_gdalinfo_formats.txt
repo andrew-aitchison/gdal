@@ -1,5 +1,4 @@
 Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update, v:virtual-I/O s:subdatasets)
-  ViewrangerVRC -raster- (rov): ViewRanger (.VRC) (*.VRC)
   VRT -raster,multidimensional raster- (rw+uv): Virtual Raster (*.vrt)
   DERIVED -raster- (ro): Derived datasets using VRT pixel functions
   GTI -raster- (rov): GDAL Raster Tile Index (*.gti.gpkg, *.gti.fgb, *.gti)
@@ -133,8 +132,9 @@ Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update,
   STACIT -raster- (rovs): Spatio-Temporal Asset Catalog Items
   GDALG -raster,vector- (rov): GDAL Streamed Algorithm driver (*.gdalg.json)
   NSIDCbin -raster- (rov): NSIDC Sea Ice Concentrations binary (.bin) (*.bin)
-  GPKG -raster,vector- (rw+vs): GeoPackage (*.gpkg, *.gpkg.zip)
-  OpenFileGDB -raster,vector- (rw+v): ESRI FileGeodatabase (using OpenFileGDB) (*.gdb)
+  GPKG -raster,vector- (rw+uvs): GeoPackage (*.gpkg, *.gpkg.zip)
+  OpenFileGDB -raster,vector- (rw+uv): ESRI FileGeodatabase (using OpenFileGDB) (*.gdb)
+  ViewrangerVRC -raster- (rov): ViewRanger (.VRC) (*.VRC)
   CAD -raster,vector- (rovs): AutoCAD Driver (*.dwg)
   PLSCENES -raster,vector- (ro): Planet Labs Scenes API
   NGW -raster,vector- (rw+s): NextGIS Web
