@@ -135,7 +135,6 @@ Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update,
   NSIDCbin -raster- (rov): NSIDC Sea Ice Concentrations binary (.bin) (*.bin)
   GPKG -raster,vector- (rw+vs): GeoPackage (*.gpkg, *.gpkg.zip)
   OpenFileGDB -raster,vector- (rw+v): ESRI FileGeodatabase (using OpenFileGDB) (*.gdb)
-  ViewrangerVRC -raster- (rov): ViewRanger (.VRC) (*.VRC)
   CAD -raster,vector- (rovs): AutoCAD Driver (*.dwg)
   PLSCENES -raster,vector- (ro): Planet Labs Scenes API
   NGW -raster,vector- (rw+s): NextGIS Web
