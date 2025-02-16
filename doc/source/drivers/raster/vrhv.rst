@@ -48,5 +48,5 @@ Overviews
 Links
 -----
 
-NOTE: Implemented as :source_file:`frmts/vrc/VRVH.cpp`.
+NOTE: Implemented as :source_file:`frmts/vrc/VRHV.cpp`.
 
