@@ -178,6 +178,7 @@ Raster drivers
    usgsdem
    vicar
    vrc
+   vrhv
    vrt
    wcs
    webp
