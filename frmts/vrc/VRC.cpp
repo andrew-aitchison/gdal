@@ -301,8 +301,8 @@ char *VRCDataset::VRCGetString(VSILFILE *fp, size_t byteaddr)
 VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
                              int nThisOverviewIn, int nOverviewCountIn,
                              VRCRasterBand **papoOverviewBandsIn)
-    : eBandInterp(GCI_Undefined), nThisOverview(nThisOverviewIn),
-      nOverviewCount(nOverviewCountIn), papoOverviewBands(papoOverviewBandsIn)
+    : nThisOverview(nThisOverviewIn), nOverviewCount(nOverviewCountIn),
+      papoOverviewBands(papoOverviewBandsIn)
 {
     VRCDataset *poVRCDS = poDSIn;
     poDS = static_cast<GDALDataset *>(poVRCDS);
@@ -876,11 +876,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
     {
         return GDAL_IDENTIFY_FALSE;
     }
-#if HAS_SAFE311
-    if (poOpenInfo->IsExtensionEqualToCI("VRC"))
-#else
-    if (!EQUAL(CPLGetExtension(pszFileName), "VRC"))
-#endif
+    if (!poOpenInfo->IsExtensionEqualToCI("VRC"))
     {
         return GDAL_IDENTIFY_FALSE;
     }
@@ -1199,13 +1195,14 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         return nullptr;
 
     {
-        int nIdentified = Identify(poOpenInfo);
+        const int nIdentified = Identify(poOpenInfo);
         if (GDAL_IDENTIFY_TRUE != nIdentified)
         {
             if (GDAL_IDENTIFY_UNKNOWN == nIdentified)
+            {
                 CPLDebug("Viewranger", "VRC driver could not identify %s",
                          poOpenInfo->pszFilename);
-
+            }
             return nullptr;
         }
     }
@@ -1252,11 +1249,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
 
-#if HAS_SAFE311
     poDS->sFileName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
-#else
-    poDS->sFileName = CPLGetBasename(poOpenInfo->pszFilename);
-#endif
 
     /* -------------------------------------------------------------------- */
     /*      Read the header.                                                */
