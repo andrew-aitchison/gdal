@@ -48,10 +48,6 @@
 // VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
 // #define VRC36_PIXEL_IS_PIXEL 1
 
-#ifndef HAS_SAFE311
-#define HAS_SAFE311 (GDAL_VERSION_NUM >= 3110000)
-#endif
-
 #include <cinttypes>
 #include <cstdio>
 
@@ -165,8 +161,8 @@ class VRCDataset : public GDALDataset
     ~VRCDataset() override;
 #endif
 
-    static GDALDataset *Open(GDALOpenInfo *);
-    static int Identify(GDALOpenInfo *);
+    static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
+    static int Identify(GDALOpenInfo *poOpenInfo);
 
     // Gdal <3 uses proj.4, Gdal>=3 uses proj.6, see eg:
     // https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn
@@ -194,9 +190,8 @@ class VRCRasterBand : public GDALRasterBand
 {
     friend class VRCDataset;
 
-    GDALColorInterp eBandInterp;
+    GDALColorInterp eBandInterp{GCI_Undefined};
     int nThisOverview;  // -1 for base ?
-    unsigned int nResFactor;
     int nOverviewCount;
     VRCRasterBand **papoOverviewBands;
 
