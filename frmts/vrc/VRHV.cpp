@@ -1066,7 +1066,7 @@ void VRHRasterBand::read_VRH_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
     // pnBottomPixel +=
     //    static_cast<VRHVDataset *>(poDS)->nRasterYSize * tile_xx;
 
-    signed short *pnOutPixel =
+    auto *pnOutPixel =
         pnBottomPixel + static_cast<VRHVDataset *>(poDS)->nRasterYSize - 1;
 
     signed int max = -1 * 0x10000;
@@ -1251,12 +1251,11 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
 
 char **VRHVDataset::GetFileList()
 {
-    char **papszFileList = GDALDataset::GetFileList();
 
     CPLDebug("ViewrangerHV", "GetDescription %s", GetDescription());
 
     // GDALReadWorldFile2 (gdal_misc.cpp) has code we need to copy
-    return papszFileList;
+    return GDALDataset::GetFileList();
 }
 
 // #endif
