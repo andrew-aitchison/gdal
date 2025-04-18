@@ -2891,7 +2891,7 @@ GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
         return nullptr;
     }
 
-    VRCRasterBand *pThisOverview = poFullBand->papoOverviewBands[iOverviewIn];
+    auto *const pThisOverview = poFullBand->papoOverviewBands[iOverviewIn];
     CPLDebug("Viewranger",
              "GetOverview(%d) nBand %d - returns %d x %d overview %p "
              "(overview count is %d)",
