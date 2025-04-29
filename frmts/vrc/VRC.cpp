@@ -2163,6 +2163,11 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         return nullptr;
     }
 
+    CPLDebug("Viewranger PNG",
+             "read_PNG(%p .. %u %llu %u, (%d %d) [%u %u]) called", fp,
+             nVRCHeader, nPalette, nVRCDataLen, nGDtile_xx, nGDtile_yy,
+             nVRtile_xx, nVRtile_yy);
+
     png_voidp user_error_ptr = nullptr;
     // Initialize PNG structures
     png_structp png_ptr =
@@ -3258,10 +3263,15 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
              nThisOverview, nPNGXcount, nPNGYcount, pngXsize, pngYsize,
              nShrinkFactor);
 
+#define DEBUG_SUB_TILES defined(NOISY)
     // Read in this tile's index to png sub-tiles.
     std::vector<unsigned int> anPngIndex;
     anPngIndex.reserve((static_cast<size_t>(nPNGXcount) * nPNGYcount) + 1);
-    for (unsigned long loop = 0;
+    for (unsigned long
+#if DEBUG_SUB_TILES
+             prev = 0,
+#endif
+             loop = 0;
          loop <= static_cast<unsigned long>(nPNGXcount) * nPNGYcount;
          // <= because there is an extra entry
          //    pointing just passed the last png sub-tile.
@@ -3278,7 +3288,27 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
                      anPngIndex.back());
             anPngIndex.back() = 0;
         }
+#if DEBUG_SUB_TILES
+        if (loop > 0 && anPngIndex.back() < prev)
+        {
+            CPLDebug("Viewranger",
+                     "Band %d ovrvw %d block [%d,%d] png image %lu at x%x "
+                     "is before previous entry",
+                     nBand, nThisOverview, block_xx, block_yy, loop,
+                     anPngIndex.back());
+        }
+        prev = loop;
+#endif
     }
+
+#if DEBUG_SUB_TILES
+    for (auto pPngIndex : anPngIndex)
+    {
+        (void)pPngIndex;
+        CPLDebug("Viewranger", "dbst\tx%x", pPngIndex);
+    }
+#endif
+#undef DEBUG_SUB_TILES
 
     // unsigned int nPNGplteIndex = nTileIndex + 0x20 + 0x10 +8
     //    + 4*(nPNGXcount*nPNGYcount+1);
@@ -3340,7 +3370,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
                 continue;
             }
             if (nDataLen < 1)
-            {  // There should be a better/higher limit.
+            {  // There should be a better/higher minimum.
                 CPLDebug("Viewranger PNG",
                          "block (%d,%d) tile (%u,%u) PNG data "
                          "overflows - length %d",
