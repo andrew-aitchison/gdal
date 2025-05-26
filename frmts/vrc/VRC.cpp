@@ -3263,12 +3263,12 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
              nThisOverview, nPNGXcount, nPNGYcount, pngXsize, pngYsize,
              nShrinkFactor);
 
-#define DEBUG_SUB_TILES defined(NOISY)
+#define DEBUG_SUB_TILES 1  // defined(NOISY)
     // Read in this tile's index to png sub-tiles.
     std::vector<unsigned int> anPngIndex;
     anPngIndex.reserve((static_cast<size_t>(nPNGXcount) * nPNGYcount) + 1);
     for (unsigned long
-#if DEBUG_SUB_TILES
+#if DEBUG_SUB_TILES == 1
              prev = 0,
 #endif
              loop = 0;
@@ -3288,7 +3288,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
                      anPngIndex.back());
             anPngIndex.back() = 0;
         }
-#if DEBUG_SUB_TILES
+#if DEBUG_SUB_TILES == 1
         if (loop > 0 && anPngIndex.back() < prev)
         {
             CPLDebug("Viewranger",
@@ -3301,7 +3301,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
 #endif
     }
 
-#if DEBUG_SUB_TILES
+#if DEBUG_SUB_TILES == 1
     for (auto pPngIndex : anPngIndex)
     {
         (void)pPngIndex;
