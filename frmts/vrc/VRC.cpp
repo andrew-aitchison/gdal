@@ -824,8 +824,8 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
         // but without the 10million metre false_northing
         dLeft = 1.0 * nLeft;
         dRight = 1.0 * nRight;
-        dTop = 1.0 * nTop + tenMillion;
-        dBottom = 1.0 * nBottom + tenMillion;
+        dTop = nTop + tenMillion;
+        dBottom = nBottom + tenMillion;
 
         CPLDebug("Viewranger", "shifting by 10 million: TL: %g %g BR: %g %g",
                  dTop, dLeft, dBottom, dRight);
@@ -835,11 +835,11 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
     // Ygeo = padfTransform[3] + pixel*padfTransform[4] + line*padfTransform[5];
 
     padfTransform[0] = dLeft;
-    padfTransform[1] = 1.0 * dRight - dLeft;
+    padfTransform[1] = dRight - dLeft;
     padfTransform[2] = 0.0;
     padfTransform[3] = dTop;
     padfTransform[4] = 0.0;
-    padfTransform[5] = 1.0 * dBottom - dTop;
+    padfTransform[5] = dBottom - dTop;
 
     {
         padfTransform[1] /= (GetRasterXSize());
@@ -3725,7 +3725,7 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
         const int i1 = 3 * nPNGwidth * 2 * (nBottomRow - 1 - nCopyStartRow);
         // const int i2=i1+3*nPNGwidth;
         const int jjj = (nBand - 1) + ((nCopyStopCol - 1 - nCopyStartCol) * 6);
-        if (i1 + jjj > 3 * nPNGwidth * nPNGheight - 16)
+        if (i1 + jjj + 16 > 3 * nPNGwidth * nPNGheight)
         {
             CPLDebug("Viewranger PNG", "Band %d: i1 %d = 3 * %d * 2 * %d",
                      nBand, i1, nPNGwidth, nBottomRow - 1 - nCopyStartRow);
