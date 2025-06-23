@@ -208,7 +208,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
             return;
         }
 
-        if (anTileOverviewIndex[nThisOverview + 1] >= poGDS->oStatBufL.st_size)
+        if (anTileOverviewIndex[nThisOverview + 1] >= poGDS->st_size)
         {
             CPLDebug("Viewranger",
                      "\toverview level %d data beyond end of file at x%08x",
@@ -394,7 +394,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
          loop++)
     {
         vnSubtileIndex.push_back(VRReadUInt(fp));
-        if (vnSubtileIndex[loop] >= poGDS->oStatBufL.st_size)
+        if (vnSubtileIndex[loop] >= poGDS->st_size)
         {
             vnSubtileIndex.data()[loop] = 0;
         }
@@ -412,8 +412,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
 
             unsigned long nStart = vnSubtileIndex[loop];
             unsigned long nFinish = vnSubtileIndex[loop + 1];
-            unsigned long nFileSize =
-                static_cast<unsigned int>(poGDS->oStatBufL.st_size);
+            unsigned long nFileSize = static_cast<unsigned int>(poGDS->st_size);
             CPLString osBaseLabel = CPLString().Printf(
                 "/tmp/werdna/vrc2tif/%s.%03d.%03d.%08lu.%02u",
                 // CPLGetBasename(poOpenInfo->pszFilename) doesn't quite work

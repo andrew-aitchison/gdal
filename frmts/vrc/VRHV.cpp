@@ -82,11 +82,14 @@ class VRHVDataset : public GDALDataset
     char *pszLongTitle = nullptr;
     char *pszCopyright = nullptr;
 
-    std::string sDatum;
+    std::string sDatum = CPLStrdup("");
     short nCountry = -1;
 
+  private:
+    // CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
+    VRHVDataset &operator=(const VRHVDataset &) = delete;
+
   public:
-    VRHVDataset() = default;
 #ifdef EXPLICIT_DELETE
     ~VRHVDataset() override;
 #endif
@@ -191,9 +194,9 @@ class VRHRasterBand : public GDALRasterBand
 {
     friend class VRHVDataset;
 
-    int nRecordSize;
+    int nRecordSize = 0;
 
-    GDALColorInterp eBandInterp;
+    GDALColorInterp eBandInterp = GCI_GrayIndex;
     // signed short *pVRHVData=nullptr;
 
     void read_VRH_Tile(VSILFILE *fp, int tile_xx, int tile_yy, void *pimage);
