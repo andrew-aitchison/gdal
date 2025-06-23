@@ -158,7 +158,6 @@ class VRCDataset : public GDALDataset
 
   private:
     CPL_DISALLOW_COPY_ASSIGN(VRCDataset)
-    // VRCDataset &operator=(const VRCDataset &) = delete;
 
   public:
     VRCDataset() = default;  // This does not initialize abyHeader
@@ -230,7 +229,6 @@ class VRCRasterBand : public GDALRasterBand
 
   private:
     CPL_DISALLOW_COPY_ASSIGN(VRCRasterBand)
-    // VRCRasterBand &operator=(const VRCRasterBand &) = delete;
 
   public:
     VRCRasterBand(VRCDataset *poDSIn, int nBandIn, int nThisOverviewIn,
