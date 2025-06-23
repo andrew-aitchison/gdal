@@ -142,9 +142,9 @@ class VRCDataset : public GDALDataset
     int16_t nCountry = -1;
     OGRSpatialReference *poSRS = nullptr;
 
-    std::string sFileName;
-    std::string sLongTitle;
-    std::string sCopyright;
+    std::string sFileName = "";
+    std::string sLongTitle = "";
+    std::string sCopyright = "";
 
     unsigned int tileSizeMax = 0, tileSizeMin = INT_MAX;
     unsigned int tileXcount = 0, tileYcount = 0;
@@ -153,7 +153,12 @@ class VRCDataset : public GDALDataset
     unsigned int *VRCBuildTileIndex(unsigned int nTileIndexAddr,
                                     unsigned int nTileIndexStart);
 
-    VSIStatBufL oStatBufL;
+    //VSIStatBufL oStatBufL;
+    off_t st_size = 0;
+
+  private:
+    CPL_DISALLOW_COPY_ASSIGN(VRCDataset)
+    // VRCDataset &operator=(const VRCDataset &) = delete;
 
   public:
     VRCDataset() = default;  // This does not initialize abyHeader
@@ -222,6 +227,10 @@ class VRCRasterBand : public GDALRasterBand
     int verifySubTileMem(GByte abyRawStartData[], unsigned long start,
                          unsigned long finish, int nGDtile_xx, int nGDtile_yy,
                          unsigned int nVRtile_xx, unsigned int nVRtile_yy);
+
+  private:
+    CPL_DISALLOW_COPY_ASSIGN(VRCRasterBand)
+    // VRCRasterBand &operator=(const VRCRasterBand &) = delete;
 
   public:
     VRCRasterBand(VRCDataset *poDSIn, int nBandIn, int nThisOverviewIn,
