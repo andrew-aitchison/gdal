@@ -178,7 +178,7 @@ class VRCDataset : public GDALDataset
 
     // const char *_GetProjectionRef
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &geoTransform) const override;
 
     static char *VRCGetString(VSILFILE *fp, size_t byteaddr);
 };

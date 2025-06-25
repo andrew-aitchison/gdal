@@ -105,7 +105,7 @@ class VRHVDataset : public GDALDataset
         return poSRS;
     }
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &geoTransform) const override;
 
     char **GetFileList() override;
 
@@ -453,7 +453,7 @@ VRHVDataset::~VRHVDataset()
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-CPLErr VRHVDataset::GetGeoTransform(double *padfTransform)
+CPLErr VRHVDataset::GetGeoTransform(GDALGeoTransform &geoTransform) const
 
 {
     const double tenMillion = 10.0 * 1000 * 1000;
@@ -493,28 +493,28 @@ CPLErr VRHVDataset::GetGeoTransform(double *padfTransform)
                  dTop, dLeft, dBottom, dRight);
     }
 
-    // Xgeo = padfTransform[0] + pixel*padfTransform[1] + line*padfTransform[2];
-    // Ygeo = padfTransform[3] + pixel*padfTransform[4] + line*padfTransform[5];
+    // Xgeo = geoTransform[0] + pixel*geoTransform[1] + line*geoTransform[2];
+    // Ygeo = geoTransform[3] + pixel*geoTransform[4] + line*geoTransform[5];
     if (nMagic == vrh_magic || nMagic == vrv_magic || nMagic == vmc_magic)
     {
-        padfTransform[0] = dLeft;
-        padfTransform[1] = (1.0 * dRight - dLeft) / (GetRasterXSize());
-        padfTransform[2] = 0.0;
-        padfTransform[3] = dTop;
-        padfTransform[4] = 0.0;
-        padfTransform[5] = (1.0 * dBottom - dTop) / (GetRasterYSize());
+        geoTransform[0] = dLeft;
+        geoTransform[1] = (1.0 * dRight - dLeft) / (GetRasterXSize());
+        geoTransform[2] = 0.0;
+        geoTransform[3] = dTop;
+        geoTransform[4] = 0.0;
+        geoTransform[5] = (1.0 * dBottom - dTop) / (GetRasterYSize());
     }
     else
     {
         CPLError(CE_Failure, CPLE_AppDefined, "unknown magic %u", nMagic);
     }
 
-    CPLDebug("ViewrangerHV", "padfTransform raster %d x %d", GetRasterXSize(),
+    CPLDebug("ViewrangerHV", "geoTransform raster %d x %d", GetRasterXSize(),
              GetRasterYSize());
-    CPLDebug("ViewrangerHV", "padfTransform %g %g %g", padfTransform[0],
-             padfTransform[1], padfTransform[2]);
-    CPLDebug("ViewrangerHV", "padfTransform %g %g %g", padfTransform[3],
-             padfTransform[4], padfTransform[5]);
+    CPLDebug("ViewrangerHV", "geoTransform %g %g %g", geoTransform[0],
+             geoTransform[1], geoTransform[2]);
+    CPLDebug("ViewrangerHV", "geoTransform %g %g %g", geoTransform[3],
+             geoTransform[4], geoTransform[5]);
     return CE_None;
 }
 
