@@ -787,7 +787,7 @@ VRCDataset::~VRCDataset()
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
+CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &geoTransform) const
 {
     const double tenMillion = 10.0 * 1000 * 1000;
 
@@ -831,19 +831,19 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
                  dTop, dLeft, dBottom, dRight);
     }
 
-    // Xgeo = padfTransform[0] + pixel*padfTransform[1] + line*padfTransform[2];
-    // Ygeo = padfTransform[3] + pixel*padfTransform[4] + line*padfTransform[5];
+    // Xgeo = geoTransform[0] + pixel*geoTransform[1] + line*geoTransform[2];
+    // Ygeo = geoTransform[3] + pixel*geoTransform[4] + line*geoTransform[5];
 
-    padfTransform[0] = dLeft;
-    padfTransform[1] = dRight - dLeft;
-    padfTransform[2] = 0.0;
-    padfTransform[3] = dTop;
-    padfTransform[4] = 0.0;
-    padfTransform[5] = dBottom - dTop;
+    geoTransform[0] = dLeft;
+    geoTransform[1] = dRight - dLeft;
+    geoTransform[2] = 0.0;
+    geoTransform[3] = dTop;
+    geoTransform[4] = 0.0;
+    geoTransform[5] = dBottom - dTop;
 
     {
-        padfTransform[1] /= (GetRasterXSize());
-        padfTransform[5] /= (GetRasterYSize());
+        geoTransform[1] /= (GetRasterXSize());
+        geoTransform[5] /= (GetRasterYSize());
     }
 
     if (nMagic != vrc_magic && nMagic != vrc_magic36)
@@ -851,12 +851,12 @@ CPLErr VRCDataset::GetGeoTransform(double *padfTransform)
         CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
     }
 
-    CPLDebug("Viewranger", "padfTransform raster %d x %d", GetRasterXSize(),
+    CPLDebug("Viewranger", "geoTransform raster %d x %d", GetRasterXSize(),
              GetRasterYSize());
-    CPLDebug("Viewranger", "padfTransform %g %g %g", padfTransform[0],
-             padfTransform[1], padfTransform[2]);
-    CPLDebug("Viewranger", "padfTransform %g %g %g", padfTransform[3],
-             padfTransform[4], padfTransform[5]);
+    CPLDebug("Viewranger", "geoTransform %g %g %g", geoTransform[0],
+             geoTransform[1], geoTransform[2]);
+    CPLDebug("Viewranger", "geoTransform %g %g %g", geoTransform[3],
+             geoTransform[4], geoTransform[5]);
     return CE_None;
 }
 
