@@ -1545,6 +1545,12 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                          poOpenInfo->pszFilename);
                 return nullptr;
             }
+            if (oStatBufL.st_size < 1)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "no data found in file %s\n", poOpenInfo->pszFilename);
+                return nullptr;
+            }
             poDS->st_size = oStatBufL.st_size;
         }
 
