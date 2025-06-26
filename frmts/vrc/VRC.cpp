@@ -937,7 +937,15 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     // the next bit may be too big for that,
     // so we need to start reading directly from the file.
 
-    // int nTileStart = -1;
+    if (st_size < 1)
+    {
+
+        CPLDebug("Viewranger",
+                 "VRCGetTileIndex(): file to small %d to have a tile index\n",
+                 st_size);
+        return nullptr;
+    }
+
     if (VSIFSeekL(fp, static_cast<size_t>(nTileIndexStart), SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRC tile index");
