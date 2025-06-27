@@ -28,7 +28,6 @@
 // Everything declared here is also declared in VRC.h
 // #ifndef VRC_H_INCLUDED
 
-#pragma once
 #ifndef VRC_UTILS_H_INCLUDED
 #define VRC_UTILS_H_INCLUDED
 

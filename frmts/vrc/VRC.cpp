@@ -939,9 +939,8 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
 
     if (st_size < 1)
     {
-
         CPLDebug("Viewranger",
-                 "VRCGetTileIndex(): file to small %d to have a tile index\n",
+                 "VRCGetTileIndex(): file too small %ld to have a tile index\n",
                  st_size);
         return nullptr;
     }
@@ -1876,10 +1875,10 @@ void dumpPPM(unsigned int width, unsigned int height,
     // is static the best way to count the PPMs ?
     static unsigned int nPPMcount = 0;
 
-    CPLDebug("Viewranger PPM",
-             "dumpPPM(%u %u %p %u %s %s-interleaved) count %u", width, height,
-             data, rowlength, osBaseLabel.c_str(),
-             (eInterleave == pixel) ? "pixel" : "band", nPPMcount);
+    CPLDebug(
+        "Viewranger PPM", "dumpPPM(%u %u %p %u %s %s-interleaved) count %u",
+        width, height, data, rowlength, osBaseLabel.c_str(),
+        (eInterleave == VRCinterleave::pixel) ? "pixel" : "band", nPPMcount);
     if (osBaseLabel == nullptr)
     {
         CPLDebug("Viewranger PPM", "dumpPPM: null osBaseLabel\n");
@@ -1897,9 +1896,9 @@ void dumpPPM(unsigned int width, unsigned int height,
                  osBaseLabel.c_str(), rowlength);
     }
 
-    const CPLString osPPMname =
-        CPLString().Printf("%s.%05u.%s", osBaseLabel.c_str(), nPPMcount,
-                           (eInterleave == pixel) ? "ppm" : "pgm");
+    const CPLString osPPMname = CPLString().Printf(
+        "%s.%05u.%s", osBaseLabel.c_str(), nPPMcount,
+        (eInterleave == VRCinterleave::pixel) ? "ppm" : "pgm");
     if (osPPMname == nullptr)
     {
         CPLDebug("Viewranger PPM", "osPPMname truncated %s %u",
@@ -1933,12 +1932,12 @@ void dumpPPM(unsigned int width, unsigned int height,
     size_t nHeaderSize = 0;
     switch (eInterleave)
     {
-        case pixel:
+        case VRCinterleave::pixel:
             nHeaderSize = static_cast<size_t>(
                 CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P6\n%u %u\n255\n",
                             width, height));
             break;
-        case band:
+        case VRCinterleave::band:
             nHeaderSize = static_cast<size_t>(
                 CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P5\n%u %u\n255\n",
                             width, height));
@@ -1963,7 +1962,7 @@ void dumpPPM(unsigned int width, unsigned int height,
         const unsigned char *pRow = data;
         for (unsigned int r = 0; r < height; r++)
         {
-            if (eInterleave == pixel)
+            if (eInterleave == VRCinterleave::pixel)
             {
                 if (width != VSIFWriteL(pRow, 3, width, fpPPM))
                 {
@@ -3433,7 +3432,8 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
                                 nThisOverview, block_xx, block_yy, loopX, loopY,
                                 nBand, nHeader);
                             dumpPPM(nPNGwidth, nPNGheight, pbyPNGbuffer,
-                                    nPNGwidth, osBaseLabel, pixel, nEnvTile);
+                                    nPNGwidth, osBaseLabel,
+                                    VRCinterleave::pixel, nEnvTile);
                         }
 
                         if (nPrevPNGwidth == 0)

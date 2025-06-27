@@ -564,8 +564,8 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         dumpPPM(static_cast<unsigned int>(nBlockXSize),
                 static_cast<unsigned int>(nBlockYSize),
                 static_cast<unsigned char *>(pImage),
-                static_cast<unsigned int>(nBlockXSize), osBaseLabel, band,
-                static_cast<unsigned int>(nDumpCount));
+                static_cast<unsigned int>(nBlockXSize), osBaseLabel,
+                VRCinterleave::band, static_cast<unsigned int>(nDumpCount));
     }
 }
 

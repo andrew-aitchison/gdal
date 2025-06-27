@@ -86,10 +86,11 @@ class VRHVDataset : public GDALDataset
     short nCountry = -1;
 
   private:
-    // CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
-    VRHVDataset &operator=(const VRHVDataset &) = delete;
+    CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
+    // VRHVDataset &operator=(const VRHVDataset &) = delete;
 
   public:
+    VRHVDataset() = default;  // This does not initialize abyHeader ?
 #ifdef EXPLICIT_DELETE
     ~VRHVDataset() override;
 #endif
@@ -485,10 +486,10 @@ CPLErr VRHVDataset::GetGeoTransform(GDALGeoTransform &geoTransform) const
     else if (nCountry == 155)
     {
         // New South Wales srs is not quite GDA94/MGA55 EPSG:28355
-        dLeft = 1.0 * nLeft;
-        dRight = 1.0 * nRight;
-        dTop = 1.0 * nTop + tenMillion;
-        dBottom = 1.0 * nBottom + tenMillion;
+        dLeft = nLeft;
+        dRight = nRight;
+        dTop = nTop + tenMillion;
+        dBottom = nBottom + tenMillion;
         CPLDebug("ViewrangerHV", "shifting by 10 million: TL: %g %g BR: %g %g",
                  dTop, dLeft, dBottom, dRight);
     }
@@ -887,12 +888,10 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
                 CPLDebug("ViewrangerHV", "Unexpected VMC file version %d",
                          poDS->nVRHVersion);
             }
-            poDS->nTop =
-                poDS->nBottom +
-                poDS->nRasterYSize * static_cast<int>(poDS->nPixelMetres);
-            poDS->nRight =
-                poDS->nLeft +
-                poDS->nRasterXSize * static_cast<int>(poDS->nPixelMetres);
+            poDS->nTop = poDS->nBottom + (poDS->nRasterYSize *
+                                          static_cast<int>(poDS->nPixelMetres));
+            poDS->nRight = poDS->nLeft + (poDS->nRasterXSize *
+                                          static_cast<int>(poDS->nPixelMetres));
             CPLDebug("ViewrangerHV", "VMC Top %d = %d + %u * %d", poDS->nTop,
                      poDS->nBottom, poDS->nPixelMetres, poDS->nRasterYSize);
             CPLDebug("ViewrangerHV", "VMC Right %d = %d + %u * %d",

@@ -2,8 +2,6 @@
  *
  */
 
-#pragma once
-
 #ifndef PNG_CRC_H_INCLUDED
 #define PNG_CRC_H_INCLUDED
 

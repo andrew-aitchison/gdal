@@ -26,8 +26,6 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-#pragma once
-
 #ifndef VRC_H_INCLUDED
 #define VRC_H_INCLUDED
 
@@ -100,7 +98,7 @@ extern unsigned int VRReadUInt(VSILFILE *fp);
 extern unsigned int VRReadUInt(VSILFILE *fp, unsigned int byteOffset);
 void VRC_file_strerror_r(int nFileErr, char *buf, size_t buflen);
 
-enum VRCinterleave : uint8_t
+enum class VRCinterleave : uint8_t
 {
     band,
     pixel
@@ -160,7 +158,7 @@ class VRCDataset : public GDALDataset
     CPL_DISALLOW_COPY_ASSIGN(VRCDataset)
 
   public:
-    VRCDataset() = default;  // This does not initialize abyHeader
+    VRCDataset() = default;  // This does not initialize abyHeader ?
 #ifdef EXPLICIT_DELETE
     ~VRCDataset() override;
 #endif
