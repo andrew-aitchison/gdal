@@ -1444,19 +1444,12 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     {  // Block to calculate size of raster
         const double dfRasterXSize =
             ((10000.0) * (poDS->nRight - poDS->nLeft)) / poDS->nScale;
-        poDS->nRasterXSize = static_cast<int>(dfRasterXSize);
         const double dfRasterYSize =
             ((10000.0) * (poDS->nTop - poDS->nBottom)) / poDS->nScale;
-        poDS->nRasterYSize = static_cast<int>(dfRasterYSize);
 
         // cast to double to avoid overflow and loss of precision
         // eg  (10000*503316480)/327680000 = 15360
         //             but                 = 11 with 32bit ints.
-        //
-        // ... but could still overflow when casting from df... to n... FixMe
-
-        CPLDebug("Viewranger", "%d=%f x %d=%f pixels", poDS->nRasterXSize,
-                 dfRasterXSize, poDS->nRasterYSize, dfRasterYSize);
 
         if (dfRasterXSize >= INT_MAX || dfRasterYSize >= INT_MAX)
         {
@@ -1467,6 +1460,11 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
+        poDS->nRasterXSize = static_cast<int>(dfRasterXSize);
+        poDS->nRasterYSize = static_cast<int>(dfRasterYSize);
+        CPLDebug("Viewranger", "%d=%f x %d=%f pixels", poDS->nRasterXSize,
+                 dfRasterXSize, poDS->nRasterYSize, dfRasterYSize);
+
         if (poDS->nRasterXSize <= 0 || poDS->nRasterYSize <= 0)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
@@ -1545,6 +1543,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         // Used in VRCGetTileIndex to recognize noData values
         // and several other places.
         {
+            poDS->st_size = 0;
             VSIStatBufL oStatBufL;
             if (VSIStatL(poOpenInfo->pszFilename, &oStatBufL))
             {
