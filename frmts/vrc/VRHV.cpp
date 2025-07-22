@@ -969,7 +969,10 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create copyright information.                                   */
     /* -------------------------------------------------------------------- */
-    poDS->SetMetadataItem("TIFFTAG_COPYRIGHT", poDS->pszCopyright, "");
+    if (poDS->pszCopyright != nullptr && poDS->pszCopyright[0] != 0)
+    {
+        poDS->SetMetadataItem("TIFFTAG_COPYRIGHT", poDS->pszCopyright, "");
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
