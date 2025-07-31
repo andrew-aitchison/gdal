@@ -189,6 +189,7 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
             switch (nMapID)
             {
                 case 0:
+                    // North America - onshore and offshore
                     VRC_EPSG(4269);
                     VRC_SWAP_AXES;
                     break;
@@ -259,9 +260,9 @@ extern const char *CharsetFromCountry(int16_t nCountry)
             return "LATIN9";
         case 2:  // Ireland
             return "LATIN9";
-        case 5:  // Finland
-            return "LATIN9";
-        case 8:  // Belgium. Some Belgium .VRH files are case 17:
+        case 5:               // Finland
+            return "LATIN6";  // iso8859-10
+        case 8:               // Belgium. Some Belgium .VRH files are case 17:
             return "LATIN9";
         case 9:  // Switzerland
             return "LATIN9";
