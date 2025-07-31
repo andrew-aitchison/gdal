@@ -65,7 +65,7 @@
 #endif
 
 static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //
-static const unsigned int vrc_magic36 = 0x01ce6336;  // 0x3663ce01; //
+static const unsigned int vrc_magic36 = 0x01ce6336;  // decimal 30303030  //
 
 // static const unsigned int nVRCNoData = 0xffffffff;
 // static const unsigned int nVRCNoData = 255;
@@ -118,8 +118,8 @@ extern const char *CharsetFromCountry(int16_t nCountry);
 /* ==================================================================== */
 /************************************************************************/
 
-// class VRCDataset : public GDALPamDataset
-class VRCDataset : public GDALDataset
+class VRCDataset final : public GDALPamDataset
+// class VRCDataset : public GDALDataset
 {
     friend class VRCRasterBand;
 
@@ -154,17 +154,31 @@ class VRCDataset : public GDALDataset
     //VSIStatBufL oStatBufL;
     off_t st_size = 0;
 
+    bool bGeoTransformValid = FALSE;
+    bool bHasTriedLoadWorldFile = FALSE;
+    GDALGeoTransform m_gt{0.0, 1.0, 0.0, -1.0, 0.0, 0.0};
+    void LoadWorldFile();
+    CPLString osWldFilename = "";
+
   private:
     CPL_DISALLOW_COPY_ASSIGN(VRCDataset)
 
   public:
-    VRCDataset() = default;  // This does not initialize abyHeader ?
+    VRCDataset() = default;
 #ifdef EXPLICIT_DELETE
     ~VRCDataset() override;
 #endif
 
-    static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
+    static VRCDataset *Open(GDALOpenInfo *poOpenInfo);
+
+    static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo)
+    {
+        return Open(poOpenInfo);
+    }
+
     static int Identify(GDALOpenInfo *poOpenInfo);
+
+    char **GetFileList() override;
 
     // Gdal <3 uses proj.4, Gdal>=3 uses proj.6, see eg:
     // https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn
@@ -176,7 +190,7 @@ class VRCDataset : public GDALDataset
 
     // const char *_GetProjectionRef
 
-    CPLErr GetGeoTransform(GDALGeoTransform &geoTransform) const override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     static char *VRCGetString(VSILFILE *fp, size_t byteaddr);
 };
@@ -187,8 +201,8 @@ class VRCDataset : public GDALDataset
 /* ==================================================================== */
 /************************************************************************/
 
-// class VRCRasterBand : public GDALPamRasterBand
-class VRCRasterBand : public GDALRasterBand
+class VRCRasterBand final : public GDALPamRasterBand
+// class VRCRasterBand : public GDALRasterBand
 {
     friend class VRCDataset;
 
@@ -245,7 +259,7 @@ class VRCRasterBand : public GDALRasterBand
     CPLErr SetNoDataValue(double dfNoDataValue) final;
 
     int GetOverviewCount() override;
-    GDALRasterBand *GetOverview(int iOverviewIn) override;
+    GDALPamRasterBand *GetOverview(int iOverviewIn) override;
     CPLErr IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage) override;
 
     int IGetDataCoverageStatus(int nXOff, int nYOff, int nXSize, int nYSize,

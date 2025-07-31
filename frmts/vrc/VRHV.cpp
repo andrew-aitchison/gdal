@@ -63,7 +63,7 @@ static const unsigned int nVRVNoData = 255;
 
 class VRHRasterBand;
 
-class VRHVDataset : public GDALDataset
+class VRHVDataset : public GDALPamDataset
 {
     friend class VRHRasterBand;
 
@@ -85,6 +85,12 @@ class VRHVDataset : public GDALDataset
     std::string sDatum = CPLStrdup("");
     short nCountry = -1;
 
+    bool bGeoTransformValid = FALSE;
+    bool bHasTriedLoadWorldFile = FALSE;
+    GDALGeoTransform m_gt{0.0, 1.0, 0.0, -1.0, 0.0, 0.0};
+    void LoadWorldFile();
+    CPLString osWldFilename{};
+
   private:
     CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
     // VRHVDataset &operator=(const VRHVDataset &) = delete;
@@ -95,7 +101,13 @@ class VRHVDataset : public GDALDataset
     ~VRHVDataset() override;
 #endif
 
-    static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
+    static GDALPamDataset *Open(GDALOpenInfo *poOpenInfo);
+
+    static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo)
+    {
+        return Open(poOpenInfo);
+    }
+
     static int Identify(GDALOpenInfo *poOpenInfo);
 
     // Gdal <3 uses proj.4, Gdal>=3 uses proj.6, see eg:
@@ -191,7 +203,7 @@ char *VRHVDataset::VRHGetString(VSILFILE *fp, size_t byteaddr)
 /* ==================================================================== */
 /************************************************************************/
 
-class VRHRasterBand : public GDALRasterBand
+class VRHRasterBand : public GDALPamRasterBand
 {
     friend class VRHVDataset;
 
@@ -416,7 +428,7 @@ GDALColorInterp VRHRasterBand::GetColorInterpretation()
 #ifdef EXPLICIT_DELETE
 VRHVDataset::~VRHVDataset()
 {
-    GDALDataset::FlushCache(TRUE);
+    GDALPamDataset::FlushCache(TRUE);
 
     if (fp != nullptr)
         VSIFCloseL(fp);
@@ -665,7 +677,7 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
 /*                                Open()                                */
 /************************************************************************/
 
-GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
+GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
     if (nullptr == poOpenInfo || !Identify(poOpenInfo))
@@ -1000,6 +1012,9 @@ GDALDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     /* Let gdal do this for us.      */
     poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
 
+    // Initialize any PAM information.
+    poDS->TryLoadXML(poOpenInfo->GetSiblingFiles());
+
     return (poDS);
 }
 
@@ -1035,7 +1050,7 @@ void GDALRegister_VRHV()
         // of the ViewRanger file formats, further research may be needed.
         poDriver->SetMetadataItem("LICENSE_POLICY", "NONRECIPROCAL");
 
-        poDriver->pfnOpen = VRHVDataset::Open;
+        poDriver->pfnOpen = VRHVDataset::OpenWrapper;
         poDriver->pfnIdentify = VRHVDataset::Identify;
 
         GetGDALDriverManager()->RegisterDriver(poDriver);
@@ -1251,16 +1266,48 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
 }
 
 /************************************************************************/
+/*                        LoadWorldFile()                               */
+/************************************************************************/
+
+void VRHVDataset::LoadWorldFile()
+{
+    if (bHasTriedLoadWorldFile)
+        return;
+    bHasTriedLoadWorldFile = TRUE;
+
+    char *pszWldFilename = nullptr;
+
+    // This will find the .VHW file
+    bGeoTransformValid =
+        GDALReadWorldFile2(GetDescription(), nullptr, m_gt,
+                           oOvManager.GetSiblingFiles(), &pszWldFilename);
+
+    if (pszWldFilename)
+    {
+        osWldFilename = pszWldFilename;
+        CPLFree(pszWldFilename);
+    }
+}
+
+/************************************************************************/
 /*                            GetFileList()                             */
 /************************************************************************/
 
 char **VRHVDataset::GetFileList()
 {
-
     CPLDebug("ViewrangerHV", "GetDescription %s", GetDescription());
 
-    // GDALReadWorldFile2 (gdal_misc.cpp) has code we need to copy
-    return GDALDataset::GetFileList();
+    char **papszFileList = GDALPamDataset::GetFileList();
+
+    LoadWorldFile();
+
+    if (!osWldFilename.empty() &&
+        CSLFindString(papszFileList, osWldFilename) == -1)
+    {
+        papszFileList = CSLAddString(papszFileList, osWldFilename);
+    }
+
+    return papszFileList;
 }
 
 // #endif

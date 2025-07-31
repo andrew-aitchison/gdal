@@ -305,7 +305,7 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
       papoOverviewBands(papoOverviewBandsIn)
 {
     VRCDataset *poVRCDS = poDSIn;
-    poDS = static_cast<GDALDataset *>(poVRCDS);
+    poDS = static_cast<GDALPamDataset *>(poVRCDS);
     nBand = nBandIn;
     CPLDebug("Viewranger", "%s %p->VRCRasterBand(%p, %d, %d, %d, %p)",
              poVRCDS->sFileName.c_str(),
@@ -349,7 +349,8 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
              nRasterYSize);
 
     // Image Structure Metadata:  INTERLEAVE=PIXEL would be good
-    GDALRasterBand::SetMetadataItem("INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE");
+    GDALPamRasterBand::SetMetadataItem("INTERLEAVE", "PIXEL",
+                                       "IMAGE_STRUCTURE");
 
     if (poVRCDS->nMagic == vrc_magic)
     {
@@ -586,8 +587,9 @@ double VRCRasterBand::GetNoDataValue(int *pbSuccess)
 /************************************************************************/
 CPLErr VRCRasterBand::SetNoDataValue(double dfNoDataValue)
 {
-    (void)dfNoDataValue;
-    // Users cannot set NoDataValue; this is read-only data.
+    CPLError(CE_Failure, CPLE_NoWriteAccess,
+             "Unable to set no data value to %g, dataset opened read only.\n",
+             dfNoDataValue);
     return CE_Failure;
 }
 
@@ -754,7 +756,7 @@ GDALColorTable *VRCRasterBand::GetColorTable()
 #ifdef EXPLICIT_DELETE
 VRCDataset::~VRCDataset()
 {
-    GDALDataset::FlushCache(TRUE);
+    GDALPamDataset::FlushCache(TRUE);
 
     if (fp != nullptr)
         VSIFCloseL(fp);
@@ -787,63 +789,12 @@ VRCDataset::~VRCDataset()
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &geoTransform) const
+CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    const double tenMillion = 10.0 * 1000 * 1000;
-
-    double dLeft = nLeft;
-    double dRight = nRight;
-    double dTop = nTop;
-    double dBottom = nBottom;
-
-    if (nCountry == 17)
+    if (bGeoTransformValid)
     {
-        // This is unlikely to be correct.
-        // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps
-        // have coordinate unit which is not metres.
-        // It might be some part of a degree, eg 1 degree/ten million.
-        CPLDebug("Viewranger",
-                 "MapID %d country/srs 17 USA?Discovery(Spain, Greece)?Belgium "
-                 "grid is "
-                 "unknown. Current guess is unlikely to be correct.",
-                 nMapID);
-        CPLDebug("Viewranger",
-                 "raw corner positions: TL: %.10g %.10g BR: %.10g %.10g", dTop,
-                 dLeft, dBottom, dRight);
-        const double factor = 9.0 * 1000 * 1000;
-        dLeft /= factor;
-        dRight /= factor;
-        dTop /= factor;
-        dBottom /= factor;
-        CPLDebug("ViewrangerHV", "scaling by %g TL: %g %g BR: %g %g", factor,
-                 dTop, dLeft, dBottom, dRight);
-    }
-    else if (nCountry == 155)
-    {
-        // New South Wales, Australia uses GDA94/MGA55 EPSG:28355
-        // but without the 10million metre false_northing
-        dLeft = 1.0 * nLeft;
-        dRight = 1.0 * nRight;
-        dTop = nTop + tenMillion;
-        dBottom = nBottom + tenMillion;
-
-        CPLDebug("Viewranger", "shifting by 10 million: TL: %g %g BR: %g %g",
-                 dTop, dLeft, dBottom, dRight);
-    }
-
-    // Xgeo = geoTransform[0] + pixel*geoTransform[1] + line*geoTransform[2];
-    // Ygeo = geoTransform[3] + pixel*geoTransform[4] + line*geoTransform[5];
-
-    geoTransform[0] = dLeft;
-    geoTransform[1] = dRight - dLeft;
-    geoTransform[2] = 0.0;
-    geoTransform[3] = dTop;
-    geoTransform[4] = 0.0;
-    geoTransform[5] = dBottom - dTop;
-
-    {
-        geoTransform[1] /= (GetRasterXSize());
-        geoTransform[5] /= (GetRasterYSize());
+        gt = m_gt;
+        return CE_None;
     }
 
     if (nMagic != vrc_magic && nMagic != vrc_magic36)
@@ -851,13 +802,13 @@ CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &geoTransform) const
         CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
     }
 
+    gt = m_gt;
     CPLDebug("Viewranger", "geoTransform raster %d x %d", GetRasterXSize(),
              GetRasterYSize());
-    CPLDebug("Viewranger", "geoTransform %g %g %g", geoTransform[0],
-             geoTransform[1], geoTransform[2]);
-    CPLDebug("Viewranger", "geoTransform %g %g %g", geoTransform[3],
-             geoTransform[4], geoTransform[5]);
-    return CE_None;
+    CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[0], gt[1], gt[2]);
+    CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[3], gt[4], gt[5]);
+
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -1042,14 +993,15 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
         CPLError(CE_Failure, CPLE_AppDefined,
                  "VRCBuildTileIndex called for a map with mapID %d", nMapID);
     }
-    // Is this limit (eg 64k x 64k tiles) reasonable ?
-    if (tileXcount * tileYcount >= UINT_MAX)
+
+    if (static_cast<long long>(tileXcount) * tileYcount >= UINT_MAX)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "VRCBuildTileIndex(x%x) called for oversized (%u x %u) image",
                  nTileIndexStart, tileXcount, tileYcount);
         return nullptr;
     }
+
     if (VSIFSeekL(fp, static_cast<size_t>(nTileIndexStart), SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -1194,7 +1146,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
 /*                                Open()                                */
 /************************************************************************/
 
-GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
+VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 {
     CPLDebug("Viewranger", "VRCDataset::Open( %p )", poOpenInfo);
 
@@ -1238,7 +1190,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     }
 
     /* -------------------------------------------------------------------- */
-    /*      Create a corresponding GDALDataset.                             */
+    /*         Create a corresponding GDALPamDataset.                       */
     /* -------------------------------------------------------------------- */
     // Evan Rouault suggests std::unique_ptr here:
     // https://github.com/OSGeo/gdal/pull/4092
@@ -1247,6 +1199,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     // std::unique_ptr<VRCDataset>(new VRCDataset());  // -Wreturn-stack-address
     // auto poDS = std::unique_ptr<VRCDataset>();
     auto *poDS = new VRCDataset();
+    // auto poDS = std::unique_ptr<VRCDataset>(new VRCDataset());
     if (poDS == nullptr)  //-V668
     {
         return nullptr;
@@ -1264,6 +1217,44 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     VSIFReadL(poDS->abyHeader, 1, sizeof(poDS->abyHeader), poDS->fp);
 
     poDS->nMagic = VRGetUInt(poOpenInfo->pabyHeader, 0);
+
+    {
+        // Verify and/or report some unknown?unused values early in the header
+        auto nVRCdownloadID =
+            static_cast<int>(VRGetShort(poOpenInfo->pabyHeader, 4));
+        const unsigned int sixtyfourKplus1 = VRGetUInt(poDS->abyHeader, 8);
+        const unsigned int byte12 = poDS->abyHeader[12];
+        const unsigned int byte13 = poDS->abyHeader[13];
+
+        if (nVRCdownloadID != 4)
+        {
+            CPLDebug("Viewranger", "VRC file %s unexpected download ID %d",
+                     poOpenInfo->pszFilename, nVRCdownloadID);
+        }
+        if (sixtyfourKplus1 != 0x00010001)
+        {
+            CPLDebug("Viewranger",
+                     "VRC file %s expected 0x00010001 but got 0x%08x",
+                     poOpenInfo->pszFilename, sixtyfourKplus1);
+        }
+        // No idea what byte12 and byte13 represent;
+        // report them in case I can spot a pattern.
+        if (byte12 != 15)
+        {
+            // NSWRoadMap250k.VRC has 0xAA
+            // Valle Antrona.VRC has 0x0B
+            // Zakynthos.VRC has 0xBE
+            CPLDebug("Viewranger",
+                     "VRC file %s byte 0x0000000c is 0x%02x - expected 0x0f",
+                     poOpenInfo->pszFilename, byte12);
+        }
+        if (byte13 != 9)
+        {
+            CPLDebug("Viewranger",
+                     "VRC file %s byte 0x0000000d is 0x%02x - expected 0x09",
+                     poOpenInfo->pszFilename, byte13);
+        }
+    }
 
     poDS->nCountry = VRGetShort(poDS->abyHeader, 6);
     const char *szInCharset = CharsetFromCountry(poDS->nCountry);
@@ -1290,11 +1281,11 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     }
 
     {
-        constexpr size_t VRCpszMapIDlen = 11;
+        constexpr int VRCpszMapIDlen = 11;
         char pszMapID[VRCpszMapIDlen] = "";
         const int ret =
             CPLsnprintf(pszMapID, VRCpszMapIDlen, "%d", poDS->nMapID);
-        if (ret == VRCpszMapIDlen - 1)
+        if (ret < VRCpszMapIDlen)
         {
             poDS->SetMetadataItem("VRC ViewRanger MapID", pszMapID, "");
         }
@@ -1302,7 +1293,7 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLDebug("Viewranger",
                      "Could not set MapID Metadata - CPLsnprintf( , "
-                     "VRCpszMapIDlen, %d) returned %d - expected %" PRI_SIZET,
+                     "VRCpszMapIDlen, %d) returned %d - expected %d",
                      poDS->nMapID, ret, VRCpszMapIDlen - 1);
         }
     }
@@ -1460,8 +1451,8 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             // poDS = nullptr; // Was I being paranoid ?
             return nullptr;
         }
-        poDS->nRasterXSize = static_cast<int>(dfRasterXSize);
-        poDS->nRasterYSize = static_cast<int>(dfRasterYSize);
+        poDS->nRasterXSize = static_cast<int>(std::round(dfRasterXSize));
+        poDS->nRasterYSize = static_cast<int>(std::round(dfRasterYSize));
         CPLDebug("Viewranger", "%d=%f x %d=%f pixels", poDS->nRasterXSize,
                  dfRasterXSize, poDS->nRasterYSize, dfRasterYSize);
 
@@ -1639,10 +1630,10 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         anCorners[1] = VRReadInt(poDS->fp);
         anCorners[2] = VRReadInt(poDS->fp);
         anCorners[3] = VRReadInt(poDS->fp);
-        CPLDebug("Viewranger", "x%08x LTRB (outer) %d %d %d %d", nCornerPtr,
-                 poDS->nLeft, poDS->nTop, poDS->nRight, poDS->nBottom);
-        CPLDebug("Viewranger", "x%08x LTRB (inner) %d %d %d %d", nCornerPtr,
-                 anCorners[0], anCorners[3], anCorners[2], anCorners[1]);
+        CPLDebug("Viewranger", "x%08x (outer) LBRT %d %d %d %d", nCornerPtr,
+                 poDS->nLeft, poDS->nBottom, poDS->nRight, poDS->nTop);
+        CPLDebug("Viewranger", "x%08x (inner) LBRT %d %d %d %d", nCornerPtr,
+                 anCorners[0], anCorners[1], anCorners[2], anCorners[3]);
 
         if (poDS->nTop != anCorners[3])
         {
@@ -1732,6 +1723,64 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             CPLDebug("Viewranger", "mismatch Right %d %d", poDS->nRight,
                      anCorners[2]);
         }
+
+        const double tenMillion = 10.0 * 1000 * 1000;
+
+        double dLeft = poDS->nLeft;
+        double dRight = poDS->nRight;
+        double dTop = poDS->nTop;
+        double dBottom = poDS->nBottom;
+
+        if (poDS->nCountry == 17)
+        {
+            poDS->LoadWorldFile();
+
+            // This is unlikely to be correct.
+            // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps
+            // have coordinate unit which is not metres.
+            // It might be some part of a degree, eg 1 degree/ten million.
+            CPLDebug(
+                "Viewranger",
+                "MapID %d country/srs 17 USA?Discovery(Spain, Greece)?Belgium "
+                "grid is unknown. Current guess is unlikely to be correct.",
+                poDS->nMapID);
+            CPLDebug("Viewranger",
+                     "raw corner positions: TL: %.9g %.9g BR: %.9g %.9g", dTop,
+                     dLeft, dBottom, dRight);
+            const double factor = 9.0 * 1000 * 1000;
+            dLeft /= factor;
+            dRight /= factor;
+            dTop /= factor;
+            dBottom /= factor;
+            CPLDebug("Viewranger", "scaling by %g TL: %g %g BR: %g %g", factor,
+                     dTop, dLeft, dBottom, dRight);
+        }
+        else if (poDS->nCountry == 155)
+        {
+            // New South Wales, Australia uses GDA94/MGA55 EPSG:28355
+            // but without the 10million metre false_northing
+            dTop += tenMillion;
+            dBottom += tenMillion;
+
+            CPLDebug("Viewranger",
+                     "shifting by 10 million: TL: %g %g BR: %g %g", dTop, dLeft,
+                     dBottom, dRight);
+        }
+
+        // Xgeo = m_gt[0] + pixel*m_gt[1] + line*m_gt[2];
+        // Ygeo = m_gt[3] + pixel*m_gt[4] + line*m_gt[5];
+        poDS->m_gt[0] = dLeft;
+        poDS->m_gt[1] = dRight - dLeft;
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = dTop;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = dBottom - dTop;
+
+        {
+            poDS->m_gt[1] /= poDS->GetRasterXSize();
+            poDS->m_gt[5] /= poDS->GetRasterYSize();
+        }
+        poDS->bGeoTransformValid = true;
 
         const unsigned int nTileIndexStart =
             nCornerPtr + 16;  // Skip the corners
@@ -1826,20 +1875,6 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     //
     // --------------------------------------------------------------------
 
-    // Until we support overviews, large files are very slow.
-    // This environment variable allows users to skip them.
-    int fSlowFile = FALSE;
-    const char *szVRCmaxSize = CPLGetConfigOption("VRC_MAX_SIZE", "");
-    if (szVRCmaxSize != nullptr && *szVRCmaxSize != 0)
-    {
-        const long long nMaxSize = strtoll(szVRCmaxSize, nullptr, 10);
-        // Should support KMGTP... suffixes.
-        if (nMaxSize > poDS->st_size)
-        {
-            fSlowFile = TRUE;
-        }
-    }
-    if (!fSlowFile)
     {
         constexpr int nMyBandCount = 4;
         for (int i = 1; i <= nMyBandCount; i++)
@@ -1861,7 +1896,9 @@ GDALDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         }
     }
 
+    // Initialize any PAM information.
     poDS->SetDescription(poOpenInfo->pszFilename);
+    poDS->TryLoadXML(poOpenInfo->GetSiblingFiles());
 
     return (poDS);
 }
@@ -2769,7 +2806,7 @@ void CPL_DLL GDALRegister_VRC()
     // poDriver->SetMetadataItem( "INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE"
     // );
 
-    poDriver->pfnOpen = VRCDataset::Open;
+    poDriver->pfnOpen = VRCDataset::OpenWrapper;
     poDriver->pfnIdentify = VRCDataset::Identify;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
@@ -2840,7 +2877,8 @@ int VRCRasterBand::GetOverviewCount()
 //                            GetOverview()                             */
 //***********************************************************************/
 
-GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
+GDALPamRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
+// GDALRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
 {
     auto *poVRCDS = static_cast<VRCDataset *>(poDS);
     if (poVRCDS == nullptr)
@@ -3792,6 +3830,61 @@ int VRCRasterBand::Shrink_Tile_into_Block(GByte *pbyPNGbuffer, int nPNGwidth,
              nBlockYSize, nRasterXSize, nRasterYSize);
 
     return 0;
+}
+
+/************************************************************************/
+/*                        LoadWorldFile()                               */
+/************************************************************************/
+
+void VRCDataset::LoadWorldFile()
+{
+    if (bHasTriedLoadWorldFile)
+        return;
+    bHasTriedLoadWorldFile = TRUE;
+
+    if (bGeoTransformValid)
+        return;
+
+    char *pszWldFilename = nullptr;
+
+    // This will find the .VCW file *** tbc ****
+    bGeoTransformValid =
+        GDALReadWorldFile2(GetDescription(), nullptr, m_gt,
+                           oOvManager.GetSiblingFiles(), &pszWldFilename);
+
+    // This will find a .wld file.
+    // By convention a .wld file belongs to the .VRC file, never to a .VRH file.
+
+    if (!bGeoTransformValid)
+        bGeoTransformValid =
+            GDALReadWorldFile2(GetDescription(), ".wld", m_gt,
+                               oOvManager.GetSiblingFiles(), &pszWldFilename);
+
+    if (pszWldFilename)
+    {
+        osWldFilename = pszWldFilename;
+        CPLFree(pszWldFilename);
+    }
+}
+
+/************************************************************************/
+/*                            GetFileList()                             */
+/************************************************************************/
+
+char **VRCDataset::GetFileList()
+
+{
+    char **papszFileList = GDALPamDataset::GetFileList();
+
+    LoadWorldFile();
+
+    if (!osWldFilename.empty() &&
+        CSLFindString(papszFileList, osWldFilename) == -1)
+    {
+        papszFileList = CSLAddString(papszFileList, osWldFilename);
+    }
+
+    return papszFileList;
 }
 
 //  #endif
