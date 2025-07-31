@@ -793,6 +793,7 @@ CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     if (bGeoTransformValid)
     {
+        // Do we need this to do a full copy ? FIX ME
         gt = m_gt;
         return CE_None;
     }
@@ -802,13 +803,14 @@ CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &gt) const
         CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
     }
 
-    gt = m_gt;
+    const CPLErr ret = GDALPamDataset::GetGeoTransform(gt);
+
     CPLDebug("Viewranger", "geoTransform raster %d x %d", GetRasterXSize(),
              GetRasterYSize());
     CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[0], gt[1], gt[2]);
     CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[3], gt[4], gt[5]);
 
-    return GDALPamDataset::GetGeoTransform(gt);
+    return ret;
 }
 
 /************************************************************************/
@@ -882,7 +884,7 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
 /*                              VRCGetTileIndex()                       */
 /************************************************************************/
 
-unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
+uint32_t *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
 {
     // We were reading from abyHeader;
     // the next bit may be too big for that,
@@ -891,7 +893,7 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     if (st_size < 1)
     {
         CPLDebug("Viewranger",
-                 "VRCGetTileIndex(): file too small %ld to have a tile index\n",
+                 "VRCGetTileIndex(): file too small %jd to have a tile index\n",
                  st_size);
         return nullptr;
     }
@@ -902,7 +904,7 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
         return nullptr;
     }
 
-    auto *anNewTileIndex = static_cast<unsigned int *>(
+    auto *anNewTileIndex = static_cast<uint32_t *>(
         VSIMalloc3(sizeof(unsigned int), static_cast<size_t>(tileXcount),
                    static_cast<size_t>(tileYcount)));
     if (anNewTileIndex == nullptr)
@@ -921,7 +923,7 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
         unsigned int q = (tileXcount * (tileYcount - 1)) + i;
         for (unsigned int j = 0; j < tileYcount; j++)
         {
-            unsigned int nValue = VRReadUInt(fp);
+            uint32_t nValue = VRReadUInt(fp);
             // Ignore the index if it points
             // outside the limits of the file
             if (/* nValue <= 0 || */ nValue >= st_size)
@@ -985,8 +987,8 @@ unsigned int *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
 // ToDo: These files have *two* tile indexes;
 // the names used in this code need to be clearer,
 // both inside and outside this function.
-unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
-                                            unsigned int nTileIndexStart)
+uint32_t *VRCDataset::VRCBuildTileIndex(uint32_t nTileIndexAddr,
+                                        uint32_t nTileIndexStart)
 {
     if (nMapID != 8)
     {
@@ -1018,7 +1020,7 @@ unsigned int *VRCDataset::VRCBuildTileIndex(unsigned int nTileIndexAddr,
                  "Cannot allocate memory for first tile index");
         return nullptr;
     }
-    auto *anNewTileIndex = static_cast<unsigned int *>(
+    auto *anNewTileIndex = static_cast<uint32_t *>(
         VSIMalloc3(sizeof(unsigned int), static_cast<size_t>(tileXcount),
                    static_cast<size_t>(tileYcount)));
     if (anNewTileIndex == nullptr)
@@ -1210,6 +1212,11 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
     poOpenInfo->fpL = nullptr;
 
     poDS->sFileName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
+
+    // Initialize any PAM information.
+    poDS->SetDescription(poOpenInfo->pszFilename);
+
+    poDS->TryLoadXML(poOpenInfo->GetSiblingFiles());
 
     /* -------------------------------------------------------------------- */
     /*      Read the header.                                                */
@@ -1724,64 +1731,6 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                      anCorners[2]);
         }
 
-        const double tenMillion = 10.0 * 1000 * 1000;
-
-        double dLeft = poDS->nLeft;
-        double dRight = poDS->nRight;
-        double dTop = poDS->nTop;
-        double dBottom = poDS->nBottom;
-
-        if (poDS->nCountry == 17)
-        {
-            poDS->LoadWorldFile();
-
-            // This is unlikely to be correct.
-            // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps
-            // have coordinate unit which is not metres.
-            // It might be some part of a degree, eg 1 degree/ten million.
-            CPLDebug(
-                "Viewranger",
-                "MapID %d country/srs 17 USA?Discovery(Spain, Greece)?Belgium "
-                "grid is unknown. Current guess is unlikely to be correct.",
-                poDS->nMapID);
-            CPLDebug("Viewranger",
-                     "raw corner positions: TL: %.9g %.9g BR: %.9g %.9g", dTop,
-                     dLeft, dBottom, dRight);
-            const double factor = 9.0 * 1000 * 1000;
-            dLeft /= factor;
-            dRight /= factor;
-            dTop /= factor;
-            dBottom /= factor;
-            CPLDebug("Viewranger", "scaling by %g TL: %g %g BR: %g %g", factor,
-                     dTop, dLeft, dBottom, dRight);
-        }
-        else if (poDS->nCountry == 155)
-        {
-            // New South Wales, Australia uses GDA94/MGA55 EPSG:28355
-            // but without the 10million metre false_northing
-            dTop += tenMillion;
-            dBottom += tenMillion;
-
-            CPLDebug("Viewranger",
-                     "shifting by 10 million: TL: %g %g BR: %g %g", dTop, dLeft,
-                     dBottom, dRight);
-        }
-
-        // Xgeo = m_gt[0] + pixel*m_gt[1] + line*m_gt[2];
-        // Ygeo = m_gt[3] + pixel*m_gt[4] + line*m_gt[5];
-        poDS->m_gt[0] = dLeft;
-        poDS->m_gt[1] = dRight - dLeft;
-        poDS->m_gt[2] = 0.0;
-        poDS->m_gt[3] = dTop;
-        poDS->m_gt[4] = 0.0;
-        poDS->m_gt[5] = dBottom - dTop;
-
-        {
-            poDS->m_gt[1] /= poDS->GetRasterXSize();
-            poDS->m_gt[5] /= poDS->GetRasterYSize();
-        }
-        poDS->bGeoTransformValid = true;
-
         const unsigned int nTileIndexStart =
             nCornerPtr + 16;  // Skip the corners
         const unsigned int nTileIndexSize = VRReadUInt(poDS->fp);
@@ -1801,6 +1750,81 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                      "nTileIndexStart %u=x%08x points to %08x is not seven",
                      nTileIndexStart, nTileIndexStart, nTileIndexSize);
         }
+
+        {
+            const double tenMillion = 10.0 * 1000 * 1000;
+
+            double dLeft = poDS->nLeft;
+            double dRight = poDS->nRight;
+            double dTop = poDS->nTop;
+            double dBottom = poDS->nBottom;
+
+            const int nX = poDS->GetRasterXSize();
+            const int nY = poDS->GetRasterYSize();
+
+            if (poDS->nCountry == 17)
+            {
+                poDS->LoadWorldFile();
+                if (poDS->bGeoTransformValid)
+                {
+                    // Not needed and wrong
+                    // dLeft = poDS->m_gt[0] ;
+                    // dRight = (dLeft + poDS->m_gt[1]) / nX;
+                    // dTop = poDS->m_gt[3];
+                    // dBottom = (dTop - poDS->m_gt[5]) / nY;
+                    goto gt_set;
+                }
+
+                // This is unlikely to be correct.
+                // USA, Discovery (Spain, Greece) and some Belgium (VRH height) maps
+                // have coordinate unit which is not metres.
+                // It might be some part of a degree, eg 1 degree/ten million.
+                CPLDebug(
+                    "Viewranger",
+                    "MapID %d country/srs 17 USA?Discovery(Spain, "
+                    "Greece)?Belgium "
+                    "grid is unknown. Current guess is unlikely to be correct."
+                    " Use a .VCW, .VHW or .wld file if you can locate this "
+                    "map.",
+                    poDS->nMapID);
+                CPLDebug("Viewranger",
+                         "raw corner positions: TL: %.9g %.9g BR: %.9g %.9g",
+                         dTop, dLeft, dBottom, dRight);
+                const double factor = 9.0 * 1000 * 1000;
+                dLeft /= factor;
+                dRight /= factor;
+                dTop /= factor;
+                dBottom /= factor;
+                CPLDebug("Viewranger", "scaling by %g TL: %g %g BR: %g %g",
+                         factor, dTop, dLeft, dBottom, dRight);
+            }
+            else if (poDS->nCountry == 155)
+            {
+                // New South Wales, Australia uses GDA94/MGA55 EPSG:28355
+                // but without the 10million metre false_northing
+                dTop += tenMillion;
+                dBottom += tenMillion;
+
+                CPLDebug("Viewranger",
+                         "shifting by 10 million: TL: %g %g BR: %g %g", dTop,
+                         dLeft, dBottom, dRight);
+            }
+
+            // Xgeo = m_gt[0] + pixel*m_gt[1] + line*m_gt[2];
+            // Ygeo = m_gt[3] + pixel*m_gt[4] + line*m_gt[5];
+            poDS->m_gt[0] = dLeft;
+            poDS->m_gt[1] = dRight - dLeft;
+            poDS->m_gt[2] = 0.0;
+            poDS->m_gt[3] = dTop;
+            poDS->m_gt[4] = 0.0;
+            poDS->m_gt[5] = dBottom - dTop;
+
+            poDS->m_gt[1] /= nX;
+            poDS->m_gt[5] /= nY;
+        }
+
+    gt_set:
+        poDS->bGeoTransformValid = true;
 
         if (poDS->nMapID == 8)
         {
@@ -1895,10 +1919,6 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             poDS->SetMetadataItem("INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE");
         }
     }
-
-    // Initialize any PAM information.
-    poDS->SetDescription(poOpenInfo->pszFilename);
-    poDS->TryLoadXML(poOpenInfo->GetSiblingFiles());
 
     return (poDS);
 }

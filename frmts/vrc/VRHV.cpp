@@ -89,7 +89,7 @@ class VRHVDataset : public GDALPamDataset
     bool bHasTriedLoadWorldFile = FALSE;
     GDALGeoTransform m_gt{0.0, 1.0, 0.0, -1.0, 0.0, 0.0};
     void LoadWorldFile();
-    CPLString osWldFilename{};
+    CPLString osWldFilename = "";
 
   private:
     CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
@@ -101,7 +101,7 @@ class VRHVDataset : public GDALPamDataset
     ~VRHVDataset() override;
 #endif
 
-    static GDALPamDataset *Open(GDALOpenInfo *poOpenInfo);
+    static VRHVDataset *Open(GDALOpenInfo *poOpenInfo);
 
     static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo)
     {
@@ -118,7 +118,7 @@ class VRHVDataset : public GDALPamDataset
         return poSRS;
     }
 
-    CPLErr GetGeoTransform(GDALGeoTransform &geoTransform) const override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     char **GetFileList() override;
 
@@ -466,69 +466,32 @@ VRHVDataset::~VRHVDataset()
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-CPLErr VRHVDataset::GetGeoTransform(GDALGeoTransform &geoTransform) const
+CPLErr VRHVDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    const double tenMillion = 10.0 * 1000 * 1000;
-
-    double dLeft = nLeft;
-    double dRight = nRight;
-    double dTop = nTop;
-    double dBottom = nBottom;
-
-    if (nCountry == 17)
+    if (bGeoTransformValid)
     {
-        // This may not be correct
-        // USA, Discovery (Spain,Greece) and some Belgium (VRH height) maps
-        // have coordinate unit of something like 1 degree/ten million
-        CPLDebug("ViewrangerHV",
-                 "country/srs 17 USA?Belgium?Discovery(Spain,Greece) grid is "
-                 "unknown. "
-                 "Current guess is unlikely to be correct.");
-        CPLDebug("ViewrangerHV", "raw position: TL: %d %d BR: %d %d", nTop,
-                 nLeft, nBottom, nRight);
-        const double factor = 9.0 * 1000 * 1000;
-        dLeft /= factor;
-        dRight /= factor;
-        dTop /= factor;
-        dBottom /= factor;
-        CPLDebug("ViewrangerHV", "scaling by %g TL: %g %g BR: %g %g", factor,
-                 dTop, dLeft, dBottom, dRight);
-    }
-    else if (nCountry == 155)
-    {
-        // New South Wales srs is not quite GDA94/MGA55 EPSG:28355
-        dLeft = nLeft;
-        dRight = nRight;
-        dTop = nTop + tenMillion;
-        dBottom = nBottom + tenMillion;
-        CPLDebug("ViewrangerHV", "shifting by 10 million: TL: %g %g BR: %g %g",
-                 dTop, dLeft, dBottom, dRight);
+        // Do we need this to do a full copy ? FIX ME
+        gt = m_gt;
+        return CE_None;
     }
 
-    // Xgeo = geoTransform[0] + pixel*geoTransform[1] + line*geoTransform[2];
-    // Ygeo = geoTransform[3] + pixel*geoTransform[4] + line*geoTransform[5];
-    if (nMagic == vrh_magic || nMagic == vrv_magic || nMagic == vmc_magic)
+    if (nMagic != vrh_magic && nMagic != vrv_magic && nMagic != vmc_magic)
     {
-        geoTransform[0] = dLeft;
-        geoTransform[1] = (1.0 * dRight - dLeft) / (GetRasterXSize());
-        geoTransform[2] = 0.0;
-        geoTransform[3] = dTop;
-        geoTransform[4] = 0.0;
-        geoTransform[5] = (1.0 * dBottom - dTop) / (GetRasterYSize());
-    }
-    else
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "unknown magic %u", nMagic);
+        CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
     }
 
-    CPLDebug("ViewrangerHV", "geoTransform raster %d x %d", GetRasterXSize(),
-             GetRasterYSize());
-    CPLDebug("ViewrangerHV", "geoTransform %g %g %g", geoTransform[0],
-             geoTransform[1], geoTransform[2]);
-    CPLDebug("ViewrangerHV", "geoTransform %g %g %g", geoTransform[3],
-             geoTransform[4], geoTransform[5]);
-    return CE_None;
+    const int nX = GetRasterXSize();
+    const int nY = GetRasterYSize();
+    CPLErr ret = CE_Failure;
+
+    ret = GDALPamDataset::GetGeoTransform(gt);
+
+    CPLDebug("Viewranger", "geoTransform raster %d x %d", nX, nY);
+    CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[0], gt[1], gt[2]);
+    CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[3], gt[4], gt[5]);
+
+    return ret;
 }
 
 /************************************************************************/
@@ -677,7 +640,7 @@ int VRHVDataset::Identify(GDALOpenInfo *poOpenInfo)
 /*                                Open()                                */
 /************************************************************************/
 
-GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
+VRHVDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
     if (nullptr == poOpenInfo || !Identify(poOpenInfo))
@@ -707,6 +670,9 @@ GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     /* Borrow the file pointer from GDALOpenInfo* */
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
+    // Initialize any PAM information.
+    poDS->TryLoadXML(poOpenInfo->GetSiblingFiles());
+    poDS->SetDescription(poOpenInfo->pszFilename);
 
     /* -------------------------------------------------------------------- */
     /*      Read the header.                                                */
@@ -860,6 +826,8 @@ GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         case vmc_magic:
             // .vmc viewranger map choice file
             // generated by viewrangershop to store tiles to be purchased.
+
+            // Why divide by ten ? Is this for all maps ?
             // poDS->nPixelMetres = VRGetInt(poDS->abyHeader, 8);
             poDS->nPixelMetres =
                 static_cast<unsigned int>(VRGetInt(poDS->abyHeader, 8) / 10.0);
@@ -920,6 +888,8 @@ GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
             return nullptr;
     }
 
+    CPLDebug("ViewrangerHV", "Country/SRS code %hu", poDS->nCountry);
+
     if (poDS->nRasterXSize <= 0 || poDS->nRasterYSize <= 0)
     {
         CPLError(CE_Failure, CPLE_NotSupported, "Invalid dimensions : %d x %d",
@@ -949,6 +919,79 @@ GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
                  poDS->nRasterXSize, poDS->nRasterYSize, MAX_X, MAX_Y);
     }
 
+    {
+        const double tenMillion = 10.0 * 1000 * 1000;
+
+        double dLeft = poDS->nLeft;
+        double dRight = poDS->nRight;
+        double dTop = poDS->nTop;
+        double dBottom = poDS->nBottom;
+
+        const int nX = poDS->GetRasterXSize();
+        const int nY = poDS->GetRasterYSize();
+
+        CPLDebug("ViewrangerHV", "LBRT %d %d %d %d", poDS->nLeft, poDS->nBottom,
+                 poDS->nRight, poDS->nTop);
+
+        if (poDS->nCountry == 17)
+        {
+            poDS->LoadWorldFile();
+            if (poDS->bGeoTransformValid)
+            {
+                // Not needed and wrong
+                // dLeft = poDS->m_gt[0] ;
+                // dRight = (dLeft + poDS->m_gt[1]) / nX;
+                // dTop = poDS->m_gt[3];
+                // dBottom = (dTop - poDS->m_gt[5]) / nY;
+                goto gt_set;
+            }
+
+            // This may not be correct
+            // USA, Discovery (Spain,Greece) and some Belgium (VRH height) maps
+            // have coordinate unit of something like 1 degree/ten million
+            CPLDebug("ViewrangerHV",
+                     "country/srs 17 USA?Belgium?Discovery(Spain,Greece) grid "
+                     "is unknown. "
+                     "Current guess is unlikely to be correct.");
+            CPLDebug("ViewrangerHV", "raw position: TL: %d %d BR: %d %d",
+                     poDS->nTop, poDS->nLeft, poDS->nBottom, poDS->nRight);
+            const double factor = 9.0 * 1000 * 1000;
+            dLeft /= factor;
+            dRight /= factor;
+            dTop /= factor;
+            dBottom /= factor;
+            CPLDebug("ViewrangerHV", "scaling by %g TL: %g %g BR: %g %g",
+                     factor, dTop, dLeft, dBottom, dRight);
+        }
+        else if (poDS->nCountry == 155)
+        {
+            // New South Wales srs is not quite GDA94/MGA55 EPSG:28355
+            dTop += tenMillion;
+            dBottom += tenMillion;
+            CPLDebug("ViewrangerHV",
+                     "shifting by 10 million: TL: %g %g BR: %g %g", dTop, dLeft,
+                     dBottom, dRight);
+        }
+
+        // Xgeo = poDS->m_gt[0] + pixel*poDS->m_gt[1] + line*poDS->m_gt[2];
+        // Ygeo = poDS->m_gt[3] + pixel*poDS->m_gt[4] + line*poDS->m_gt[5];
+        poDS->m_gt[0] = dLeft;
+        poDS->m_gt[1] = (1.0 * dRight - dLeft) / nX;
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = dTop;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = (1.0 * dBottom - dTop) / nY;
+
+    gt_set:
+        poDS->bGeoTransformValid = true;
+
+        CPLDebug("ViewrangerHV", "geoTransform raster %d x %d", nX, nY);
+        CPLDebug("ViewrangerHV", "geoTransform %g %g %g", poDS->m_gt[0],
+                 poDS->m_gt[1], poDS->m_gt[2]);
+        CPLDebug("ViewrangerHV", "geoTransform %g %g %g", poDS->m_gt[3],
+                 poDS->m_gt[4], poDS->m_gt[5]);
+    }
+
     /********************************************************************/
     /*                     Set datum - do I mean CRS ?                  */
     /********************************************************************/
@@ -969,7 +1012,10 @@ GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
     /********************************************************************/
     /*             Report some strings found in the file                */
     /********************************************************************/
-    CPLDebug("ViewrangerHV", "Long Title: %s", poDS->pszLongTitle);
+    if (poDS->pszLongTitle != nullptr)
+    {
+        CPLDebug("ViewrangerHV", "Long Title: %s", poDS->pszLongTitle);
+    }
     CPLDebug("ViewrangerHV", "Copyright: %s", poDS->pszCopyright);
     CPLDebug("ViewrangerHV", "%u metre pixels", poDS->nPixelMetres);
     if ((poDS->nMagic != vrh_magic) && poDS->nScale > 0)
@@ -1004,16 +1050,11 @@ GDALPamDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         poBand->SetNoDataValue(nVRNoData);
     }
 
-    poDS->SetDescription(poOpenInfo->pszFilename);
-
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
     /* Let gdal do this for us.      */
     poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
-
-    // Initialize any PAM information.
-    poDS->TryLoadXML(poOpenInfo->GetSiblingFiles());
 
     return (poDS);
 }
@@ -1274,6 +1315,9 @@ void VRHVDataset::LoadWorldFile()
     if (bHasTriedLoadWorldFile)
         return;
     bHasTriedLoadWorldFile = TRUE;
+
+    if (bGeoTransformValid)
+        return;
 
     char *pszWldFilename = nullptr;
 

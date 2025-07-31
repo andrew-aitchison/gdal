@@ -128,7 +128,7 @@ class VRCDataset final : public GDALPamDataset
     GByte abyHeader[0x5a0]{};
 
     unsigned int *anColumnIndex = nullptr;
-    unsigned int *anTileIndex = nullptr;
+    uint32_t *anTileIndex = nullptr;
     unsigned int nMagic = 0;
     double dfPixelMetres = 0.0;
     int32_t nMapID = -1;
