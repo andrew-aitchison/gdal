@@ -890,11 +890,12 @@ uint32_t *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     // the next bit may be too big for that,
     // so we need to start reading directly from the file.
 
-    if (st_size < 1)
+    if (nVRCsize < 1)
     {
         CPLDebug("Viewranger",
-                 "VRCGetTileIndex(): file too small %jd to have a tile index\n",
-                 st_size);
+                 "VRCGetTileIndex(): file too small %" VRC_PRI_OFFT
+                 " to have a tile index\n",
+                 nVRCsize);
         return nullptr;
     }
 
@@ -926,7 +927,7 @@ uint32_t *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
             uint32_t nValue = VRReadUInt(fp);
             // Ignore the index if it points
             // outside the limits of the file
-            if (/* nValue <= 0 || */ nValue >= st_size)
+            if (/* nValue <= 0 || */ nValue >= nVRCsize)
             {
                 CPLDebug("Viewranger",
                          "anNewTileIndex[%u] (%u %u) addr x%08x not in file", q,
@@ -1064,7 +1065,7 @@ uint32_t *VRCDataset::VRCBuildTileIndex(uint32_t nTileIndexAddr,
 
         // Ignore the index if it points
         // outside the limits of the file
-        if (/* nLastTileFound <= 0 || */ nLastTileFound >= st_size)
+        if (/* nLastTileFound <= 0 || */ nLastTileFound >= nVRCsize)
         {
             anNewTileIndex[nTileFound] = 0;
             nTileFound++;
@@ -1536,12 +1537,12 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         CPLDebug("Viewranger", "tile count %u x %u", poDS->tileXcount,
                  poDS->tileYcount);
 
-        // Sets st_size (used to be VSIStatBufL oStatBufL)
+        // Sets nVRCsize (used to be VSIStatBufL oStatBufL)
         // Find out how big the file is.
         // Used in VRCGetTileIndex to recognize noData values
         // and several other places.
         {
-            poDS->st_size = 0;
+            poDS->nVRCsize = 0;
             VSIStatBufL oStatBufL;
             if (VSIStatL(poOpenInfo->pszFilename, &oStatBufL))
             {
@@ -1555,12 +1556,12 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                          "no data found in file %s\n", poOpenInfo->pszFilename);
                 return nullptr;
             }
-            poDS->st_size = oStatBufL.st_size;
+            poDS->nVRCsize = oStatBufL.st_size;
         }
 
         const unsigned int nTileIndexAddr = nNextString + 44;
 
-        if (nTileIndexAddr >= poDS->st_size)
+        if (nTileIndexAddr >= poDS->nVRCsize)
         {
             CPLDebug("Viewranger",
                      "Tile index %u=0x%08x points outside the file. Ignored\n",
@@ -2231,7 +2232,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
                  nGDtile_xx, nGDtile_yy, nVRtile_xx, nVRtile_yy, nVRCDataLen);
         return nullptr;
     }
-    if (nVRCDataLen >= static_cast<VRCDataset *>(poDS)->st_size)
+    if (nVRCDataLen >= static_cast<VRCDataset *>(poDS)->nVRCsize)
     {
         return nullptr;
     }
@@ -2546,7 +2547,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
         const unsigned int maxPlteLen = 0x300 + (2UL * sizeof(uint32_t));
         const unsigned int nVRCPlteLen = VRReadUInt(fp);
-        if (nVRCPlteLen > static_cast<VRCDataset *>(poDS)->st_size)
+        if (nVRCPlteLen > static_cast<VRCDataset *>(poDS)->nVRCsize)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "implausible palette length %u=x%08x", nVRCPlteLen,
@@ -2588,7 +2589,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             VSIFree(pbyPNGbuffer);
             return nullptr;
         }
-        if (nPNGPlteLen > static_cast<VRCDataset *>(poDS)->st_size)
+        if (nPNGPlteLen > static_cast<VRCDataset *>(poDS)->nVRCsize)
         {
             CPLDebug("Viewranger PNG",
                      "PNGPalette length %u=x%08x bigger than file !",
@@ -3147,14 +3148,14 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
         return;
     }
 
-    if (nTileIndex >= poVRCDS->st_size)
+    if (nTileIndex >= poVRCDS->nVRCsize)
     {
         // No data for this tile
         CPLDebug("Viewranger",
                  "VRCRasterBand::read_VRC_Tile_PNG(.. %d %d ..) "
                  "tileIndex %u %s end of file",
                  block_xx, block_yy, nTileIndex,
-                 nTileIndex == poVRCDS->st_size ? "at" : "beyond");
+                 nTileIndex == poVRCDS->nVRCsize ? "at" : "beyond");
         return;
     }
 
@@ -3227,7 +3228,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
         return;
     }
 
-    if (anTileOverviewIndex[nThisOverview + 1] >= poVRCDS->st_size)
+    if (anTileOverviewIndex[nThisOverview + 1] >= poVRCDS->nVRCsize)
     {
         CPLDebug("Viewranger OVRV",
                  "\toverview level %d data at x%08x is beyond end of file",
@@ -3353,7 +3354,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
     {
         // was anPngIndex[loop] = VRReadUInt(fp);
         anPngIndex.push_back(VRReadUInt(fp));
-        if (anPngIndex.back() > poVRCDS->st_size)
+        if (anPngIndex.back() > poVRCDS->nVRCsize)
         {
             CPLDebug("Viewranger",
                      "Band %d ovrvw %d block [%d,%d] png image %lu at x%x "
