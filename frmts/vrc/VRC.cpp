@@ -893,7 +893,7 @@ uint32_t *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     if (nVRCsize < 1)
     {
         CPLDebug("Viewranger",
-                 "VRCGetTileIndex(): file too small %" VRC_PRI_OFFT
+                 "VRCGetTileIndex(): file too small %" PRIu32
                  " to have a tile index\n",
                  nVRCsize);
         return nullptr;
@@ -1537,7 +1537,7 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         CPLDebug("Viewranger", "tile count %u x %u", poDS->tileXcount,
                  poDS->tileYcount);
 
-        // Sets nVRCsize (used to be VSIStatBufL oStatBufL)
+        // Sets nVRCsize (used to be VSIStatBufL oStatBufL.st_size)
         // Find out how big the file is.
         // Used in VRCGetTileIndex to recognize noData values
         // and several other places.
@@ -1556,7 +1556,23 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                          "no data found in file %s\n", poOpenInfo->pszFilename);
                 return nullptr;
             }
-            poDS->nVRCsize = oStatBufL.st_size;
+            if (oStatBufL.st_size < 0)
+            {
+                poDS->nVRCsize = 0;
+                CPLError(CE_Failure, CPLE_ObjectNull, "file %s is empty\n",
+                         poOpenInfo->pszFilename);
+                return nullptr;
+            }
+            else if (oStatBufL.st_size > 0xFFFFFFFF)
+            {
+                poDS->nVRCsize = 0xFFFFFFFF;
+                CPLError(CE_Failure, CPLE_AppDefined, "file %s is too big\n",
+                         poOpenInfo->pszFilename);
+            }
+            else
+            {
+                poDS->nVRCsize = static_cast<uint32_t>(oStatBufL.st_size);
+            }
         }
 
         const unsigned int nTileIndexAddr = nNextString + 44;

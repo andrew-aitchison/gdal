@@ -63,9 +63,6 @@
 #define PRI_SIZET "zu"
 #define PRI_SIZETx "zx"
 #endif
-// There is *no* standard way of printing an off_t
-// and some GDAL platforms do not support %j
-#define VRC_PRI_OFFT "ld"
 
 static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //
 static const unsigned int vrc_magic36 = 0x01ce6336;  // decimal 30303030  //
@@ -155,7 +152,7 @@ class VRCDataset final : public GDALPamDataset
                                     unsigned int nTileIndexStart);
 
     //VSIStatBufL oStatBufL;
-    off_t nVRCsize = 0;
+    uint32_t nVRCsize = 0;
 
     bool bGeoTransformValid = FALSE;
     bool bHasTriedLoadWorldFile = FALSE;
