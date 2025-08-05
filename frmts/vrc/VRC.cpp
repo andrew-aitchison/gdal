@@ -587,10 +587,17 @@ double VRCRasterBand::GetNoDataValue(int *pbSuccess)
 /************************************************************************/
 CPLErr VRCRasterBand::SetNoDataValue(double dfNoDataValue)
 {
-    CPLError(CE_Failure, CPLE_NoWriteAccess,
-             "Unable to set no data value to %g, dataset opened read only.\n",
-             dfNoDataValue);
-    return CE_Failure;
+    static int nCount = 0;
+    nCount++;
+    if (0 == (nCount & (nCount - 1)))
+    {  // ie if nCount is a power of 2
+        CPLError(
+            CE_Warning, CPLE_NoWriteAccess,
+            "Unable to set no data value to %g, dataset opened read only.\n",
+            dfNoDataValue);
+    }
+    // return CE_Failure;
+    return CE_None;
 }
 
 /************************************************************************/
@@ -1249,8 +1256,9 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         // report them in case I can spot a pattern.
         if (byte12 != 15)
         {
-            // NSWRoadMap250k.VRC has 0xAA
             // Valle Antrona.VRC has 0x0B
+            // SierraAracena.VRC has 0x9c
+            // NSWRoadMap250k.VRC has 0xAA
             // Zakynthos.VRC has 0xBE
             CPLDebug("Viewranger",
                      "VRC file %s byte 0x0000000c is 0x%02x - expected 0x0f",
@@ -1563,7 +1571,8 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                          poOpenInfo->pszFilename);
                 return nullptr;
             }
-            else if (oStatBufL.st_size > 0xFFFFFFFF)
+
+            if (oStatBufL.st_size > 0xFFFFFFFF)
             {
                 poDS->nVRCsize = 0xFFFFFFFF;
                 CPLError(CE_Failure, CPLE_AppDefined, "file %s is too big\n",
@@ -1784,12 +1793,7 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                 poDS->LoadWorldFile();
                 if (poDS->bGeoTransformValid)
                 {
-                    // Not needed and wrong
-                    // dLeft = poDS->m_gt[0] ;
-                    // dRight = (dLeft + poDS->m_gt[1]) / nX;
-                    // dTop = poDS->m_gt[3];
-                    // dBottom = (dTop - poDS->m_gt[5]) / nY;
-                    goto gt_set;
+                    goto gt_is_set;
                 }
 
                 // This is unlikely to be correct.
@@ -1840,8 +1844,8 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             poDS->m_gt[5] /= nY;
         }
 
-    gt_set:
         poDS->bGeoTransformValid = true;
+    gt_is_set:
 
         if (poDS->nMapID == 8)
         {
@@ -2369,7 +2373,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
         return nullptr;
     }
 
-#if defined UseCountFull
+#ifdef UseCountFull
     double dfPNGYcountFull = nBlockYSize / nPNGheight;
     int nPNGYcountFull = (int)(dfPNGYcountFull + .5);
     if (nPNGheight * nPNGYcount == nBlockYSize)

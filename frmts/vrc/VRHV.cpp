@@ -481,13 +481,10 @@ CPLErr VRHVDataset::GetGeoTransform(GDALGeoTransform &gt) const
         CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
     }
 
-    const int nX = GetRasterXSize();
-    const int nY = GetRasterYSize();
     CPLErr ret = CE_Failure;
 
     ret = GDALPamDataset::GetGeoTransform(gt);
 
-    CPLDebug("Viewranger", "geoTransform raster %d x %d", nX, nY);
     CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[0], gt[1], gt[2]);
     CPLDebug("Viewranger", "gt %10.9g %10.9g %10.9g", gt[3], gt[4], gt[5]);
 
@@ -938,12 +935,7 @@ VRHVDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
             poDS->LoadWorldFile();
             if (poDS->bGeoTransformValid)
             {
-                // Not needed and wrong
-                // dLeft = poDS->m_gt[0] ;
-                // dRight = (dLeft + poDS->m_gt[1]) / nX;
-                // dTop = poDS->m_gt[3];
-                // dBottom = (dTop - poDS->m_gt[5]) / nY;
-                goto gt_set;
+                goto gt_is_set;
             }
 
             // This may not be correct
@@ -982,8 +974,8 @@ VRHVDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
         poDS->m_gt[4] = 0.0;
         poDS->m_gt[5] = (1.0 * dBottom - dTop) / nY;
 
-    gt_set:
         poDS->bGeoTransformValid = true;
+    gt_is_set:
 
         CPLDebug("ViewrangerHV", "geoTransform raster %d x %d", nX, nY);
         CPLDebug("ViewrangerHV", "geoTransform %g %g %g", poDS->m_gt[0],
