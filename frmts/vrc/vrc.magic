@@ -1,7 +1,7 @@
 #
 # ViewRanger files
 #
-0	belong  0x7e1f2e00
+0	lelong  0x002e1f7e
 >6 leshort 17  ViewRanger VRC PNG-based file unsupported CRS (US/BE/ES)
 >6 leshort !17 ViewRanger VRC PNG-based file
 # Pay-by-tile files have a 32bit null before the string count ...
@@ -12,7 +12,8 @@
 >>>22  	pstring/l x	   name %s
 # position and scale after a variable number of pstring/l s
 #
-0	belong  0x3663ce01
+# 0	lelong  0x01ce3663
+0	lelong  30303030
 #  (US/BE/ES)
 >6 leshort 17 ViewRanger VRC "type-36" file unsupported CRS (US/BE/ES)
 >6 leshort !17  ViewRanger VRC "type-36" file
