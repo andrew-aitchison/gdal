@@ -41,10 +41,10 @@
 #include <cpl_vsi_virtual.h>  // for HasPRead() and PRead()
 
 // We have not fully deciphered the data format
-// of VRC files with magic=0x01ce6336.
+// of VRC files with magic = 30303030 = 0x01ce6336.
 // Set *one* of these definitions (to 1)
-// VRC36_PIXEL_IS_PIXEL is to be assumed if none are set.
-// #define VRC36_PIXEL_IS_PIXEL 1
+// VRCthirty_PIXEL_IS_PIXEL is to be assumed if none are set.
+// #define VRCthirty_PIXEL_IS_PIXEL 1
 
 #include <cinttypes>
 #include <cstdio>
@@ -64,8 +64,8 @@
 #define PRI_SIZETx "zx"
 #endif
 
-static const unsigned int vrc_magic = 0x002e1f7e;    // 0x7e1f2e00; //
-static const unsigned int vrc_magic36 = 0x01ce6336;  // decimal 30303030  //
+static const unsigned int vrc_magic = 0x002e1f7e;
+static const unsigned int vrc_magicThirty = 30303030;  // = 0x01ce6336;
 
 // static const unsigned int nVRCNoData = 0xffffffff;
 // static const unsigned int nVRCNoData = 255;
@@ -171,11 +171,6 @@ class VRCDataset final : public GDALPamDataset
 
     static VRCDataset *Open(GDALOpenInfo *poOpenInfo);
 
-    static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo)
-    {
-        return Open(poOpenInfo);
-    }
-
     static int Identify(GDALOpenInfo *poOpenInfo);
 
     char **GetFileList() override;
@@ -211,8 +206,8 @@ class VRCRasterBand final : public GDALPamRasterBand
     int nOverviewCount;
     VRCRasterBand **papoOverviewBands;
 
-    void read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
-                          void *pImage);
+    void read_VRC_Tile_thirty(VSILFILE *fp, int block_xx, int block_yy,
+                              void *pImage);
     void read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
                            void *pImage);
     GByte *read_PNG(VSILFILE *fp,

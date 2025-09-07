@@ -25,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
-// #ifdef FRMT_vrc
+#ifdef FRMT_vrcThirty
 
 #include "VRC.h"
 
@@ -42,8 +42,8 @@ static size_t bytesmatch(const unsigned char *data,
     return count;
 }
 
-void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
-                                     void *pImage)
+void VRCRasterBand::read_VRC_Tile_thirty(VSILFILE *fp, int block_xx,
+                                         int block_yy, void *pImage)
 {
     auto *poGDS = dynamic_cast<VRCDataset *>(poDS);
     if (poGDS == nullptr)
@@ -53,39 +53,40 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
     if (block_xx < 0 || block_xx >= nRasterXSize)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
-                 "read_VRC_Tile_36 invalid row %d", block_xx);
+                 "read_VRC_Tile_thirty invalid row %d", block_xx);
         return;
     }
     if (block_yy < 0 || block_yy >= nRasterYSize)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
-                 "read_VRC_Tile_36 invalid column %d", block_yy);
+                 "read_VRC_Tile_thirty invalid column %d", block_yy);
         return;
     }
     if (pImage == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "read_VRC_Tile_36 passed no image");
+                 "read_VRC_Tile_thirty passed no image");
         return;
     }
-    if (poGDS->nMagic != vrc_magic36)
+    if (poGDS->nMagic != vrc_magicThirty)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "read_VRC_Tile_36 called with wrong magic number x%08x",
+                 "read_VRC_Tile_thirty called with wrong magic number x%08x",
                  poGDS->nMagic);
         return;
     }
 
-    CPLDebug("Viewranger", "read_VRC_Tile_36(%p, %d, %d, %p)",
+    CPLDebug("Viewranger", "read_VRC_Tile_thirty(%p, %d, %d, %p)",
              static_cast<void *>(fp), block_xx, block_yy, pImage);
 
     const unsigned int tilenum =
         static_cast<unsigned int>(block_xx) +
         (poGDS->tileXcount * static_cast<unsigned int>(block_yy));
 
-    // VRC36_PIXEL_IS_PIXEL
+    // VRCthirty_PIXEL_IS_PIXEL
     // this will be the default
-    CPLDebug("Viewranger", "vrc36_pixel_is_pixel only partially implemented");
+    CPLDebug("Viewranger",
+             "VRCthirty_pixel_is_pixel only partially implemented");
     unsigned int nTileIndex = poGDS->anTileIndex[tilenum];
     // CPLDebug("Viewranger", "vrcmetres_pixel_is_pixel");
     CPLDebug("Viewranger",
@@ -95,7 +96,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
     if (nTileIndex == 0)
     {
         // No data for this tile
-        CPLDebug("Viewranger", "read_VRC_Tile_36(.. %d %d ..) null tile",
+        CPLDebug("Viewranger", "read_VRC_Tile_thirty(.. %d %d ..) null tile",
                  block_xx, block_yy);
 
         if (eDataType == GDT_Byte)
@@ -111,9 +112,10 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         }
         else
         {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "read_VRC_Tile_36 eDataType %d unexpected for null tile",
-                     eDataType);
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                "read_VRC_Tile_thirty eDataType %d unexpected for null tile",
+                eDataType);
         }
         return;
     }
@@ -131,7 +133,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         if (nOverviewCount != 7)
         {
             CPLDebug("Viewranger OVRV",
-                     "read_VRC_Tile_36: nOverviewCount is %d "
+                     "read_VRC_Tile_thirty: nOverviewCount is %d "
                      "- expected seven - MapID %d",
                      nOverviewCount, poGDS->nMapID);
             return;
@@ -170,9 +172,10 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
 
         if (nOverviewCount < 1 || anTileOverviewIndex[0] == 0)
         {
-            CPLDebug("Viewranger",
-                     "VRCRasterBand::read_VRC_Tile_36(.. %d %d ..) empty tile",
-                     block_xx, block_yy);
+            CPLDebug(
+                "Viewranger",
+                "VRCRasterBand::read_VRC_Tile_thirty(.. %d %d ..) empty tile",
+                block_xx, block_yy);
             return;
         }
 
@@ -203,7 +206,7 @@ void VRCRasterBand::read_VRC_Tile_36(VSILFILE *fp, int block_xx, int block_yy,
         {
             CPLDebug(
                 "Viewranger",
-                "read_VRC_Tile_36: overview %d=x%08x not in range [-1, %d]",
+                "read_VRC_Tile_thirty: overview %d=x%08x not in range [-1, %d]",
                 nThisOverview, nThisOverview, nOverviewCount);
             return;
         }
@@ -696,4 +699,4 @@ int VRCRasterBand::verifySubTileMem(GByte abyRawStartData[],
     return 0x0100 | static_cast<int>(nBytesMatched);
 }
 
-// #endif
+#endif

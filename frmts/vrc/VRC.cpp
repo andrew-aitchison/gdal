@@ -401,11 +401,11 @@ VRCRasterBand::VRCRasterBand(VRCDataset *poDSIn, int nBandIn,
         CPLDebug("Viewranger", "overview %d block %d x %d", nThisOverview,
                  nBlockXSize, nBlockYSize);
     }
-    else if (poVRCDS->nMagic == vrc_magic36)
+    else if (poVRCDS->nMagic == vrc_magicThirty)
     {
         CPLError(CE_Warning, CPLE_AppDefined,
-                 "Sorry, .VRC files with magic %08x not yet understood\n",
-                 vrc_magic36);
+                 "Sorry, .VRC files with magic %08d not yet understood\n",
+                 vrc_magicThirty);
     }
 
     VRCRasterBand::SetColorInterpretation(eBandInterp);
@@ -720,10 +720,10 @@ GDALColorInterp VRCRasterBand::GetColorInterpretation()
         return this->eBandInterp;
     }
 
-    if (poGDS->nMagic == vrc_magic36)
+    if (poGDS->nMagic == vrc_magicThirty)
     {
         CPLDebug("Viewranger",
-                 "VRCRasterBand::GetColorInterpretation vrc36 "
+                 "VRCRasterBand::GetColorInterpretation VRCthirty "
                  "GetColorInterpretation %08x %d",
                  poGDS->nMagic, this->eBandInterp);
         return this->eBandInterp;
@@ -805,7 +805,7 @@ CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &gt) const
         return CE_None;
     }
 
-    if (nMagic != vrc_magic && nMagic != vrc_magic36)
+    if (nMagic != vrc_magic && nMagic != vrc_magicThirty)
     {
         CPLDebug("Viewranger", "nMagic x%08x unknown", nMagic);
     }
@@ -851,35 +851,28 @@ int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
 
     const unsigned int nb64k1 = VRGetUInt(poOpenInfo->pabyHeader, 8);
     const bool b64k1 = (nb64k1 == 0x00010001);
+    if (!b64k1)
+    {
+        CPLDebug("Viewranger",
+                 "VRC file %s - limited support for unusual third long "
+                 "0x%08x - expected 0x00010001",
+                 poOpenInfo->pszFilename, nb64k1);
+    }
+
     if (nMagic == vrc_magic)
     {
         CPLDebug("Viewranger", "VRC file %s supported",
                  poOpenInfo->pszFilename);
 
-        if (!b64k1)
-        {
-            CPLDebug("Viewranger",
-                     "VRC file %s - limited support for unusual third long "
-                     "0x%08x - expected 0x00010001",
-                     poOpenInfo->pszFilename, nb64k1);
-        }
         return GDAL_IDENTIFY_TRUE;
     }
 
-    if (nMagic == vrc_magic36)
+    if (nMagic == vrc_magicThirty)
     {
         CPLError(
             CE_Warning, CPLE_AppDefined,
-            "%s: image data for .VRC magic 0x3663ce01 files not yet understood",
+            "%s: image data for .VRC magic 30303030 files not yet understood",
             poOpenInfo->pszFilename);
-
-        if (!b64k1)
-        {
-            CPLDebug("Viewranger",
-                     "VRC file %s - limited support for unusual third long "
-                     "0x%08x - expected 0x00010001",
-                     poOpenInfo->pszFilename, nb64k1);
-        }
 
         return GDAL_IDENTIFY_FALSE;
     }
@@ -1868,9 +1861,9 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
             // but we need to get tileSizeMax/Min and/or tile[XY]count
             // into the band
         }
-        else if (poDS->nMagic == vrc_magic36)
+        else if (poDS->nMagic == vrc_magicThirty)
         {
-            // VRC36_PIXEL_IS_PIXEL
+            // VRCthirty_PIXEL_IS_PIXEL
             // this will be the default
             // nRasterXSize,nRasterYSize are fine
             // but we need to get tileSizeMax/Min and/or tile[XY]count
@@ -1956,7 +1949,7 @@ void dumpPPM(unsigned int width, unsigned int height,
         "Viewranger PPM", "dumpPPM(%u %u %p %u %s %s-interleaved) count %u",
         width, height, data, rowlength, osBaseLabel.c_str(),
         (eInterleave == VRCinterleave::pixel) ? "pixel" : "band", nPPMcount);
-    if (osBaseLabel == nullptr)
+    if (osBaseLabel.empty())
     {
         CPLDebug("Viewranger PPM", "dumpPPM: null osBaseLabel\n");
         return;
@@ -2140,7 +2133,7 @@ static void dumpPNG(
 
     CPLDebug("Viewranger PNG", "dumpPNG(%p %d %s\n%s) count %u", data, nDataLen,
              osBaseLabel.c_str(), osWLDparams.c_str(), nPNGcount);
-    if (osBaseLabel == nullptr)
+    if (osBaseLabel.empty())
     {
         CPLDebug("Viewranger PNG", "dumpPNG: null osBaseLabel\n");
         return;
@@ -3103,8 +3096,8 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
     if (poVRCDS->nMagic != vrc_magic)
     {
         // Second "if" will be temporary
-        // if we can read "VRC36" file data at the subtile/block level.
-        if (poVRCDS->nMagic != vrc_magic36)
+        // if we can read "VRCthirty" file data at the subtile/block level.
+        if (poVRCDS->nMagic != vrc_magicThirty)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "read_VRC_Tile_PNG called with wrong magic number x%08x",
