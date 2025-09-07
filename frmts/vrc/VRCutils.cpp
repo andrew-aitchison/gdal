@@ -173,8 +173,9 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
             VRC_EPSG(32632);
             break;
         case 17:
-            // This "country" code uses a different, unknown, unit - not metres.
-            // USA, Discovery(Spain/Canaries/Greece)
+            // This "country" code uses a different, unknown, unit
+            // - not metres; probably some fraction of a degree.
+            // USA, Discovery Walking Guides (Spain/Canaries/Greece)
             // and US + Belgium .VRH (height) files
             if (szCountry && szCountry[0])
             {
@@ -206,10 +207,10 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
         case 19:  // France
             VRC_EPSG(2154);
             break;
-        case 20:  // Greece (also see 17 for Discovery Walking Guides)
+        case 20:  // Greece; also see 17 and 134.
             VRC_EPSG(2100);
             break;
-        case 21:  // Spain (also see 17 for Discovery Walking Guides)
+        case 21:  // Spain; also see 17.
             VRC_EPSG(3042);
             VRC_SWAP_AXES;
             break;
@@ -218,6 +219,9 @@ extern OGRSpatialReference *CRSfromCountry(int16_t nCountry, int32_t nMapID,
             break;
         case 133:  // Czech Republic / Slovakia
             VRC_EPSG(32633);
+            break;
+        case 134:  //  Greece, metric. Also see 17 and 20.
+            VRC_EPSG(32634);
             break;
         case 155:  // Australia
             // Note that in VRCDataset::GetGeoTransform()
@@ -276,23 +280,27 @@ extern const char *CharsetFromCountry(int16_t nCountry)
             return "LATIN9";
         case 16:  // Italy
             return "LATIN9";
-        case 17:  // USA, Discovery(Spain/Canaries/Greece)
-            // (US + Belgium .VRH files are also 17, but .VRH files have no strings).
+        case 17:  // USA, Discovery Walking Guides (Spain/Canaries/Greece)
+            // Degree-based ?
+            // (US + Belgium .VRH files are also 17,
+            //  but .VRH files have no strings).
             return "LATIN9";
         case 18:  // New Zealand
             return "LATIN9";
         case 19:  // France
             return "LATIN9";
-        case 20:  // Greece
+        case 20:  // Greece, degrees. Also see 17 and 134.
             // return "UTF-8";
-            return "LATIN9";
+            return "LATIN9";  //  "GREEK"; ???
         // case 21:  // Spain, but not Discovery Walking Guides ?
         //     return "UTF-8";
         case 132:  // Austria/Germany/Denmark
             return "LATIN9";
         case 133:  // Czech Republic / Slovakia
             return "LATIN9";
-        case 155:  // Australia
+        case 134:             // Greece, metric. Also see 17 and 20.
+            return "LATIN9";  //  "GREEK"; ???
+        case 155:             // Australia
             return "LATIN9";
         default:
             return "UTF-8";
