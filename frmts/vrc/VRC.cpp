@@ -43,6 +43,18 @@
 #include <array>
 #include <cinttypes>
 
+#include "VRHV.h"
+
+// #ifdef VRC_STANDALONE
+CPL_C_START
+void CPL_DLL GDALRegister_VRC(void) __attribute__((visibility("default")));
+// declared in gdal_frmts.h
+CPL_C_END
+// #endif
+
+static int IdentifyWrapper(GDALOpenInfo *poOpenInfo);
+static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo);
+
 template <class T, class U> void static vector_append(T &a, U &b)
 {
     // a.insert(std::end(a),std::begin(b),std::end(b));
@@ -820,12 +832,40 @@ CPLErr VRCDataset::GetGeoTransform(GDALGeoTransform &gt) const
     return ret;
 }
 
+int IdentifyWrapper(GDALOpenInfo *poOpenInfo)
+{
+
+    if (poOpenInfo == nullptr)
+    {
+        return GDAL_IDENTIFY_FALSE;
+    }
+
+    if (poOpenInfo->nHeaderBytes < 12)
+    {
+        return GDAL_IDENTIFY_UNKNOWN;
+    }
+
+    const char *pszFileName = CPLGetFilename(poOpenInfo->pszFilename);
+    if (pszFileName == nullptr)  //-V547
+    {
+        return GDAL_IDENTIFY_FALSE;
+    }
+
+    int nRet = VRCDataset::Identify(poOpenInfo);
+
+    if (nRet != GDAL_IDENTIFY_TRUE)
+    {
+        nRet = VRHVDataset::Identify(poOpenInfo);
+    }
+
+    return nRet;
+}
+
 /************************************************************************/
 /*                              Identify()                              */
 /************************************************************************/
 
 int VRCDataset::Identify(GDALOpenInfo *poOpenInfo)
-
 {
     if (poOpenInfo == nullptr)
     {
@@ -1145,6 +1185,18 @@ uint32_t *VRCDataset::VRCBuildTileIndex(uint32_t nTileIndexAddr,
     return anNewTileIndex;
 }
 
+GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo)
+{
+    GDALDataset *pRet = VRCDataset::Open(poOpenInfo);
+
+    if (pRet == nullptr)
+    {
+        pRet = VRHVDataset::Open(poOpenInfo);
+    }
+
+    return pRet;
+}
+
 /************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
@@ -1160,11 +1212,6 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         const int nIdentified = Identify(poOpenInfo);
         if (GDAL_IDENTIFY_TRUE != nIdentified)
         {
-            if (GDAL_IDENTIFY_UNKNOWN == nIdentified)
-            {
-                CPLDebug("Viewranger", "VRC driver could not identify %s",
-                         poOpenInfo->pszFilename);
-            }
             return nullptr;
         }
     }
@@ -2830,9 +2877,9 @@ void CPL_DLL GDALRegister_VRC()
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
 
     // Which of these is correct ?
+    // GDALMD_AOP_AREA is the GDAL default.
     // poDriver->SetMetadataItem(GDALMD_AREA_OR_POINT, GDALMD_AOP_POINT);
     poDriver->SetMetadataItem(GDALMD_AREA_OR_POINT, GDALMD_AOP_AREA);
-    // GDALMD_AOP_AREA is the GDAL default.
 
     // See https://gdal.org/development/rfc/rfc34_license_policy.html
     poDriver->SetMetadataItem("LICENSE_POLICY", "NONRECIPROCAL");
@@ -2840,8 +2887,8 @@ void CPL_DLL GDALRegister_VRC()
     // poDriver->SetMetadataItem( "INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE"
     // );
 
-    poDriver->pfnOpen = VRCDataset::OpenWrapper;
-    poDriver->pfnIdentify = VRCDataset::Identify;
+    poDriver->pfnOpen = OpenWrapper;
+    poDriver->pfnIdentify = IdentifyWrapper;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }
