@@ -31,17 +31,13 @@
 #ifndef VRHV_H_INCLUDED
 #define VRHV_H_INCLUDED
 
-#ifdef FRMT_vrc
 #define FRMT_viewranger
-#endif
 
 #include "VRC.h"
 
 class VRHRasterBand;
-// class VRHVDataset : public GDALPamDataset;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpadded"
+// class VRHVDataset : public GDALPamDataset;
 
 class VRHVDataset : public GDALPamDataset
 {
@@ -67,28 +63,19 @@ class VRHVDataset : public GDALPamDataset
 
     bool bGeoTransformValid = FALSE;
     bool bHasTriedLoadWorldFile = FALSE;
-#if GDAL_VERSION_NUM < 3120000
-    double m_gt[6] =
-#else
-    GDALGeoTransform m_gt
-#endif  // GDAL_VERSION_NUM  3120000
-        {0.0, 1.0, 0.0, -1.0, 0.0, 0.0};
+    GDALGeoTransform m_gt{0.0, 1.0, 0.0, -1.0, 0.0, 0.0};
     void LoadWorldFile();
     CPLString osWldFilename = "";
 
-#pragma clang diagnostic pop
-
   private:
-#if GDAL_VERSION_MAJOR >= 2
     CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
     // VRHVDataset &operator=(const VRHVDataset &) = delete;
-#endif
 
   public:
     VRHVDataset() = default;  // This does not initialize abyHeader ?
 #ifdef EXPLICIT_DELETE
     ~VRHVDataset() override;
-#endif  // def EXPLICIT_DELETE
+#endif
 
     static VRHVDataset *Open(GDALOpenInfo *poOpenInfo);
 
@@ -102,35 +89,12 @@ class VRHVDataset : public GDALPamDataset
     // Gdal <3 uses proj.4, Gdal>=3 uses proj.6, see eg:
     // https://trac.osgeo.org/gdal/wiki/rfc73_proj6_wkt2_srsbarn
     // https://gdal.org/development/rfc/rfc73_proj6_wkt2_srsbarn.html
-#if GDAL_VERSION_MAJOR >= 3
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return poSRS;
     }
-#else
-    const char *GetProjectionRef() override
-    {
-        char *pszSRS = nullptr;
-        if (!poSRS)
-        {
-            poSRS = CRSfromCountry(nCountry, 0, nullptr);
-        }
-        if (poSRS)
-        {
-            poSRS->exportToWkt(&pszSRS);
-            // delete poSRS; ???
-        }
-        CPLDebug("VRC", "GetProjectionRef() returns %s", pszSRS);
-        return pszSRS;
-        // return sDatum.c_str();
-    }
-#endif
 
-#if GDAL_VERSION_NUM < 3120000
-    CPLErr GetGeoTransform(double *gt) override;
-#else
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
-#endif  // GDAL_VERSION_NUM  3120000
 
     char **GetFileList() override;
 
