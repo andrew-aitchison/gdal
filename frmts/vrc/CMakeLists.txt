@@ -4,12 +4,14 @@ if (GDAL_USE_PNG AND GDAL_USE_ZLIB)
   
   add_gdal_driver(
     TARGET gdal_VRC
-    # SOURCES png_crc.c png_crc.h VRC.cpp VRC.h VRCthirtysix.cpp VRCutils.cpp VRCutils.h VRHV.cpp
+    # SOURCES png_crc.c png_crc.h VRC.cpp VRC.h VRCthirty.cpp VRCutils.cpp VRCutils.h VRHV.cpp
     SOURCES png_crc.c
             png_crc.h
             VRC.cpp
             VRC.h
+            VRCthirty.cpp
             VRCutils.cpp
+            VRHV.cpp
     PLUGIN_CAPABLE_IF
            "NOT GDAL_USE_PNG_INTERNAL\\\;NOT GDAL_USE_ZLIB_INTERNAL"
     )
