@@ -45,12 +45,7 @@
 
 #include "VRHV.h"
 
-// #ifdef VRC_STANDALONE
-CPL_C_START
 void CPL_DLL GDALRegister_VRC(void) __attribute__((visibility("default")));
-// declared in gdal_frmts.h
-CPL_C_END
-// #endif
 
 static int IdentifyWrapper(GDALOpenInfo *poOpenInfo);
 static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo);
