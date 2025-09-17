@@ -45,7 +45,11 @@
 
 #include "VRHV.h"
 
-void CPL_DLL GDALRegister_VRC(void) __attribute__((visibility("default")));
+void CPL_DLL GDALRegister_VRC(void)
+#ifdef VRC_STANDALONE
+    __attribute__((visibility("default")))
+#endif  // def VRC_STANDALONE
+    ;
 
 static int IdentifyWrapper(GDALOpenInfo *poOpenInfo);
 static GDALDataset *OpenWrapper(GDALOpenInfo *poOpenInfo);
@@ -2842,7 +2846,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 //                          GDALRegister_VRC()                          */
 //***********************************************************************/
 
-void CPL_DLL GDALRegister_VRC()
+void CPL_DLL GDALRegister_VRC(void)
 {
     if (!GDAL_CHECK_VERSION("ViewrangerVRC"))
         return;
