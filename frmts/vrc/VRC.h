@@ -31,6 +31,7 @@
 
 #define FRMT_viewranger
 
+#include <gdal_raster_cpp.h>
 #include <gdal_pam.h>
 #include <ogr_spatialref.h>
 
