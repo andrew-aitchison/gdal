@@ -198,7 +198,7 @@ void VRCRasterBand::read_VRC_Tile_thirty(VSILFILE *fp, int block_xx,
                      anTileOverviewIndex[1] - nTileIndex);
         }
 
-        dumpTileHeaderData(fp, nTileIndex,
+        dumpTileHeaderData(fp, static_cast<vsi_l_offset>(nTileIndex),
                            1 + static_cast<unsigned int>(nOverviewCount),
                            anTileOverviewIndex, block_xx, block_yy);
 

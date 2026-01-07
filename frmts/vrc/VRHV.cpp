@@ -89,7 +89,8 @@ char *VRHVDataset::VRHGetString(VSILFILE *fp, size_t byteaddr)
     }
     else
     {
-        const int nSeekResult = VSIFSeekL(fp, byteaddr, SEEK_SET);
+        const int nSeekResult =
+            VSIFSeekL(fp, static_cast<vsi_l_offset>(byteaddr), SEEK_SET);
         if (nSeekResult)
         {
             CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRC string");
@@ -277,7 +278,9 @@ CPLErr VRHRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
         if (poGDS->anColumnIndex[nBlockXOff])
         {
             const int seekres = VSIFSeekL(
-                poGDS->fp, poGDS->anColumnIndex[nBlockXOff], SEEK_SET);
+                poGDS->fp,
+                static_cast<vsi_l_offset>(poGDS->anColumnIndex[nBlockXOff]),
+                SEEK_SET);
             if (seekres)
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
@@ -684,8 +687,9 @@ VRHVDataset *VRHVDataset::Open(GDALOpenInfo *poOpenInfo)
             /*************************************************************/
             /*             Read index data from VRH file                 */
             /*************************************************************/
-            const int seekres =
-                VSIFSeekL(poDS->fp, vrh_header_offset + 20, SEEK_SET);
+            const int seekres = VSIFSeekL(
+                poDS->fp, static_cast<vsi_l_offset>(vrh_header_offset + 20),
+                SEEK_SET);
             if (seekres)
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
@@ -1117,12 +1121,12 @@ void VRHRasterBand::read_VMC_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
     if (static_cast<VRHVDataset *>(poDS)->nVRHVersion == 1)
     {
         CPLDebug("ViewrangerHV", "Seeking to byte 29 for version 1");
-        seekres = VSIFSeekL(fp, 29, SEEK_SET);
+        seekres = VSIFSeekL(fp, static_cast<vsi_l_offset>(29), SEEK_SET);
     }
     else
     {
         CPLDebug("ViewrangerHV", "Seeking to byte 41 for version 2");
-        seekres = VSIFSeekL(fp, 41, SEEK_SET);
+        seekres = VSIFSeekL(fp, static_cast<vsi_l_offset>(41), SEEK_SET);
     }
     if (seekres != 0)
     {
@@ -1194,14 +1198,15 @@ void VRHRasterBand::read_VRV_Tile(VSILFILE *fp, int tile_xx, int tile_yy,
         return;
     }
 
-    int seekres = VSIFSeekL(fp, 0x24, SEEK_SET);
+    int seekres = VSIFSeekL(fp, static_cast<vsi_l_offset>(0x24), SEEK_SET);
     if (seekres)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRV data");
         return;
     }
     const vsi_l_offset string_length = VRReadUInt(fp);
-    seekres = VSIFSeekL(fp, 0x28 + string_length, SEEK_SET);
+    seekres = VSIFSeekL(fp, static_cast<vsi_l_offset>(0x28) + string_length,
+                        SEEK_SET);
     if (seekres)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "cannot seek to VRV data");

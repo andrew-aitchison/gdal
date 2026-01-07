@@ -82,7 +82,7 @@ static const unsigned int nVRCNoData = 1;
 
 class VRCRasterBand;
 
-extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
+extern void dumpTileHeaderData(VSILFILE *fp, vsi_l_offset nTileIndex,
                                unsigned int nOverviewCount,
                                const unsigned int anTileOverviewIndex[],
                                int tile_xx, int tile_yy);

@@ -1650,7 +1650,9 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
                 // Pay-by-tile files have two (maybe even three?) tile indexes.
 
                 // Report but otherwise ignore the index at nTileIndexAddr
-                if (VSIFSeekL(poDS->fp, nTileIndexAddr, SEEK_SET))
+                if (VSIFSeekL(poDS->fp,
+                              static_cast<vsi_l_offset>(nTileIndexAddr),
+                              SEEK_SET))
                 {
                     CPLError(CE_Failure, CPLE_AppDefined,
                              "cannot seek to nTileIndexAddr %u=x%08x",
@@ -1679,7 +1681,8 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
         const unsigned int nSecondSevenPtr =
             nTileIndexAddr + (4 * poDS->tileXcount * poDS->tileYcount);
 
-        if (VSIFSeekL(poDS->fp, nSecondSevenPtr, SEEK_SET))
+        if (VSIFSeekL(poDS->fp, static_cast<vsi_l_offset>(nSecondSevenPtr),
+                      SEEK_SET))
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "cannot seek to nSecondSevenPtr %u=x%08x", nSecondSevenPtr,
@@ -1689,7 +1692,8 @@ VRCDataset *VRCDataset::Open(GDALOpenInfo *poOpenInfo)
 
         const unsigned int nCornerPtr = nSecondSevenPtr + 11;
         // ... +11 skips over 07 00 00 00 01 00 01 00 01 00 01
-        if (VSIFSeekL(poDS->fp, nCornerPtr, SEEK_SET))
+        if (VSIFSeekL(poDS->fp, static_cast<vsi_l_offset>(nCornerPtr),
+                      SEEK_SET))
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "cannot seek to VRC tile corners");
@@ -2370,7 +2374,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
 
     // IHDR_data here
 
-    if (VSIFSeekL(fp, nVRCHeader, SEEK_SET))
+    if (VSIFSeekL(fp, static_cast<vsi_l_offset>(nVRCHeader), SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "cannot seek to nVRCHeader %u=x%08x", nVRCHeader, nVRCHeader);
@@ -2598,7 +2602,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     // PLTE chunk here (no "PLTE" type string in VRC data)
     if (nPalette != 0)
     {
-        if (VSIFSeekL(fp, nPalette, SEEK_SET))
+        if (VSIFSeekL(fp, static_cast<vsi_l_offset>(nPalette), SEEK_SET))
         {
             VSIFree(pbyPNGbuffer);
             return nullptr;
@@ -2718,7 +2722,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     }
 
     // Jump to VRCData
-    if (VSIFSeekL(fp, nVRCData, SEEK_SET))
+    if (VSIFSeekL(fp, static_cast<vsi_l_offset>(nVRCData), SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "cannot seek to nVRCData %u=x%08x", nVRCData, nVRCData);
@@ -3052,7 +3056,7 @@ GDALPamRasterBand *VRCRasterBand::GetOverview(int iOverviewIn)
     return pThisOverview;
 }
 
-extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
+extern void dumpTileHeaderData(VSILFILE *fp, vsi_l_offset nTileIndex,
                                unsigned int nOverviewCount,
                                const unsigned int anTileOverviewIndex[],
                                const int tile_xx, const int tile_yy)
@@ -3065,16 +3069,16 @@ extern void dumpTileHeaderData(VSILFILE *fp, unsigned int nTileIndex,
     const vsi_l_offset byteOffset = VSIFTellL(fp);
     if (nOverviewCount != 7)
     {
-        CPLDebug("Viewranger", "tile (%d %d) header at x%x: %u - not seven",
+        CPLDebug("Viewranger", "tile (%d %d) header at x%0llx: %u - not seven",
                  tile_xx, tile_yy, nTileIndex, nOverviewCount);
         // CPLDebug does not "use" values
         (void)tile_xx;
         (void)tile_yy;
     }
-    if (VSIFSeekL(fp, nTileIndex, SEEK_SET))
+    if (VSIFSeekL(fp, static_cast<vsi_l_offset>(nTileIndex), SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "dumpTileHeaderData cannot seek to nTileIndex %u=x%08ux",
+                 "dumpTileHeaderData cannot seek to nTileIndex %llu=x%0llx",
                  nTileIndex, nTileIndex);
     }
     for (unsigned int i = 0; i < nOverviewCount; i++)
@@ -3218,7 +3222,7 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
         return;
     }
 
-    if (VSIFSeekL(fp, nTileIndex, SEEK_SET))
+    if (VSIFSeekL(fp, static_cast<vsi_l_offset>(nTileIndex), SEEK_SET))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "cannot seek to tile header x%08x", nTileIndex);
@@ -3303,7 +3307,10 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
     if (bTileShrink == false)
     {
         nShrinkFactor = 1;  // -V1048 reassigning initialized value
-        if (VSIFSeekL(fp, anTileOverviewIndex[nThisOverview + 1], SEEK_SET))
+        if (VSIFSeekL(fp,
+                      static_cast<vsi_l_offset>(
+                          anTileOverviewIndex[nThisOverview + 1]),
+                      SEEK_SET))
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "cannot seek to overview level %d data at x%08x",
@@ -3338,7 +3345,10 @@ void VRCRasterBand::read_VRC_Tile_PNG(VSILFILE *fp, int block_xx, int block_yy,
         CPLDebug("Viewranger OVRV", "\t overview %d at x%08x\n",
                  nThisOverview - 1, anTileOverviewIndex[nThisOverview]);
 
-        if (VSIFSeekL(fp, anTileOverviewIndex[nThisOverview], SEEK_SET))
+        if (VSIFSeekL(
+                fp,
+                static_cast<vsi_l_offset>(anTileOverviewIndex[nThisOverview]),
+                SEEK_SET))
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "cannot seek to overview level %d data at x%08x",
