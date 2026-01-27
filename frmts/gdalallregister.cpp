@@ -776,10 +776,6 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_JPEGXL();
 #endif
 
-#ifdef FRMT_vrc
-    GDALRegister_VRC();
-#endif
-
 #ifdef FRMT_basisu_ktx2
     GDALRegister_BASISU();
     GDALRegister_KTX2();
@@ -791,6 +787,10 @@ void CPL_STDCALL GDALAllRegister()
 
 #ifdef FRMT_e57
     GDALRegister_E57();
+#endif
+
+#if 0  // def FRMT_vrc
+    GDALRegister_VRC();
 #endif
 
     // NOTE: you need to generally insert your own driver before that line.
