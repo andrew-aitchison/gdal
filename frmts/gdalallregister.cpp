@@ -785,10 +785,6 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_GDALG();
 #endif
 
-#ifdef FRMT_e57
-    GDALRegister_E57();
-#endif
-
 #if 0  // def FRMT_vrc
     GDALRegister_VRC();
 #endif
