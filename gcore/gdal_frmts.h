@@ -110,7 +110,10 @@ void CPL_DLL GDALRegister_MSGN(void);
 void CPL_DLL GDALRegister_MSG(void);
 void DeclareDeferredMSGPlugin(void);
 void CPL_DLL GDALRegister_RIK(void);
-void CPL_DLL GDALRegister_VRC(void);
+#ifdef FRMT_vrc
+// void CPL_DLL __attribute__((visibility("default"))) GDALRegister_VRC(void);
+// void CPL_DLL __attribute__((visibility("default"))) GDALRegister_VRHV(void);
+#endif  // def FRMT_vrc
 void CPL_DLL GDALRegister_Leveller(void);
 void CPL_DLL GDALRegister_SRTMHGT(void);
 void CPL_DLL GDALRegister_DIPEx(void);

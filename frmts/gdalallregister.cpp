@@ -785,8 +785,8 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_GDALG();
 #endif
 
-#if 0  // def FRMT_vrc
-    GDALRegister_VRC();
+#ifdef FRMT_vrc
+//    GDALRegister_VRC();
 #endif
 
     // NOTE: you need to generally insert your own driver before that line.
