@@ -785,7 +785,7 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_GDALG();
 #endif
 
-#if 0  // def FRMT_vrc
+#ifdef FRMT_vrc
     GDALRegister_VRC();
 #endif
 
