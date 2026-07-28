@@ -1,7 +1,11 @@
 #
 
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -Wno-unknown-pragmas)
+endif()
+
 if (GDAL_USE_PNG AND GDAL_USE_ZLIB)
-  
+
   add_gdal_driver(
     TARGET gdal_VRC
     # SOURCES png_crc.c png_crc.h VRC.cpp VRC.h VRCthirty.cpp VRCutils.cpp VRCutils.h VRHV.cpp
