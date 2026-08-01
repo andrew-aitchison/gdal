@@ -89,9 +89,9 @@ typedef struct
 
 #define VALID_CHAR(x) ((x) > 31 && (x) < 127) ? (x) : '.'
 
-extern void HexPrint(std::vector<png_byte> v);
+extern void HexPrint(const std::vector<png_byte> &v);
 
-void HexPrint(std::vector<png_byte> v)
+void HexPrint(const std::vector<png_byte> &v)
 {
     for (unsigned int i = 0; i < v.size(); i += 16)
     {
