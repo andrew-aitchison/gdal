@@ -35,6 +35,9 @@
 #include <cstdio>
 
 #pragma clang diagnostic push
+// First disable the warning about unknown warnings ...
+#pragma clang diagnostic ignored "-Wunknown-warning-option"
+//  .. now the rest can be in alphabetical order:
 #pragma clang diagnostic ignored "-Wc++98-compat"
 #pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
 #pragma clang diagnostic ignored "-Wdeprecated-copy-with-dtor"
@@ -51,7 +54,6 @@
 // #pragma clang diagnostic ignored "-Wsign-conversion"
 #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
 #pragma clang diagnostic ignored "-Wundef"
-#pragma clang diagnostic ignored "-Wunknown-warning-option"
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
 #pragma clang diagnostic ignored "-Wunused-template"
 #pragma clang diagnostic ignored "-Wweak-vtables"
