@@ -229,7 +229,7 @@ class VRCDataset final : public GDALPamDataset
 
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
-    static char *VRCGetString(VSILFILE *fp, size_t byteaddr);
+    static char *VRCGetString(VSILFILE *fp, vsi_l_offset byteaddr);
 };
 
 #pragma clang diagnostic pop

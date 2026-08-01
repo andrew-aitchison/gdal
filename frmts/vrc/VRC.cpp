@@ -306,7 +306,7 @@ bool PNGCRCcompareChunkWith(const std::vector<png_byte> &vData,
 // If index pointer is nul then an empty string is returned
 // (rather than a null pointer).
 //
-char *VRCDataset::VRCGetString(VSILFILE *fp, size_t byteaddr)
+char *VRCDataset::VRCGetString(VSILFILE *fp, vsi_l_offset byteaddr)
 {
     if (byteaddr == 0)
     {
@@ -342,8 +342,7 @@ char *VRCDataset::VRCGetString(VSILFILE *fp, size_t byteaddr)
         if (string_length < 0)
         {
             CPLDebug("Viewranger",
-                     "odd length for string %012" PRI_SIZETx
-                     " - length %" PRId32,
+                     "odd length for string %012llx - length %" PRId32,
                      byteaddr, string_length);
         }
         return VSIStrdup("");
