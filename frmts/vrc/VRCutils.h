@@ -45,7 +45,7 @@
 #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
 #pragma clang diagnostic ignored "-Wundef"
 #pragma clang diagnostic ignored "-Wunknown-warning-option"
-// #if defined(__clang__)
+// #ifdef __clang__
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
 // #endif
 #pragma clang diagnostic ignored "-Wunused-template"

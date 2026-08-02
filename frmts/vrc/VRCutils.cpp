@@ -9,12 +9,16 @@
 
 extern short VRGetShort(const void *base, int byteOffset)
 {
+#ifdef __clang__
 #pragma clang diagnostic push
+#endif
     // #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
     auto *buf = static_cast<const unsigned char *>(base) + byteOffset;
     unsigned short vv = buf[0];
     vv |= static_cast<unsigned short>(buf[1] << 8U);
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
     return static_cast<int16_t>(vv);
 }

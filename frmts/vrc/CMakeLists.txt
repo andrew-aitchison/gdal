@@ -1,8 +1,8 @@
 #
 
-if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -Wno-unknown-pragmas)
-endif()
+#if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+#  set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -Wno-unknown-pragmas)
+#endif()
 
 if (GDAL_USE_PNG AND GDAL_USE_ZLIB)
 

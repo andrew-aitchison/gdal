@@ -118,7 +118,7 @@ void HexPrint(const std::vector<png_byte> &v)
 // PNG values are in network byte order (big-endian) -
 // unlike other values in the .VRC file which are little-endian.
 
-static unsigned int PNGGetUInt(const void *base, const size_t byteOffset)
+static uint32_t PNGGetUInt(const void *base, const size_t byteOffset)
 {
     if (nullptr == base)
     {
@@ -207,8 +207,10 @@ static void PNGAPI VRC_png_read_data_fn(png_structp png_read_ptr,
     }
 }
 
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
+#endif
 
 static uint32_t PNGCRCcheckChunk(const std::vector<png_byte> &vData,
                                  vsi_l_offset nPNGchunkStart);
@@ -229,7 +231,7 @@ uint32_t PNGCRCcheckChunk(const std::vector<png_byte> &vData,
     }
     const uint32_t nLen = PNGGetUInt(vData.data(), nPNGchunkStart);
 
-    if (nLen > vData.size() || nLen > 1L << 31U)
+    if (nLen > vData.size() || nLen > 1UL << 31U)
     {
         // from PNG spec nLen <= 2^31
         // CPLDebug("Viewranger PNG",
@@ -296,7 +298,9 @@ bool PNGCRCcompareChunkWith(const std::vector<png_byte> &vData,
     return TRUE;
 }
 
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
 // -------------------------------------------------------------------------
 // Returns a (null-terminated) string allocated from VSIMalloc.
@@ -2168,22 +2172,26 @@ void dumpPPM(unsigned int width, unsigned int height,
     const size_t nHeaderBufSize = 40;
     char acHeaderBuf[nHeaderBufSize] = "";
     size_t nHeaderSize = 0;
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wswitch-default"
+#endif
     switch (eInterleave)
     {
         case VRCinterleave::pixel:
-            nHeaderSize = static_cast<vsi_l_offset>(
+            nHeaderSize = static_cast<size_t>(
                 CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P6\n%u %u\n255\n",
                             width, height));
             break;
         case VRCinterleave::band:
-            nHeaderSize = static_cast<vsi_l_offset>(
+            nHeaderSize = static_cast<size_t>(
                 CPLsnprintf(acHeaderBuf, nHeaderBufSize, "P5\n%u %u\n255\n",
                             width, height));
             break;
     }
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
     // CPLsnprintf may return negative values;
     // the cast to size_t converts these to large positive
@@ -2526,9 +2534,9 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
     }
     vector_append(VRCpng_callback.vData, aVRCHeader);
 
-    const unsigned int nPNGwidth = PNGGetUInt(&aVRCHeader, 0);
+    const uint32_t nPNGwidth = PNGGetUInt(&aVRCHeader, 0);
     *pPNGwidth = nPNGwidth;
-    const unsigned int nPNGheight = PNGGetUInt(&aVRCHeader, 4);
+    const uint32_t nPNGheight = PNGGetUInt(&aVRCHeader, 4);
     *pPNGheight = nPNGheight;
 
     if (nPNGwidth == 0 || nPNGheight == 0)

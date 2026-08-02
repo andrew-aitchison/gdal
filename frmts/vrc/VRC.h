@@ -34,6 +34,7 @@
 #include <cinttypes>
 #include <cstdio>
 
+#ifdef __clang__
 #pragma clang diagnostic push
 // First disable the warning about unknown warnings ...
 #pragma clang diagnostic ignored "-Wunknown-warning-option"
@@ -57,6 +58,7 @@
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
 #pragma clang diagnostic ignored "-Wunused-template"
 #pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
 
 #include <gdal_pam.h>
 //#include <gdal_geotransform.h>
@@ -66,18 +68,27 @@
 //#include <gdal_driver.h>
 //#include <gdal_drivermanager.h>
 #include <gdal_raster_cpp.h>
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
+
 #include <ogr_spatialref.h>
 
 // #include <cpl_string.h>
 
+#ifdef __clang__
 #pragma clang diagnostic push
 // These are only enabled by -Weverything
 // ... which is not appropriate for production.
 #pragma clang diagnostic ignored "-Winconsistent-missing-destructor-override"
 #pragma clang diagnostic ignored "-Wsuggest-destructor-override"
+#endif
+
 #include <cpl_vsi_virtual.h>  // for HasPRead() and PRead()
+
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
 // We have not fully deciphered the data format
 // of VRC files with magic = 30303030 = 0x01ce6336.
@@ -154,8 +165,10 @@ extern const char *CharsetFromCountry(int16_t nCountry);
 /* ==================================================================== */
 /************************************************************************/
 
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
+#endif
 
 class VRCDataset final : public GDALPamDataset
 // class VRCDataset : public GDALDataset
@@ -234,7 +247,9 @@ class VRCDataset final : public GDALPamDataset
     static char *VRCGetString(VSILFILE *fp, vsi_l_offset byteaddr);
 };
 
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
 /************************************************************************/
 /* ==================================================================== */
