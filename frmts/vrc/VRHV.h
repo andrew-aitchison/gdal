@@ -38,9 +38,10 @@
 class VRHRasterBand;
 // class VRHVDataset : public GDALPamDataset;
 
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
-
+#endif
 class VRHVDataset : public GDALPamDataset
 {
     friend class VRHRasterBand;
@@ -69,7 +70,9 @@ class VRHVDataset : public GDALPamDataset
     void LoadWorldFile();
     CPLString osWldFilename = "";
 
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
   private:
     CPL_DISALLOW_COPY_ASSIGN(VRHVDataset)
