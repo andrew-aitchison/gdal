@@ -1005,7 +1005,6 @@ constexpr static const char* const apszKnownConfigOptions[] =
    "PST_INSTANCE", // from jpipkakdataset.cpp
    "PST_OFFSET", // from jpipkakdataset.cpp
    "PYTHONSO", // from gdalpython.cpp
-   "QCT_DUMP_TILE", // from qctdataset.cpp
    "QGIS_HACK", // from ogrfeaturedefn.cpp
    "QHULL_LOG_TO_TEMP_FILE", // from delaunay.c
    "RAW_CHECK_FILE_SIZE", // from rawdataset.cpp
