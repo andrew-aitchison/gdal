@@ -2969,7 +2969,7 @@ void CPL_DLL __attribute__((visibility("default"))) GDALRegister_VRC(void)
 
     poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
 
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "ViewRanger (.VRC)");
+    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "ViewRanger");
     poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/vrc.html");
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "VRC");
 
