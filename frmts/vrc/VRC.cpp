@@ -1056,8 +1056,8 @@ uint32_t *VRCDataset::VRCGetTileIndex(unsigned int nTileIndexStart)
     auto *anNewTileIndex = static_cast<uint32_t *>(
         // FIXME werdna 19 March 2026: poSRS *will* leak
         // valgrind says this memory is definitely lost
-        VSIMalloc3(sizeof(unsigned int), static_cast<vsi_l_offset>(tileXcount),
-                   static_cast<vsi_l_offset>(tileYcount)));
+        VSIMalloc3(sizeof(uint32_t), static_cast<size_t>(tileXcount),
+                   static_cast<size_t>(tileYcount)));
     if (anNewTileIndex == nullptr)
     {
         CPLError(CE_Failure, CPLE_OutOfMemory,
@@ -1163,8 +1163,8 @@ uint32_t *VRCDataset::VRCBuildTileIndex(uint32_t nTileIndexAddr,
     }
 
     auto *anFirstTileIndex = static_cast<unsigned int *>(
-        VSIMalloc3(sizeof(unsigned int), static_cast<vsi_l_offset>(tileXcount),
-                   static_cast<vsi_l_offset>(tileYcount)));
+        VSIMalloc3(sizeof(unsigned int), static_cast<size_t>(tileXcount),
+                   static_cast<size_t>(tileYcount)));
     if (anFirstTileIndex == nullptr)
     {
         CPLError(CE_Failure, CPLE_OutOfMemory,
@@ -1174,8 +1174,8 @@ uint32_t *VRCDataset::VRCBuildTileIndex(uint32_t nTileIndexAddr,
     auto *anNewTileIndex = static_cast<uint32_t *>(
         // FIXME werdna 2 April 2026: poSRS *will* leak
         // valgrind says this memory is definitely lost
-        VSIMalloc3(sizeof(unsigned int), static_cast<vsi_l_offset>(tileXcount),
-                   static_cast<vsi_l_offset>(tileYcount)));
+        VSIMalloc3(sizeof(unsigned int), static_cast<size_t>(tileXcount),
+                   static_cast<size_t>(tileYcount)));
     if (anNewTileIndex == nullptr)
     {
         VSIFree(anFirstTileIndex);
@@ -2739,7 +2739,7 @@ VRCRasterBand::read_PNG(VSILFILE *fp,
             return nullptr;
         }
 
-        const unsigned long nPLTEstart = VRCpng_callback.vData.size();
+        const auto nPLTEstart = VRCpng_callback.vData.size();
         const uint32_t nPLTEcrc =
             PNGGetUInt(aVRCpalette.data(), nPNGPlteLen + 4);
 
@@ -2995,7 +2995,7 @@ void CPL_DLL __attribute__((visibility("default"))) GDALRegister_VRC(void)
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }
 
-__attribute__((visibility("default")))
+// __attribute__((visibility("default")))
 // GDALRegister_VRC()
 
 // -------------------------------------------------------------------------
@@ -4061,16 +4061,18 @@ void VRCDataset::LoadWorldFile()
 
     // This will find the .VCW file *** tbc ****
     bGeoTransformValid =
-        GDALReadWorldFile2(GetDescription(), nullptr, m_gt,
-                           oOvManager.GetSiblingFiles(), &pszWldFilename);
+        TRUE == GDALReadWorldFile2(GetDescription(), nullptr, m_gt,
+                                   oOvManager.GetSiblingFiles(),
+                                   &pszWldFilename);
 
     // This will find a .wld file.
     // By convention a .wld file belongs to the .VRC file, never to a .VRH file.
 
     if (!bGeoTransformValid)
         bGeoTransformValid =
-            GDALReadWorldFile2(GetDescription(), ".wld", m_gt,
-                               oOvManager.GetSiblingFiles(), &pszWldFilename);
+            TRUE == GDALReadWorldFile2(GetDescription(), ".wld", m_gt,
+                                       oOvManager.GetSiblingFiles(),
+                                       &pszWldFilename);
 
     if (pszWldFilename)
     {

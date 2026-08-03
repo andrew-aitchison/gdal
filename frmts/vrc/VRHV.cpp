@@ -1260,8 +1260,9 @@ void VRHVDataset::LoadWorldFile()
 
     // This will find the .VHW file
     bGeoTransformValid =
-        GDALReadWorldFile2(GetDescription(), nullptr, m_gt,
-                           oOvManager.GetSiblingFiles(), &pszWldFilename);
+        TRUE == GDALReadWorldFile2(GetDescription(), nullptr, m_gt,
+                                   oOvManager.GetSiblingFiles(),
+                                   &pszWldFilename);
 
     if (pszWldFilename)
     {
